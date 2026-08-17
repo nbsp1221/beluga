@@ -1,0 +1,6 @@
+# Copy this file to host.patch.yml and set values for the current server.
+- id: dotdsh-auth
+  config:
+    host: '127.0.0.1'
+    port: 3080
+    publicOrigin: 'https://dsh.example.com'

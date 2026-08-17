@@ -1,0 +1,17 @@
+# Keep the Harness carrier unreachable from the network. The authenticated
+# proxy below is the only public entry point.
+- id: webserver
+  config:
+    host: '127.0.0.1'
+    port: 0
+
+- insert:
+    - id: dotdsh-auth
+      name: '@dotdsh/dsh-auth'
+      config:
+        host: '127.0.0.1'
+        port: 3080
+        publicOrigin: 'http://127.0.0.1:3080'
+        sessionTtlSeconds: 86400
+        maxLoginAttempts: 10
+        loginLockSeconds: 300

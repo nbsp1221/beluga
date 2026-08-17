@@ -1,0 +1,31 @@
+node_modules/
+npm-debug.log*
+packages/*/*/lib/
+coverage/
+
+# Host-local deployment values.
+/config/host.patch.yml
+
+# Gajae Code: ignore generated runtime state, keep authorable agents and skills.
+.gjc/plugins/
+.gjc/context/
+.gjc/interviews/
+.gjc/plans/
+.gjc/ralplan/
+.gjc/specs/
+.gjc/ultragoal/
+.gjc/verification/
+.gjc/logs/
+.gjc/rlm/
+**/.gjc/state/
+.gjc/_session-*/
+.gjc/rss-checkpoints/
+.gjc/metrics.json
+**/.gjc/settings.json.fallback-invalid
+**/.gjc/settings.json.config-root.fallback-invalid
+**/.gjc/settings.json.strict-invalid
+
+# OMO Native: ignore local runtime artifacts, keep project-authored rules.
+.omo/*
+!.omo/rules/
+!.omo/rules/**
