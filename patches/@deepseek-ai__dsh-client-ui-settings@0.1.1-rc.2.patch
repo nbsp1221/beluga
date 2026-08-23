@@ -1,0 +1,22 @@
+diff --git a/lib/client.js b/lib/client.js
+index 770af7920dc9a7b05c4658429bf9136713b57887..61af38e944fd44e3baf2894674b44b6e734b1154 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -1163,7 +1163,7 @@ window.__ModuleLoader__.load({
+ 			bind(spec) {
+ 				const ctx = this.ctx;
+ 				const connection = ctx.get("connection");
+-				const controller = new SettingsScopeController(connection.api, spec, this.mirror, connection.isLoopback ? "host" : "memory", this.schema);
++				const controller = new SettingsScopeController(connection.api, spec, this.mirror, connection.isHostTrusted ? "host" : "memory", this.schema);
+ 				ctx.effect(() => {
+ 					this.mirror.ensure();
+ 					return async () => {
+@@ -1337,7 +1337,7 @@ window.__ModuleLoader__.load({
+ 		function apply(ctx) {
+ 			const schema = new SettingsSchemaService(ctx);
+ 			const connection = ctx.get("connection");
+-			const mirror = new SettingsDescribeMirror(connection.api, connection.isLoopback ? "host" : "memory");
++			const mirror = new SettingsDescribeMirror(connection.api, connection.isHostTrusted ? "host" : "memory");
+ 			ctx.effect(() => {
+ 				const disposers = [ctx.get("remote").$on("settings/document-updated", () => {
+ 					mirror.load();

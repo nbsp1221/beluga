@@ -2,9 +2,7 @@
 
 Personal DeepSeek Harness host setup with first-run owner authentication.
 
-The repository tracks how DSH is built, authenticated, and supervised. Values
-that identify one server stay in an ignored host patch, so the same checkout
-can be configured independently on another machine.
+The repository tracks how DSH is built, authenticated, and supervised. Values that identify one server stay in an ignored host patch, so the same checkout can be configured independently on another machine.
 
 ## Architecture
 
@@ -15,8 +13,11 @@ public origin
   -> DSH 127.0.0.1:<ephemeral>
 ```
 
-The built-in DSH webserver remains on loopback. Only `@dotdsh/dsh-auth`
-accepts external HTTP, API, and WebSocket traffic.
+The built-in DSH webserver remains on loopback. Only `@dotdsh/dsh-auth` accepts external HTTP, API, and WebSocket traffic.
+
+Authenticated users intentionally receive the same full-admin surface as a local DSH browser. `dsh-auth` remains the security boundary; the small client compatibility patches only tell built-in UI consumers that an authenticated remote page may use host-scoped settings and host file actions.
+
+The files under `patches/` are exact-version pnpm patches for DSH `0.1.1-rc.2`. They make upgrades fail closed when the upstream client changes. `pnpm check:compat` also scans the installed Web composition for new UI consumers that still gate host-admin features on `connection.isLoopback`, so every DSH upgrade must pass that check before its patches are refreshed.
 
 ## Host configuration
 
@@ -30,13 +31,10 @@ $EDITOR config/host.patch.yml
 Configure:
 
 - `publicOrigin`: the exact HTTPS origin used in the browser;
-- `host`: `127.0.0.1` for a reverse proxy on the host, or `0.0.0.0` when a
-  containerized reverse proxy must reach the host;
+- `host`: `127.0.0.1` for a reverse proxy on the host, or `0.0.0.0` when a containerized reverse proxy must reach the host;
 - `port`: the host port owned by the auth proxy.
 
-Authentication policy such as session lifetime and login throttling remains
-versioned in the plugin defaults. Password state and host values are not
-tracked.
+Authentication policy such as session lifetime and login throttling remains versioned in the plugin defaults. Password state and host values are not tracked.
 
 ## Install
 
@@ -61,35 +59,30 @@ Install from any working directory:
 The installer:
 
 1. derives the checkout, user, Node, DSH home, and XDG config paths;
-2. installs the locked dependency tree and builds the auth plugin;
+2. installs the locked dependency tree, builds the auth plugin, and verifies DSH compatibility;
 3. links the plugin into the current DSH Web profile;
 4. validates `config/host.patch.yml`;
 5. renders and verifies the user systemd unit;
 6. enables and restarts `dsh.service`.
 
-Re-run the installer after moving the checkout or changing the Node
-installation so the rendered unit receives the new paths.
+Re-run the installer after moving the checkout or changing the Node installation so the rendered unit receives the new paths.
 
 ## First-run authentication
 
-Open the configured `publicOrigin`. With no owner state, the auth proxy exposes
-only the password setup form. The password is persisted only as a scrypt hash
-under `${DSH_HOME:-$HOME/.dsh}/auth/state.json`.
+Open the configured `publicOrigin`. With no owner state, the auth proxy exposes only the password setup form. The password is persisted only as a scrypt hash under `${DSH_HOME:-$HOME/.dsh}/auth/state.json`.
 
-After setup, every page, API request, and WebSocket upgrade requires the secure
-session cookie. Restarting the service clears sessions but preserves the owner
-password.
+After setup, every page, API request, and WebSocket upgrade requires the secure session cookie. Restarting the service clears sessions but preserves the owner password.
 
 ## Verify
 
 ```bash
+pnpm check:compat
 pnpm check:config
 systemctl --user status dsh.service
 journalctl --user -u dsh.service
 ```
 
-To inspect the unauthenticated HTTP boundary directly, substitute the host and
-port from `config/host.patch.yml`:
+To inspect the unauthenticated HTTP boundary directly, substitute the host and port from `config/host.patch.yml`:
 
 ```bash
 curl -I -H 'Host: dsh.example.com' http://127.0.0.1:3080/
@@ -108,8 +101,7 @@ dsh.example.com {
 }
 ```
 
-For Caddy in a Linux container, bind the auth proxy to `0.0.0.0`, restrict the
-port at the firewall, and route through the host gateway:
+For Caddy in a Linux container, bind the auth proxy to `0.0.0.0`, restrict the port at the firewall, and route through the host gateway:
 
 ```caddyfile
 dsh.example.com {

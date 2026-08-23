@@ -19,7 +19,7 @@ describe("host portability", () => {
 
     expect(pluginSource).toContain("loginLockSeconds: z.number().min(1).default(300)");
     expect(pluginSource).toContain("maxLoginAttempts: z.number().min(1).default(10)");
-    expect(pluginSource).toContain("sessionTtlSeconds: z.number().min(60).default(86_400)");
+    expect(pluginSource).toContain("sessionTtlSeconds: z.number().min(60).default(604_800)");
     expect(hostExample).toContain("https://dsh.example.com");
     expect(hostExample).toContain("host: '127.0.0.1'");
     expect(gitignore).toContain("/config/host.patch.yml");

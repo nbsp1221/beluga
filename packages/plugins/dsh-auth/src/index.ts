@@ -21,7 +21,7 @@ export const Config: z<Config> = z.object({
   maxLoginAttempts: z.number().min(1).default(10),
   port: z.number().min(0).max(65_535).default(3080),
   publicOrigin: z.string().default("http://127.0.0.1:3080"),
-  sessionTtlSeconds: z.number().min(60).default(86_400),
+  sessionTtlSeconds: z.number().min(60).default(604_800),
   stateDirectory: z.string().default(""),
 });
 
@@ -36,6 +36,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (!["http:", "https:"].includes(publicOrigin.protocol)) {
     throw new Error("dotdsh-auth publicOrigin must use HTTP or HTTPS.");
   }
+
+  ctx.on("webserver/index-inject", (table) => {
+    table.push({ kind: "global", name: "__DSH_REMOTE_ADMIN__", value: true });
+  });
 
   const running = await startAuthServer({
     host: config.host,

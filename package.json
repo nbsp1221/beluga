@@ -9,13 +9,14 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "build": "pnpm --filter @dotdsh/dsh-auth build",
+    "check:compat": "node ./scripts/check-dsh-auth-compat.mjs",
     "check:config": "dsh --profile web --patch ./config/host.patch.yml --dump-config",
     "lint": "pnpm --filter @dotdsh/dsh-auth lint",
-    "start": "dsh --profile web --patch ./config/host.patch.yml",
-    "test": "pnpm --filter @dotdsh/dsh-auth test",
+    "start": "dsh --profile web --patch ./config/host.patch.yml --no-open",
+    "test": "pnpm --filter @dotdsh/dsh-auth test && pnpm check:compat",
     "typecheck": "pnpm --filter @dotdsh/dsh-auth typecheck"
   },
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.0-rc.6"
+    "@deepseek-ai/dsh": "0.1.1-rc.2"
   }
 }

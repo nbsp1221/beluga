@@ -5,7 +5,7 @@ Description=DeepSeek Harness Web
 Type=exec
 WorkingDirectory=@REPO_ROOT@
 Environment="DSH_HOME=@DSH_HOME@"
-ExecStart="@NODE_BIN@" "@DSH_BIN@" --profile web --patch "@HOST_PATCH@"
+ExecStart="@NODE_BIN@" "@DSH_BIN@" --profile web --patch "@HOST_PATCH@" --no-open
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=30

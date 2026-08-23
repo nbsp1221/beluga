@@ -1,0 +1,13 @@
+diff --git a/lib/client.js b/lib/client.js
+index c2fdca23e20d642c53cc0611bfa410c5282c1d15..49a54c85d87c57a5bb535ef759c05ffe41e5430e 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -350,7 +350,7 @@ window.__ModuleLoader__.load({
+ 				select: selectProducedFiles,
+ 				locale: NS,
+ 				inject: () => ({
+-					isLoopback: connection.isLoopback,
++					isLoopback: connection.isHostTrusted,
+ 					hooks: { hostDescription: connection.hostDescription }
+ 				})
+ 			}, ProducedFiles));

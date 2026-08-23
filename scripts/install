@@ -69,6 +69,7 @@ fi
 
 "${PNPM}" install --frozen-lockfile
 "${PNPM}" build
+"${PNPM}" check:compat
 export DSH_HOME="${DSH_HOME_PATH}"
 "${NODE}" "${DSH_BIN}" plugin --profile web add "link:${AUTH_PACKAGE}"
 "${PNPM}" check:config
