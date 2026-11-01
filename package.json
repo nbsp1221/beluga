@@ -1,22 +1,35 @@
 {
-  "name": "dotdsh",
+  "name": "beluga",
   "version": "0.0.0",
   "private": true,
-  "description": "Reproducible host deployment for DeepSeek Harness",
-  "engines": {
-    "node": ">=24.18.1 <25"
-  },
-  "packageManager": "pnpm@11.7.0",
+  "type": "module",
   "scripts": {
-    "build": "pnpm --filter @dotdsh/dsh-auth build",
-    "check:compat": "node ./scripts/check-dsh-auth-compat.mjs",
-    "check:config": "dsh --profile web --patch ./config/host.patch.yml --dump-config",
-    "lint": "pnpm --filter @dotdsh/dsh-auth lint",
-    "start": "dsh --profile web --patch ./config/host.patch.yml --no-open",
-    "test": "pnpm --filter @dotdsh/dsh-auth test && pnpm check:compat",
-    "typecheck": "pnpm --filter @dotdsh/dsh-auth typecheck"
+    "lint": "oxlint . && eslint .",
+    "format": "oxfmt --check .",
+    "format:fix": "oxfmt .",
+    "check-types": "turbo run check-types //#check-types:root",
+    "check-types:root": "tsc --noEmit",
+    "check": "turbo run lint format check-types //#check-types:root test",
+    "test": "turbo run test",
+    "test:install": "bash scripts/test-install.sh",
+    "test:watch": "turbo run test:watch",
+    "dev": "turbo run dev",
+    "package": "turbo run package"
   },
-  "dependencies": {
-    "@deepseek-ai/dsh": "0.1.1-rc.2"
-  }
+  "devDependencies": {
+    "@repo/format-config": "workspace:*",
+    "@repo/lint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "10.13.0",
+    "oxfmt": "0.72.0",
+    "oxlint": "1.89.0",
+    "oxlint-tsgolint": "7.0.2005",
+    "turbo": "^2.11.10",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=24.12"
+  },
+  "packageManager": "pnpm@12.16.1"
 }

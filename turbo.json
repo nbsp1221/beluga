@@ -1,0 +1,17 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "tasks": {
+    "//#lint": {},
+    "//#format": {},
+    "//#format:fix": { "cache": false },
+    "//#check-types:root": {},
+    "check-types": { "dependsOn": ["transit"] },
+    "test": { "dependsOn": ["transit"] },
+    "transit": { "dependsOn": ["^transit"] },
+    "@repo/web#test": { "dependsOn": ["transit"], "cache": false },
+    "test:watch": { "cache": false, "persistent": true },
+    "dev": { "cache": false, "persistent": true },
+    "package": { "cache": false, "outputs": ["dist/**"] },
+    "@repo/web#dev": { "cache": false, "persistent": true, "passThroughEnv": ["*"] }
+  }
+}

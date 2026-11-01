@@ -1,0 +1,28 @@
+{
+  "name": "@repo/lint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint": "./eslint.mjs",
+    "./oxlint": "./oxlint.mts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@retn0/eslint-config": "^2.2.0",
+    "@retn0/eslint-config-oxlint": "^0.2.0",
+    "@retn0/oxlint-config": "^3.0.0"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eslint": "^10.0.0",
+    "oxlint": "~1.89.0",
+    "oxlint-tsgolint": ">=7.0.2003"
+  }
+}
