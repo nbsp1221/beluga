@@ -8,7 +8,7 @@ fail() {
 
 main() {
   if [ "${1:-}" = --help ]; then
-    printf '%s\n' 'Usage: sh install.sh [--user USER]'
+    printf '%s\n' 'Usage: sh install.sh'
     return
   fi
 
@@ -18,18 +18,7 @@ main() {
     command -v "$command" >/dev/null || fail "Install the prerequisite: $command."
   done
 
-  if [ "$#" -eq 0 ]; then
-    set -- --user "${SUDO_USER:-$(id -un)}"
-  fi
-  if [ "$#" -ne 2 ] || [ "$1" != --user ]; then
-    fail 'Specify the service account with --user USER.'
-  fi
-  id -u -- "$2" >/dev/null || fail "Service account $2 does not exist."
-
-  if [ "$(id -u)" -ne 0 ]; then
-    command -v sudo >/dev/null || fail 'sudo is required to install the service.'
-    sudo -v
-  fi
+  [ "$#" -eq 0 ] || fail 'Usage: sh install.sh'
 
   release_url=${BELUGA_RELEASE_URL:-https://github.com/nbsp1221/beluga/releases/latest/download}
   archive=beluga-linux-x64.tar.gz
@@ -50,11 +39,7 @@ main() {
   (cd "$temporary" && printf '%s  %s\n' "$digest" "$archive" | sha256sum --check --strict -)
   tar -xzf "$temporary/$archive" -C "$temporary"
 
-  if [ "$(id -u)" -eq 0 ]; then
-    sh "$temporary/beluga/install.sh" "$@"
-  else
-    sudo sh "$temporary/beluga/install.sh" "$@"
-  fi
+  sh "$temporary/beluga/install.sh"
 }
 
 main "$@"

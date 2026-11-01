@@ -1,12 +1,10 @@
 [Unit]
-Description=Beluga agent workspace for %I
-After=network.target
+Description=Beluga agent workspace
 
 [Service]
 Type=exec
-User=%I
-WorkingDirectory=~
-ExecStart=/usr/local/lib/beluga/bin/beluga --no-open
+WorkingDirectory=%h
+ExecStart=%h/.local/lib/beluga/bin/beluga --no-open
 # The launcher forwards SIGTERM to DSH; a second signal forces immediate exit.
 KillMode=mixed
 Restart=on-failure
@@ -14,4 +12,4 @@ RestartSec=5
 UMask=0077
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

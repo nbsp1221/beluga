@@ -24,28 +24,30 @@ Keep the extracted directory in place while a manually launched profile uses it.
 On GNU/Linux x64 with systemd:
 
 ```sh
-sudo sh ./install.sh --user "$USER"
+sh ./install.sh
 ```
 
 Open the browser authentication URL printed after installation. It is local to
 the machine running Beluga. To inspect the service or retrieve its startup URL:
 
 ```sh
-unit=$(systemd-escape --template=beluga@.service "$USER")
-sudo systemctl status "$unit"
-sudo journalctl -u "$unit" -n 30 --no-pager
+systemctl --user status beluga.service
+journalctl --user -u beluga.service -n 30 --no-pager
 ```
 
-Program files are installed in `/usr/local/lib/beluga`. The service runs as the
-selected existing account, independently of interactive logins. Running as root
-gives agents full system privileges. Conversations and settings remain in that
-account's `~/.beluga`. The extracted download can be
-removed after installation.
+Program files are installed in `~/.local/lib/beluga`. The unit is installed in
+`~/.config/systemd/user/beluga.service` (`XDG_CONFIG_HOME` when set) and runs under
+your account. The installer enables lingering so the service starts at boot and
+continues after logout. If your system requires administrator authentication,
+only enabling lingering requests sudo. Installation and updates do not.
+
+Running as root gives agents full system privileges. Conversations and settings
+remain in `~/.beluga`. The extracted download can be removed after installation.
 
 The installer confirms DSH's startup URL announcement for the new service run.
 Keep startup URL logging and systemd journal output enabled. Service customizations
-belong in systemd drop-ins. Stop other Beluga instances before reinstalling shared
-program files.
+belong in systemd user drop-ins. Stop other Beluga instances before switching
+installation methods.
 
 If recovery is reported as incomplete, inspect the reported installer state and
 service journal before removing anything. Repair service configuration before

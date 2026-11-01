@@ -143,10 +143,7 @@ try {
   copyFileSync(join(application, 'packaging/install.sh'), join(root, 'install.sh'));
 
   mkdirSync(join(root, 'systemd'));
-  copyFileSync(
-    join(application, 'packaging/beluga@.service'),
-    join(root, 'systemd/beluga@.service'),
-  );
+  copyFileSync(join(application, 'packaging/beluga.service'), join(root, 'systemd/beluga.service'));
 
   for (const entry of ['runtime/bin/node', 'runtime/bin/pnpm', 'bin/beluga', 'install.sh']) {
     chmodSync(join(root, entry), 0o755);

@@ -12,9 +12,11 @@ curl -fsSL https://github.com/nbsp1221/beluga/releases/latest/download/install.s
 ```
 
 The installer downloads and verifies the latest stable release, installs its
-bundled Node.js and pnpm, and starts a service under your account. It uses sudo
-when needed for service installation. Beluga starts at boot and restarts after a
-failure.
+bundled Node.js and pnpm, and starts a systemd user service. Installation and
+updates run under your account. To keep the service running after logout and
+start it at boot, the installer enables user lingering. Only this step may
+request sudo if your system requires administrator authentication.
+Beluga restarts after a failure.
 The bundled runtime and native dependencies require a compatible glibc-based system.
 Running Beluga as root gives agents full system privileges.
 
@@ -48,17 +50,16 @@ Conversations and settings are stored in `~/.beluga` under the account running
 Beluga. Set `DSH_HOME` to use another directory. Tools used by your projects must
 be available on the host.
 
-Service installation puts program files in `/usr/local/lib/beluga`. To upgrade,
+Service installation puts program files in `~/.local/lib/beluga`. To upgrade,
 run the same installation command. It replaces program files and preserves
-your account's conversations and settings. Stop other active Beluga service
-instances before upgrading the shared installation.
+your account's conversations and settings. Stop other Beluga instances before
+switching installation methods.
 
 Check the service or apply custom service settings:
 
 ```sh
-unit=$(systemd-escape --template=beluga@.service "$USER")
-sudo systemctl status "$unit"
-sudo systemctl edit "$unit"
+systemctl --user status beluga.service
+systemctl --user edit beluga.service
 ```
 
 See the [installation notes](apps/web/packaging/README.md) for recovery guidance.
@@ -78,7 +79,8 @@ format files. See [AGENTS.md](AGENTS.md) for repository conventions.
 ### Build a Linux package
 
 Build on Linux x64 with the Node.js version in `.node-version` and the pinned pnpm
-version so native dependencies match the target:
+version so native dependencies match the target. Packaging also requires `tar`
+and `xz`:
 
 ```sh
 pnpm install --frozen-lockfile

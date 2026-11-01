@@ -8,20 +8,22 @@ fail() {
 
 trap 'printf "FAIL: Unexpected failure at line %s (exit %s).\n" "$LINENO" "$?" >&2' ERR
 
-for command in curl sha256sum python3 jq systemctl systemd-escape sudo; do
+for command in curl sha256sum python3 jq systemctl loginctl; do
   command -v "$command" > /dev/null || fail "Missing test prerequisite: $command."
 done
 [[ -d /run/systemd/system ]] || fail 'Installation tests require a disposable Linux machine with running systemd.'
 
-unit=$(systemd-escape --template=beluga@.service -- "$(id -un)")
+unit=beluga.service
+destination="$HOME/.local/lib/beluga"
+unit_file="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$unit"
 
-for path in /usr/local/lib/beluga "$HOME/.beluga"; do
+for path in "$destination" "$HOME/.beluga"; do
   if [[ -e "$path" || -L "$path" ]]; then
     fail "Refusing to use an existing installation or profile: $path."
   fi
 done
 
-if [[ "$(systemctl show "$unit" --property=LoadState --value)" != not-found ]]; then
+if [[ "$(systemctl --user show "$unit" --property=LoadState --value)" != not-found ]]; then
   fail "Refusing to use an existing service: $unit."
 fi
 
@@ -37,11 +39,11 @@ server=
 cleanup() {
   status=$?
   trap - EXIT ERR
-  if [[ -f /usr/local/lib/systemd/system/beluga@.service ]]; then
+  if [[ -f "$unit_file" ]]; then
     if [[ "$status" -ne 0 ]]; then
-      { sudo journalctl -u "$unit" -n 30 --no-pager; } > "$temporary/service.log" 2>&1 || true
+      { journalctl --user -u "$unit" -n 30 --no-pager; } > "$temporary/service.log" 2>&1 || true
     fi
-    if ! { sudo systemctl disable --now "$unit"; } > "$temporary/cleanup.log" 2>&1; then
+    if ! { systemctl --user disable --now "$unit"; } > "$temporary/cleanup.log" 2>&1; then
       printf 'FAIL: Could not stop and disable the test service %s.\n' "$unit" >&2
       status=1
     fi
@@ -100,18 +102,32 @@ for invalid in "${invalid_cases[@]}"; do
     BELUGA_RELEASE_URL="$base/$invalid" TMPDIR="$temporary/downloads" sh > "$temporary/$invalid.log" 2>&1; then
     fail "The installer accepted the $invalid checksum fixture."
   fi
-  [[ ! -e /usr/local/lib/beluga ]] || fail "The rejected $invalid release created an installation."
+  [[ ! -e "$destination" ]] || fail "The rejected $invalid release created an installation."
 done
+
+if [[ "$(loginctl show-user "$(id -un)" --property=Linger --value)" == yes ]]; then
+  mkdir "$temporary/bin"
+  cat > "$temporary/bin/sudo" <<'SH'
+#!/bin/sh
+echo 'Unexpected administrator request: lingering is already enabled.' >&2
+exit 1
+SH
+  chmod +x "$temporary/bin/sudo"
+  export PATH="$temporary/bin:$PATH"
+fi
 
 printf 'Checking one-command installation and service startup...\n'
 curl -fsSL "$base/install.sh" |
   BELUGA_RELEASE_URL="$base/release" TMPDIR="$temporary/downloads" sh > "$temporary/install.log" 2>&1 ||
   fail 'One-command installation failed; see install.log below.'
 
-[[ "$(systemctl is-enabled "$unit")" == enabled ]] || fail "$unit is not enabled for startup at boot."
-[[ "$(systemctl is-active "$unit")" == active ]] || fail "$unit is not running after installation."
-[[ "$(systemctl show "$unit" --property=User --value)" == "$(id -un)" ]] ||
+[[ "$(systemctl --user is-enabled "$unit")" == enabled ]] || fail "$unit is not enabled for startup at boot."
+[[ "$(systemctl --user is-active "$unit")" == active ]] || fail "$unit is not running after installation."
+pid=$(systemctl --user show "$unit" --property=MainPID --value)
+[[ "$(ps -p "$pid" -o uid= | tr -d '[:space:]')" == "$(id -u)" ]] ||
   fail "$unit does not run as the invoking account."
+[[ "$(loginctl show-user "$(id -un)" --property=Linger --value)" == yes ]] ||
+  fail 'User services are not configured to survive logout and start at boot.'
 
 url=$(grep -Eo 'https?://[^[:space:]]+' "$temporary/install.log" | tail -n 1) ||
   fail 'The installer did not print a browser authentication URL.'
@@ -132,7 +148,47 @@ curl -fsS --max-time 30 -b "$temporary/cookies" -H 'Content-Type: application/js
   fail 'The authenticated model-catalog request failed.'
 jq -e '.result.ok == true and any(.result.value.groups[]; .id == "openai-codex")' "$temporary/catalog.log" > /dev/null ||
   fail 'The model catalog did not return a successful result containing the Codex provider.'
+
+rpc() {
+  local method=$1 args=$2 body
+  body=$(jq -cn --arg method "$method" --argjson args "$args" \
+    '{type:"client-request",rpcId:"installation-test",method:$method,payload:{args:$args}}')
+  curl -fsS --max-time 30 -b "$temporary/cookies" -H 'Content-Type: application/json' \
+    --data "$body" "${url%%\?*}api/$method"
+}
+
+printf 'Checking reinstallation preserves a saved conversation...\n'
+mkdir "$temporary/project"
+args=$(jq -cn --arg cwd "$temporary/project" '{request:{cwd:$cwd}}')
+session=$(rpc session/create "$args" | jq -er 'select(.result.ok == true).result.value.sessionId') ||
+  fail 'Could not create the conversation preservation fixture.'
+args=$(jq -cn --arg id "$session" '{request:{sessionId:$id,title:"Keep this conversation"}}')
+rpc session/rename "$args" | jq -e '.result.ok == true' > /dev/null ||
+  fail 'Could not save the conversation title.'
+export_url="${url%%\?*}api/session.export?sessionId=$session&includeDescendants=false"
+curl -fsS --max-time 30 -b "$temporary/cookies" "$export_url" -o "$temporary/before.zip" ||
+  fail 'Could not export the original conversation.'
+
+curl -fsSL "$base/install.sh" |
+  BELUGA_RELEASE_URL="$base/release" TMPDIR="$temporary/downloads" sh > "$temporary/reinstall.log" 2>&1 ||
+  fail 'Reinstallation failed; see reinstall.log below.'
+curl -fsS --max-time 30 -b "$temporary/cookies" "$export_url" -o "$temporary/after.zip" ||
+  fail 'The original browser authentication or conversation was lost after reinstallation.'
+python3 - "$temporary/before.zip" "$temporary/after.zip" <<'PY' || fail 'The saved conversation changed during reinstallation.'
+import json
+import sys
+from zipfile import ZipFile
+
+def events(path):
+    with ZipFile(path) as archive:
+        logs = [name for name in archive.namelist() if name.endswith(".jsonl")]
+        assert len(logs) == 1, f"Expected one conversation log, got {logs}"
+        return [json.loads(line) for line in archive.read(logs[0]).splitlines()]
+
+before, after = map(events, sys.argv[1:])
+assert after[:len(before)] == before, "Original conversation events were lost or modified"
+PY
 [[ -z "$(find "$temporary/downloads" -mindepth 1 -print -quit)" ]] ||
   fail 'The installer left temporary downloads behind.'
 
-echo 'Checksum rejection, one-command installation, service startup, and authenticated web/API access passed.'
+echo 'Checksums, user-service startup, web authentication, and conversation preservation through reinstallation passed.'

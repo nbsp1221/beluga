@@ -58,7 +58,11 @@ jobs:
 
       - name: Verify one-command installation
         if: runner.os == 'Linux'
-        run: pnpm test:install
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR
+          pnpm test:install
 
       - name: Upload release files
         if: runner.os == 'Linux' && github.ref_type == 'tag'

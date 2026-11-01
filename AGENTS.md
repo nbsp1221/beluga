@@ -18,11 +18,13 @@
 - Keep abstractions proportional to current use. Investigate the cause of a failure before adding a workaround.
 - Untested does not mean unsupported. Check actual capabilities instead of blocking environments outside the test matrix.
 - Every project-specific restriction, override, or workaround needs a concrete requirement, documented upstream constraint, or reproducible failure. Remove it when that basis is absent or no longer applies.
+- Get explicit approval before introducing project-specific exceptions; prefer documented upstream behavior.
 - Group code by purpose, with a blank line when the purpose changes. Keep closely related statements together; do not space every statement mechanically.
 - Keep text files in UTF-8 with LF and a final newline. `.gitattributes` controls Git normalization; `.editorconfig` controls editor defaults and must agree with the shared formatter.
 - Review the whole changed function for readable flow and unnecessary structure. Passing lint and formatting checks does not establish readability.
 - Manage bundled plugin versions through package manifests and the lockfile. Keep credentials and machine-specific configuration out of the repository.
 - `.node-version` pins the packaged Node.js runtime; `packageManager` pins pnpm. Verify official download checksums and keep packaging output in ignored `dist/` directories.
+- Install under the invoking user's home and manage `beluga.service` with `systemctl --user`. Only enabling lingering may request sudo, after an unprivileged attempt fails.
 - Confirm startup through DSH's documented ready-URL announcement for the current systemd invocation. Do not couple installation to an optional plugin or a fixed web port.
 - Keep recovery failures explicit and retain installer state when recovery cannot complete. Preserve user-managed service drop-ins and application data.
 - The launcher forwards termination to DSH. Keep systemd's initial stop signal directed at the launcher only, while retaining group cleanup for processes that do not exit.
