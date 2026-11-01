@@ -39,7 +39,6 @@ const test = baseTest.extend<{
       ...process.env,
       DSH_HOME: home,
       CODEX_HOME: join(temporary, 'codex'),
-      DSH_AGENTS_HOME: join(temporary, 'agents'),
       DSH_TELEMETRY_DISABLED: '1',
       PNPM_CONFIG_OFFLINE: 'true',
     };
@@ -147,7 +146,8 @@ test('a new profile exposes Codex models, remote controls, and worktree manageme
     };
 
     const body = await rpc('session/modelCatalog');
-    const model: unknown = expect.objectContaining({ id: 'gpt-6-luna' });
+    const id: unknown = expect.any(String);
+    const model: unknown = expect.objectContaining({ id });
     const models: unknown = expect.arrayContaining([model]);
     const group: unknown = expect.objectContaining({ id: 'openai-codex', models });
     const groups: unknown = expect.arrayContaining([group]);

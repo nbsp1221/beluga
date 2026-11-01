@@ -1,10 +1,10 @@
 [Unit]
-Description=Beluga agent workspace for %i
+Description=Beluga agent workspace for %I
 After=network.target
 
 [Service]
 Type=exec
-User=%i
+User=%I
 WorkingDirectory=~
 ExecStart=/usr/local/lib/beluga/bin/beluga --no-open
 # The launcher forwards SIGTERM to DSH; a second signal forces immediate exit.

@@ -12,27 +12,20 @@ if [ "${1:-}" = --help ]; then
 fi
 
 if [ "$#" -ne 2 ] || [ "$1" != --user ]; then
-  fail 'Specify the non-root service account with --user USER.'
+  fail 'Specify the service account with --user USER.'
 fi
 
 user=$2
-case "$user" in
-  ''|*[!a-zA-Z0-9_.-]*) fail 'Invalid service account name.' ;;
-esac
-
 [ "$(id -u)" -eq 0 ] || fail 'Run the installer with sudo.'
 service_uid=$(id -u -- "$user") || fail "Service account $user does not exist."
-[ "$service_uid" -ne 0 ] || fail 'Beluga must run as an existing non-root account.'
-
-[ "$(uname -m)" = x86_64 ] || fail 'This package supports Linux x64 only.'
-# shellcheck source=/dev/null
-. /etc/os-release
-if [ "$ID" != ubuntu ] || [ "$VERSION_ID" != 24.04 ]; then
-  fail 'This installer supports Ubuntu 24.04 LTS.'
+if [ "$service_uid" -eq 0 ]; then
+  printf '%s\n' 'Warning: Beluga will run as root; agents will have full system privileges.' >&2
 fi
 
+[ "$(uname -m)" = x86_64 ] || fail 'This package supports Linux x64 only.'
+
 [ -d /run/systemd/system ] || fail 'A running systemd system manager is required.'
-for command in systemctl journalctl flock git; do
+for command in systemctl systemd-escape journalctl flock; do
   command -v "$command" >/dev/null || fail "Install the prerequisite: $command."
 done
 
@@ -41,10 +34,9 @@ flock --nonblock 9 || fail 'Another Beluga installation is running.'
 
 source=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 destination=/usr/local/lib/beluga
-unit="beluga@$user.service"
+unit=$(systemd-escape --template=beluga@.service -- "$user")
 unit_file=/usr/local/lib/systemd/system/beluga@.service
 
-[ "$source" != "$destination" ] || fail 'Run the installer from the extracted release directory.'
 if [ ! -x "$source/bin/beluga" ] ||
   [ ! -x "$source/runtime/bin/node" ] ||
   [ ! -f "$source/systemd/beluga@.service" ]; then
@@ -172,5 +164,5 @@ complete=true
 
 printf '\nInstalled %s. It starts at boot without an interactive login.\n' "$unit"
 printf '\nOpen in your browser:\n  %s\n\n' "$browser_url"
-printf '%s\n' "Status: sudo systemctl status $unit" "Logs: sudo journalctl -u $unit -n 30 --no-pager"
+printf '%s\n' "Status: sudo systemctl status '$unit'" "Logs: sudo journalctl -u '$unit' -n 30 --no-pager"
 printf '%s\n' 'Data stays in the service account home under ~/.beluga.' 'Remote access remains configured through Settings > Reverse proxy.'

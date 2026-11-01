@@ -10,7 +10,7 @@ overrides:
   '@opentelemetry/api': 1.9.1
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': true
-  '@google/genai': false
+  '@google/genai': false # No-op preinstall.
   koffi: true
   node-pty: true
-  protobufjs: true
+  protobufjs: false # Only warns about dependency version syntax.

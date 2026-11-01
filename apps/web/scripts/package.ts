@@ -39,8 +39,8 @@ if (
 
 const nodeVersion = readFileSync(join(workspace, '.node-version'), 'utf8').trim();
 const pnpmVersion = /^pnpm@(\d+\.\d+\.\d+)$/.exec(manager.packageManager)?.[1];
-if (!/^\d+\.\d+\.\d+$/.test(nodeVersion) || !pnpmVersion || !process.env.npm_execpath) {
-  throw new Error('Packaging requires pinned Node/pnpm versions and must run through pnpm.');
+if (!/^\d+\.\d+\.\d+$/.test(nodeVersion) || !pnpmVersion) {
+  throw new Error('Packaging requires pinned Node.js and pnpm versions.');
 }
 
 function run(command: string, args: string[]): void {

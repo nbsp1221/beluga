@@ -24,8 +24,7 @@ main() {
   if [ "$#" -ne 2 ] || [ "$1" != --user ]; then
     fail 'Specify the service account with --user USER.'
   fi
-  service_uid=$(id -u -- "$2") || fail "Service account $2 does not exist."
-  [ "$service_uid" -ne 0 ] || fail 'Run as a non-root user, or specify --user USER.'
+  id -u -- "$2" >/dev/null || fail "Service account $2 does not exist."
 
   if [ "$(id -u)" -ne 0 ]; then
     command -v sudo >/dev/null || fail 'sudo is required to install the service.'

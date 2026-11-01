@@ -8,12 +8,12 @@ fail() {
 
 trap 'printf "FAIL: Unexpected failure at line %s (exit %s).\n" "$LINENO" "$?" >&2' ERR
 
-for command in curl sha256sum python3 jq systemctl sudo; do
+for command in curl sha256sum python3 jq systemctl systemd-escape sudo; do
   command -v "$command" > /dev/null || fail "Missing test prerequisite: $command."
 done
-[[ -d /run/systemd/system ]] || fail 'Installation tests require a disposable Ubuntu 24.04 machine with running systemd.'
+[[ -d /run/systemd/system ]] || fail 'Installation tests require a disposable Linux machine with running systemd.'
 
-unit="beluga@$(id -un).service"
+unit=$(systemd-escape --template=beluga@.service -- "$(id -un)")
 
 for path in /usr/local/lib/beluga "$HOME/.beluga"; do
   if [[ -e "$path" || -L "$path" ]]; then
@@ -111,14 +111,14 @@ curl -fsSL "$base/install.sh" |
 [[ "$(systemctl is-enabled "$unit")" == enabled ]] || fail "$unit is not enabled for startup at boot."
 [[ "$(systemctl is-active "$unit")" == active ]] || fail "$unit is not running after installation."
 [[ "$(systemctl show "$unit" --property=User --value)" == "$(id -un)" ]] ||
-  fail "$unit does not run as the invoking non-root account."
+  fail "$unit does not run as the invoking account."
 
 url=$(grep -Eo 'https?://[^[:space:]]+' "$temporary/install.log" | tail -n 1) ||
   fail 'The installer did not print a browser authentication URL.'
 printf 'Checking web authentication and the Codex model catalog...\n'
 request='{"type":"client-request","rpcId":"installation-test","method":"session/modelCatalog","payload":{"args":{}}}'
 api="${url%%\?*}api/session/modelCatalog"
-status=$(curl -sS --max-time 30 --json "$request" -o /dev/null -w '%{http_code}' "$api") ||
+status=$(curl -sS --max-time 30 -H 'Content-Type: application/json' --data "$request" -o /dev/null -w '%{http_code}' "$api") ||
   fail 'The API could not be reached before authentication.'
 [[ "$status" == 401 || "$status" == 403 ]] ||
   fail "Unauthenticated API access returned HTTP $status instead of 401 or 403."
@@ -128,7 +128,7 @@ content_type=$(curl -fsSL --max-time 30 -c "$temporary/cookies" -b "$temporary/c
   fail 'The printed browser authentication URL did not open successfully.'
 [[ "$content_type" == text/html* ]] || fail "Authenticated web access returned $content_type instead of HTML."
 [[ -s "$temporary/index.html" ]] || fail 'Authenticated web access returned an empty page.'
-curl -fsS --max-time 30 -b "$temporary/cookies" --json "$request" "$api" > "$temporary/catalog.log" ||
+curl -fsS --max-time 30 -b "$temporary/cookies" -H 'Content-Type: application/json' --data "$request" "$api" > "$temporary/catalog.log" ||
   fail 'The authenticated model-catalog request failed.'
 jq -e '.result.ok == true and any(.result.value.groups[]; .id == "openai-codex")' "$temporary/catalog.log" > /dev/null ||
   fail 'The model catalog did not return a successful result containing the Codex provider.'

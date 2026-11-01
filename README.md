@@ -5,7 +5,7 @@ Use Codex models, access your workspace remotely, and organize conversations by 
 
 ## Getting started
 
-On Ubuntu 24.04 LTS x64 with systemd, curl, and Git, run as your non-root account:
+On GNU/Linux x64 with systemd and curl:
 
 ```sh
 curl -fsSL https://github.com/nbsp1221/beluga/releases/latest/download/install.sh | sh
@@ -13,7 +13,10 @@ curl -fsSL https://github.com/nbsp1221/beluga/releases/latest/download/install.s
 
 The installer downloads and verifies the latest stable release, installs its
 bundled Node.js and pnpm, and starts a service under your account. It uses sudo
-for service installation. Beluga starts at boot and restarts after a failure.
+when needed for service installation. Beluga starts at boot and restarts after a
+failure.
+The bundled runtime and native dependencies require a compatible glibc-based system.
+Running Beluga as root gives agents full system privileges.
 
 Open the browser authentication URL printed when installation finishes. In
 **GPT Auth** settings, sign in with ChatGPT or reuse an existing Codex CLI login,
@@ -26,7 +29,8 @@ For manual installation or running without a service, see the
 ## Workspaces and remote access
 
 Open a project to start a conversation. Select **Worktree** in the sidebar to create
-or import Git worktrees and keep their conversations together.
+or import Git worktrees and keep their conversations together. Worktree operations
+require Git on the host.
 
 Configure authenticated remote access in **Settings → Reverse proxy**. Installation
 keeps the loopback defaults and does not configure a firewall, TLS, or tunnels.
@@ -41,16 +45,22 @@ These features use bundled community plugins:
 ## Data and service management
 
 Conversations and settings are stored in `~/.beluga` under the account running
-Beluga. Set `DSH_HOME` to use another directory. Git and any tools used by your
-projects must be available on the host.
+Beluga. Set `DSH_HOME` to use another directory. Tools used by your projects must
+be available on the host.
 
 Service installation puts program files in `/usr/local/lib/beluga`. To upgrade,
 run the same installation command. It replaces program files and preserves
 your account's conversations and settings. Stop other active Beluga service
 instances before upgrading the shared installation.
 
-Use `sudo systemctl status "beluga@$USER.service"` to check the service.
-Apply custom service settings with `sudo systemctl edit "beluga@$USER.service"`.
+Check the service or apply custom service settings:
+
+```sh
+unit=$(systemd-escape --template=beluga@.service "$USER")
+sudo systemctl status "$unit"
+sudo systemctl edit "$unit"
+```
+
 See the [installation notes](apps/web/packaging/README.md) for recovery guidance.
 
 ## Development

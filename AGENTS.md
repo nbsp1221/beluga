@@ -5,7 +5,7 @@
 - `apps/web/src/main.ts` launches the DSH web profile.
 - `apps/web/src/profile.ts` discovers bundled plugins from direct runtime dependencies and prepares the profile through DSH's public APIs and CLI.
 - `apps/web/scripts/package.ts` uses `pnpm deploy --prod` to assemble a Linux x64 archive with pinned runtimes. Build on the target platform for native dependencies.
-- `apps/web/packaging/` contains the Ubuntu installer and systemd service template. Keep OS installation separate from the application launcher and user data.
+- `apps/web/packaging/` contains the Linux installer and systemd service template. Keep OS installation separate from the application launcher and user data.
 - Root `install.sh` downloads and verifies release assets, then delegates to the packaged installer. `BELUGA_RELEASE_URL` selects a release asset base URL for mirrors or pinned releases.
 - `scripts/test-install.sh` verifies the built release through the public installer, systemd, and authenticated web APIs.
 - `packages/` contains shared lint, formatting, TypeScript, and Vitest configuration.
@@ -16,6 +16,8 @@
 - Keep one definition for each product setting. Reuse it across startup and tests.
 - Remove replaced code and update its callers. Add compatibility behavior only for a concrete requirement; preserve user data.
 - Keep abstractions proportional to current use. Investigate the cause of a failure before adding a workaround.
+- Untested does not mean unsupported. Check actual capabilities instead of blocking environments outside the test matrix.
+- Every project-specific restriction, override, or workaround needs a concrete requirement, documented upstream constraint, or reproducible failure. Remove it when that basis is absent or no longer applies.
 - Group code by purpose, with a blank line when the purpose changes. Keep closely related statements together; do not space every statement mechanically.
 - Keep text files in UTF-8 with LF and a final newline. `.gitattributes` controls Git normalization; `.editorconfig` controls editor defaults and must agree with the shared formatter.
 - Review the whole changed function for readable flow and unnecessary structure. Passing lint and formatting checks does not establish readability.
@@ -35,8 +37,8 @@
 - Test observable contracts and important failure paths. Avoid tests that repeat implementation details or add coverage without meaningful risk.
 - Initialize DSH integration fixtures through its public CLI in unique OS temporary directories. Clean up owned files and subprocesses.
 - Routine tests must not use real credentials, call model APIs, modify user profiles, or change the repository lockfile.
-- Validate installer changes in a disposable Ubuntu VM using real systemd. A service restart or container restart does not prove machine-reboot behavior. Check shell scripts with ShellCheck.
-- Run `pnpm test:install` only on a disposable Ubuntu 24.04 machine after `pnpm package`. It refuses an existing installation, profile, or service. Keep it separate from routine `pnpm check` and `pnpm test`.
+- Validate installer changes in a disposable Linux VM using real systemd. A service restart or container restart does not prove machine-reboot behavior. Check shell scripts with ShellCheck.
+- Run `pnpm test:install` only on a disposable Linux machine with systemd after `pnpm package`. It refuses an existing installation, profile, or service. Keep it separate from routine `pnpm check` and `pnpm test`.
 - Check for active verification runs before starting a whole suite. Preserve running development servers and unrelated processes.
 
 ## Documentation
