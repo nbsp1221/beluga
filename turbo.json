@@ -1,0 +1,51 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "globalDependencies": ["packages/typescript-config/*.json"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": ["dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build", "^typecheck"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "passThroughEnv": ["SystemRoot"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "env": ["PORT", "HOST_URL"],
+      "passThroughEnv": ["CODEX_HOME", "SystemRoot"],
+      "cache": false,
+      "persistent": true
+    },
+    "lint:eslint": {
+      "dependsOn": ["^lint:eslint"]
+    },
+    "lint:eslint:fix": {
+      "cache": false
+    },
+    "//#lint:oxlint": {
+      "dependsOn": [
+        "@workspace/protocol#build",
+        "@workspace/runtime#build",
+        "@workspace/host-plugins#build"
+      ],
+      "cache": false
+    },
+    "//#lint:oxlint:fix": {
+      "dependsOn": [
+        "@workspace/protocol#build",
+        "@workspace/runtime#build",
+        "@workspace/host-plugins#build"
+      ],
+      "cache": false
+    },
+    "//#typecheck:root": {
+      "dependsOn": ["^typecheck"]
+    }
+  }
+}

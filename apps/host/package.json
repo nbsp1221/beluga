@@ -1,0 +1,36 @@
+{
+  "name": "@workspace/host",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts status",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint:eslint": "eslint .",
+    "lint:eslint:fix": "eslint --fix ."
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "catalog:",
+    "@hono/node-server": "2.1.6",
+    "@workspace/host-plugins": "workspace:*",
+    "@workspace/protocol": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workspace/tooling-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "catalog:",
+    "tsx": "4.23.15",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

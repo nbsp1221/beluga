@@ -1,0 +1,40 @@
+name: Prepare next version
+
+on:
+  push:
+    branches: [main]
+    paths: ['.changeset/*.md']
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-version
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.2
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Find release notes
+        id: changesets
+        run: |
+          if find .changeset -maxdepth 1 -name '*.md' ! -name README.md -print -quit | grep -q .; then
+            echo 'found=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: changesets/action/version@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        if: steps.changesets.outputs.found == 'true'
+        with:
+          script: pnpm release:version
+          pr-title: Prepare the next Beluga release
+          commit-message: Prepare the next Beluga release
