@@ -117,7 +117,7 @@ must match the latest one at creation. The API uses the session cookie from
 ## Adding UI components
 
 Use the configured shadcn preset and review generated diffs before overwriting
-existing files, especially the approved shared input-focus adapters.
+existing files.
 
 ```sh
 pnpm dlx shadcn@latest add button -c apps/web

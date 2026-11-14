@@ -48,9 +48,6 @@
 
 :root {
   --radius: 0.5rem;
-  /* Shared text-entry focus; geometry stays inside the existing border box. */
-  --input-focus-width: 1px;
-  --input-focus-color: color-mix(in oklab, var(--foreground) 60%, transparent);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -81,7 +78,6 @@
 }
 
 .dark {
-  --input-focus-color: color-mix(in oklab, var(--foreground) 60%, transparent);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -104,17 +100,6 @@
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-accent: var(--accent);
-}
-
-@utility input-focus {
-  border-color: transparent;
-  outline: var(--input-focus-width) solid var(--input-focus-color);
-  outline-offset: calc(-1 * var(--input-focus-width));
-
-  @media (forced-colors: active) {
-    border-color: Highlight;
-    outline-color: Highlight;
-  }
 }
 
 /* Product composition policy; official primitives keep their own defaults. */

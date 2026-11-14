@@ -10,7 +10,7 @@ last_reviewed: 2026-11-08
 
 ## 기본 요소와 테마
 
-[설정](../packages/ui/components.json)은 shadcn `base-nova`, Base UI, CSS 변수, Lucide를 사용한다. [globals.css](../packages/ui/src/styles/globals.css)가 테마 값·공통 입력 포커스·모바일 target·기본 접근성 규칙을 소유한다.
+[설정](../packages/ui/components.json)은 shadcn `base-nova`, Base UI, CSS 변수, Lucide를 사용한다. [globals.css](../packages/ui/src/styles/globals.css)가 테마 값·모바일 target·기본 접근성 규칙을 소유한다.
 
 [웹 스타일 진입점](../apps/web/src/index.css)은 앱과 Client의 Tailwind 소스를 등록한다. 공용 UI 스타일은 UI 컴포넌트와 Streamdown의 소스를 등록한다.
 
@@ -20,7 +20,7 @@ last_reviewed: 2026-11-08
 
 현재 light primary는 blue-700/흰 글자, dark primary는 blue-400/neutral-950 글자다. light의 blue-600 후보는 공식 `primary/80` hover를 흰 배경에 합성했을 때 일반 글자 대비 4.5:1을 유지하지 못해 더 어두운 값을 선택했다. 색을 바꿀 때 기본 상태뿐 아니라 실제 배경 위 hover 대비도 다시 확인한다. 이는 기존 선택의 이유이며 이번 문서 검수에서 대비를 재측정했다는 뜻은 아니다.
 
-선택 역할을 모두 primary로 바꾸지 않는다. line Tabs의 선택 글자·밑줄은 foreground, Select 옵션의 highlight는 accent/foreground, 표준 Select의 다크 표면은 input 역할을 쓴다. 버튼·탭·Select의 focus는 기존 ring을 유지하며 아래 일반 텍스트 입력 정책과 구분한다.
+선택 역할을 모두 primary로 바꾸지 않는다. line Tabs의 선택 글자·밑줄은 foreground, Select 옵션의 highlight는 accent/foreground, 표준 Select의 다크 표면은 input 역할을 쓴다. Input·Textarea·InputGroup은 버튼·탭·Select와 함께 공식 포커스 스타일을 사용한다.
 
 일반 본문·메뉴는 `text-sm`, 보조 텍스트는 `text-xs`, 입력은 공식 `text-base md:text-sm`, 데스크톱 시작 제목은 `text-2xl/leading-8`을 사용한다. 새 글꼴 크기·간격 토큰이나 DSH 전용 namespace를 추가하지 않는다. 폰트·반경·간격의 실제 값은 소스가 기준이다.
 
@@ -107,23 +107,13 @@ General은 Appearance, Conversations, Agent defaults, Keyboard로 나눈다. 동
 
 아래 승인 범위만 유지한다. 공식 API로 같은 결과를 얻을 수 있게 되면 먼저 대체를 검토하고, 눈에 보이는 차이가 생기면 비동기로 확인한다. API를 사용했다는 사실이 모든 className 조정을 기본값으로 바꾸지는 않는다.
 
-### 입력 포커스
-
-소유: [globals.css](../packages/ui/src/styles/globals.css)의 `input-focus`와 [Input](../packages/ui/src/components/input.tsx), [Textarea](../packages/ui/src/components/textarea.tsx), [InputGroup](../packages/ui/src/components/input-group.tsx)의 연결부.
-
-승인된 `--input-focus-width: 1px`와 foreground 60%에서 파생한 `--input-focus-color`를 공유한다. inset outline을 사용하고 정상 focus border를 투명하게 하여 선이 겹치지 않게 한다. 공식 3px ring은 기존 색 토큰만으로 두께를 바꿀 수 없어 세 기본 요소의 소스 연결을 수정했다. 이것은 기존 토큰만 수정한 테마가 아니다.
-
-중첩 편집기는 두 번째 ring을 그리지 않는다. invalid의 destructive border/ring, disabled, forced-colors의 Highlight를 보존한다. 버튼·탭에는 이 토큰을 적용하지 않는다. `focusStyle` API, 전역 ring-3 재정의, 전체 ring 투명화는 금지한다. registry 갱신 때 이 세 연결부를 비교한다.
-
-포커스 토큰 폭 변경이 입력의 박스 크기·텍스트 inset을 바꾸지 않고 세 경계에 함께 반영되는지 확인한다. 외부에서 data-slot을 제거하거나 !important로 상태 우선순위를 우회하지 않는다.
-
 ### Composer 표면과 입력 공간
 
 소유: [공통 Composer](../packages/client/src/features/conversation/composer/composer.tsx).
 
-공식 InputGroup/Textarea 조합에 기존 `card/card-foreground`, `rounded-3xl`과 투명 내부 편집기를 사용한다. 카드가 사방 `p-2`와 행 사이 `gap-2`를 소유하고, 편집 영역은 가로·세로에 같은 spacing 1.5를 사용한다. 첨부와 도구는 카드의 별도 행으로 배치한다. 정상 입력 focus 강조선만 억제하고 평상시 경계·커서·오류·툴바 키보드 focus·forced-colors의 2px Highlight를 남긴다. [DSH의 입력창 영역 분리](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-conversation/src/client/skeleton/InputBar.module.css#L182-L193)를 참고했다.
+공식 InputGroup/Textarea 조합에 기존 `card/card-foreground`, `rounded-3xl`과 투명 내부 편집기를 사용한다. 카드가 사방 `p-2`와 행 사이 `gap-2`를 소유하고, 편집 영역은 가로·세로에 같은 spacing 1.5를 사용한다. 첨부와 도구는 카드의 별도 행으로 배치한다. 입력에 포커스하면 공식 InputGroup이 카드 바깥에 3px 링을 표시한다. 강제 색상에서는 정상 입력 포커스에 기존 2px Highlight 윤곽선을 표시한다. [DSH의 입력창 영역 분리](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-conversation/src/client/skeleton/InputBar.module.css#L182-L193)를 참고했다.
 
-Composer 색만 바꾸려고 전역 input을 변경하면 일반 폼의 경계·다크 배경까지 바뀐다. 기존 card 역할을 사용하며, 별도 색 토큰은 card와 독립적으로 달라져야 하는 실제 요구가 있을 때만 재검토한다. 일반 폼의 포커스 토큰을 이 예외 때문에 바꾸지 않는다. textarea에 큰 편집 영역의 접근성 예외를 적용해 AAA 적합성을 주장하지 않는다.
+Composer 색만 바꾸려고 전역 input을 변경하면 일반 폼의 경계·다크 배경까지 바뀐다. 기존 card 역할을 사용하며, 별도 색 토큰은 card와 독립적으로 달라져야 하는 실제 요구가 있을 때만 재검토한다.
 
 응답 중에도 Composer의 표면과 입력 상태를 유지한다. Host에서 실행 중인 제출이 확인되면 전송 버튼 자리에 사각형 중단 버튼을 표시한다. 전송 요청을 보내거나 중단 확정을 기다릴 때는 같은 자리에 진행 표시를 두고 [Base UI의 `focusableWhenDisabled`](https://base-ui.com/react/components/button#loading-states)로 키보드 포커스를 유지한다. [DSH InputBar](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx#L355-L382), [shadcn Prompt Input](https://ui.shadcn.com/docs/ai-elements/base/prompt-input#migrating-from-ai-sdk-elements).
 

@@ -204,7 +204,7 @@ export function Composer({
     >
       <InputGroup
         aria-label="Message composer"
-        className="h-auto flex-col gap-2 rounded-3xl border-border bg-card p-2 text-card-foreground has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:border-border has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-none dark:bg-card forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-2 forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-[Highlight] forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-solid"
+        className="h-auto flex-col gap-2 rounded-3xl border-border bg-card p-2 text-card-foreground dark:bg-card forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-2 forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-[Highlight] forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-solid"
         data-testid="composer-card"
       >
         {attachments.length > 0 && (

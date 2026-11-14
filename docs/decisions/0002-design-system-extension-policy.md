@@ -7,7 +7,7 @@ decision-makers:
 
 # 공식 기본 요소와 승인된 공통 확장
 
-이 기록은 기존 사용자 승인을 통합한다. 현재 수치·소유 코드·예외의 적용 범위는 [디자인 시스템](../design-system.md)의 단일 register가 기준이다.
+이 기록은 기존 사용자 승인을 통합한다. 입력 포커스 결정은 [공식 입력 포커스 복원](0003-restore-official-input-focus.md)에서 대체했다. 현재 수치·소유 코드·예외의 적용 범위는 [디자인 시스템](../design-system.md)의 단일 register가 기준이다.
 
 ## 맥락
 
