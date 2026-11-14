@@ -1,0 +1,68 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate-run:
+        description: Successful Release candidate run ID
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CANDIDATE_RUN: ${{ inputs.candidate-run }}
+    steps:
+      - name: Verify candidate run
+        id: candidate
+        run: |
+          [[ "$CANDIDATE_RUN" =~ ^[0-9]+$ ]]
+          run=$(gh api "repos/$GH_REPO/actions/runs/$CANDIDATE_RUN")
+          sha=$(jq -er --arg repo "$GH_REPO" '
+            select(.conclusion == "success" and .head_branch == "main" and
+              .head_repository.full_name == $repo and
+              (.event == "push" or .event == "workflow_dispatch") and
+              .path == ".github/workflows/release-candidate.yml") | .head_sha
+          ' <<< "$run")
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.candidate.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.candidate-run }}
+          github-token: ${{ github.token }}
+          name: beluga-linux-x64
+          path: dist/linux
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.candidate-run }}
+          github-token: ${{ github.token }}
+          name: beluga-windows-x64
+          path: dist/windows
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.candidate-run }}
+          github-token: ${{ github.token }}
+          name: beluga-container
+          path: dist/container
+      - name: Publish verified assets
+        env:
+          RELEASE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: bash scripts/publish-release.sh

@@ -1,0 +1,107 @@
+name: Release candidate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.2
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm release:check
+      - run: pnpm check
+      - run: sh scripts/package-linux.sh "$(node -p 'require("./package.json").version')" dist/release
+      - name: Verify Linux archive
+        run: |
+          cd dist/release
+          test "$(sha256sum beluga-linux-x64.tar.gz)" = "$(cat beluga-linux-x64.tar.gz.sha256)"
+          scratch=$(mktemp -d)
+          tar -xzf beluga-linux-x64.tar.gz -C "$scratch"
+          cd "$scratch/beluga"
+          runtime/bin/node host/dist/main.js --help
+          test -f web/index.html
+          test -f LICENSE
+          test -f runtime/LICENSE
+          test -f THIRD_PARTY_NOTICES.md
+      - run: |
+          docker build --tag beluga:release-candidate \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.licenses=MIT" .
+      - name: Verify Docker runtime
+        run: |
+          docker run --rm --network none --entrypoint sh beluga:release-candidate -ec '
+            test -f LICENSE
+            test -f THIRD_PARTY_NOTICES.md
+            test -f FLUE-SDK-LICENSE.txt
+            test -f /usr/local/LICENSE
+            test -f web/index.html
+            test -z "$(command -v codex || true)"
+            node host/dist/main.js --help
+          '
+      - run: docker image save beluga:release-candidate --output dist/beluga-image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beluga-linux-x64
+          path: dist/release/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beluga-container
+          path: dist/beluga-image.tar
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.2
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm release:check
+      - run: pnpm check
+      - run: pnpm --filter @workspace/desktop run package:windows
+      - shell: pwsh
+        run: |
+          $assets = "apps/desktop/src-tauri/target/release/bundle/nsis"
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          $installer = Get-Item -LiteralPath "$assets/Beluga_${version}_x64-setup.exe" -ErrorAction Stop
+          if (@($installer).Count -ne 1) { throw "Expected one Windows installer." }
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "$($installer.FullName).sha256" -Value "$hash  $($installer.Name)" -Encoding ascii
+          $zip = "apps/desktop/src-tauri/target/release/bundle/portable/beluga-windows-x64-portable.zip"
+          $expected = ((Get-Content -LiteralPath "$zip.sha256") -split '\s+')[0]
+          if ((Get-FileHash -LiteralPath $zip).Hash -ne $expected) { throw "Portable ZIP checksum mismatch." }
+          $unpacked = Join-Path $env:RUNNER_TEMP "beluga-portable"
+          Expand-Archive -LiteralPath $zip -DestinationPath $unpacked
+          & "$unpacked/Beluga/beluga-node.exe" "$unpacked/Beluga/host/dist/main.js" --help
+          if ($LASTEXITCODE) { throw "Portable Host failed to start." }
+          foreach ($file in 'Beluga.exe', 'web/index.html', 'LICENSE', 'NODE-LICENSE.txt', 'FLUE-SDK-LICENSE.txt', 'THIRD_PARTY_NOTICES.md') {
+            Get-Item -LiteralPath "$unpacked/Beluga/$file" -ErrorAction Stop | Out-Null
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beluga-windows-x64
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/portable/beluga-windows-x64-portable.zip
+            apps/desktop/src-tauri/target/release/bundle/portable/beluga-windows-x64-portable.zip.sha256
+            apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe.sha256
+          if-no-files-found: error

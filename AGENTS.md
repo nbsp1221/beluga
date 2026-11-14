@@ -1,56 +1,37 @@
-# Repository guide
+# Working on Beluga
 
-## Structure
+Beluga is an independent, plugin-composed agent harness inspired by DSH. Keep changes small and preserve approved behavior. Read the relevant documents below before changing their area; do not load every document for every task.
 
-- `apps/web/src/main.ts` launches the DSH web profile.
-- `apps/web/src/profile.ts` discovers bundled plugins from direct runtime dependencies and prepares the profile through DSH's public APIs and CLI.
-- `apps/web/scripts/package.ts` uses `pnpm deploy --prod` to assemble a Linux x64 archive with pinned runtimes. Build on the target platform for native dependencies.
-- `apps/web/packaging/` contains the Linux installer and systemd service template. Keep OS installation separate from the application launcher and user data.
-- Root `install.sh` downloads and verifies release assets, then delegates to the packaged installer. `BELUGA_RELEASE_URL` selects a release asset base URL for mirrors or pinned releases.
-- `scripts/test-install.sh` verifies the built release through the public installer, systemd, and authenticated web APIs.
-- `packages/` contains shared lint, formatting, TypeScript, and Vitest configuration.
+## Read by task
 
-## Changes
+- Product scope or priorities: [product](docs/product.md) and [roadmap](docs/roadmap.md).
+- Packages, services, plugin registration or Host transport: [architecture](docs/architecture.md).
+- UI, theme, responsive layout or interactions: [design system](docs/design-system.md), including its scoped extension register.
+- Changing an architectural choice: the relevant [decision record](docs/decisions/).
+- Writing or deleting documentation: [documentation policy](docs/README.md).
+- Product setup: [README](README.md). Source builds and checks: [development](docs/development.md). Scripts and manifests are authoritative for executable commands and versions.
 
-- Use TypeScript for application code. Prefer existing DSH plugins and public extension points; do not patch installed dependencies.
-- Keep one definition for each product setting. Reuse it across startup and tests.
-- Remove replaced code and update its callers. Add compatibility behavior only for a concrete requirement; preserve user data.
-- Keep abstractions proportional to current use. Investigate the cause of a failure before adding a workaround.
-- Untested does not mean unsupported. Check actual capabilities instead of blocking environments outside the test matrix.
-- Every project-specific restriction, override, or workaround needs a concrete requirement, documented upstream constraint, or reproducible failure. Remove it when that basis is absent or no longer applies.
-- Get explicit approval before introducing project-specific exceptions; prefer documented upstream behavior.
-- Group code by purpose, with a blank line when the purpose changes. Keep closely related statements together; do not space every statement mechanically.
-- Keep text files in UTF-8 with LF and a final newline. `.gitattributes` controls Git normalization; `.editorconfig` controls editor defaults and must agree with the shared formatter.
-- Review the whole changed function for readable flow and unnecessary structure. Passing lint and formatting checks does not establish readability.
-- Manage bundled plugin versions through package manifests and the lockfile. Keep credentials and machine-specific configuration out of the repository.
-- `.node-version` pins the packaged Node.js runtime; `packageManager` pins pnpm. Verify official download checksums and keep packaging output in ignored `dist/` directories.
-- Install under the invoking user's home and manage `beluga.service` with `systemctl --user`. Only enabling lingering may request sudo, after an unprivileged attempt fails.
-- Confirm startup through DSH's documented ready-URL announcement for the current systemd invocation. Do not couple installation to an optional plugin or a fixed web port.
-- Keep recovery failures explicit and retain installer state when recovery cannot complete. Preserve user-managed service drop-ins and application data.
-- The launcher forwards termination to DSH. Keep systemd's initial stop signal directed at the launcher only, while retaining group cleanup for processes that do not exit.
-- Direct runtime dependencies declaring `dsh.bundle.patch` are product plugins. Only profile links into this application's `node_modules` are product-owned; preserve other plugins and user activation choices.
+## Engineering boundaries
 
-## Verification
+- Apps assemble plugins. Keep feature state and commands out of the shell and shared UI; respect the dependency directions in the architecture document.
+- Prefer existing libraries and public APIs. Do not introduce speculative abstractions, external plugin installation or another state/slot framework without a concrete requirement.
+- Do not copy DSH, Codex or derivative product implementation/style/assets into Beluga. Their source and rendered behavior are reference evidence. Official shadcn generation is an authorized reuse path; preserve third-party notices.
+- Keep sample adapters explicit in code. Do not fabricate model reasoning, tool activity, permission enforcement or persistence.
 
-- Use the pnpm version in `package.json` and run `pnpm check` after changes.
-- Run `pnpm --filter @repo/web test` for focused integration tests, or `pnpm test` for all packages.
-- Root lint and format commands check the repository; package scripts own type checks and tests. Share configuration through `packages/`.
-- Keep checks read-only. Run automatic fixes separately, then review the diff.
-- Test observable contracts and important failure paths. Avoid tests that repeat implementation details or add coverage without meaningful risk.
-- Initialize DSH integration fixtures through its public CLI in unique OS temporary directories. Clean up owned files and subprocesses.
-- Routine tests must not use real credentials, call model APIs, modify user profiles, or change the repository lockfile.
-- Validate installer changes in a disposable Linux VM using real systemd. A service restart or container restart does not prove machine-reboot behavior. Check shell scripts with ShellCheck.
-- Run `pnpm test:install` only on a disposable Linux machine with systemd after `pnpm package`. It refuses an existing installation, profile, or service. Keep it separate from routine `pnpm check` and `pnpm test`.
-- Check for active verification runs before starting a whole suite. Preserve running development servers and unrelated processes.
+## UI changes
 
-## Documentation
+- Start with the configured official shadcn preset. Check semantic theme values, then public props/composition, before considering an extension. Moving an override does not remove it.
+- Do not add tokens, modify primitive internals or introduce style overrides without evidence and user agreement. Existing scoped approvals are in the design system; they do not authorize unrelated changes.
+- Before implementing UI/UX for any feature, verify the placement, interaction and relevant states against an established product's rendered UI or source. Record the exact reference and what it supports. A feature match alone does not justify a control or its placement.
+- If a UI decision lacks reference evidence, ask the user asynchronously and wait for their answer before implementing that part. For a new exception or visible departure, explain the result, alternatives, scope, maintenance and accessibility costs in plain language and get agreement first. A request to research is not implementation approval.
+- Preserve approved design through rendered checks, including light/dark, responsive layouts, keyboard focus and open/close state. Official components or a successful build alone do not establish correct product UX.
+- Record each replacement's official component, removed custom behavior and unresolved differences in review evidence. Keep only durable rules in project docs.
 
-- Keep public documentation in English. README covers product installation and usage, not development status or experiment results; this file covers repository work.
-- Keep private research, experiment logs, and personal context outside the repository.
-- Record non-obvious decisions and evidence in the relevant review. Prefer established conventions when no project constraint justifies an exception.
+## Verification and documentation
 
-## CI and releases
-
-- CI runs `pnpm check` on Linux and Windows; Linux also builds and installs the release in its disposable runner. Keep Node and pnpm versions in `.node-version` and `packageManager`, not workflow inputs.
-- Releases call the same CI workflow. Set `apps/web/package.json`'s version before pushing the matching `vVERSION` tag. Tags with a prerelease suffix create prereleases and do not replace the stable installer.
-- Publish only the verified Linux archive, checksum, and installer to GitHub Releases. Keep repository write permission confined to the publishing job and pin external actions to immutable revisions.
+- Run checks appropriate to the change. Before heavy verification, check for an existing run and avoid overlapping whole suites. Preserve user servers, tabs and other tasks' resources.
+- Refresh Beluga's local development preview after code changes unless the user asks to skip it. Reuse the current preview URL and verify that it serves the updated build. Development preview databases do not require a backup.
+- Report what was actually checked and its limits. Do not promote historical test results into current verification or certify physical-device/accessibility behavior from viewport emulation.
+- Update the owning document with related code changes. Put current rules, decision rationale and future work in their respective homes; do not append contradictory corrections or task diaries.
+- Before deleting untracked material, preserve it outside the repository and verify the copy. Extract decisions, scope and unresolved risks before removing redundant reports.
+- Do not stage or commit unless explicitly requested.

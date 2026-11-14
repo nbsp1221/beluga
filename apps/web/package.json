@@ -1,31 +1,44 @@
 {
-  "name": "@repo/web",
-  "version": "0.1.2",
+  "name": "web",
+  "version": "0.0.1",
   "private": true,
-  "files": [
-    "src/main.ts",
-    "src/profile.ts"
-  ],
   "type": "module",
   "scripts": {
-    "check-types": "tsc --noEmit",
-    "dev": "node ./src/main.ts",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "preview": "vite preview",
+    "lint:eslint": "eslint .",
+    "lint:eslint:fix": "eslint --fix .",
     "test": "vitest run",
-    "test:watch": "vitest --watch",
-    "package": "node ./scripts/package.ts"
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "@cerbur/clutch-dsh-worktree": "0.1.18",
-    "@deepseek-ai/dsh": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-app-boot": "0.2.1-rc.2",
-    "dsh-codex-auth": "0.3.4-rc.2",
-    "dsh-full-remote": "https://github.com/JUANWANG-BUAA/dsh-full-remote/releases/download/v0.5.0/dsh-full-remote-0.5.0.tgz"
+    "@workspace/client": "workspace:*",
+    "@workspace/protocol": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "@workspace/ui": "workspace:*",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:"
   },
   "devDependencies": {
-    "@repo/typescript-config": "workspace:*",
-    "@repo/vitest-config": "workspace:*",
+    "@tailwindcss/vite": "catalog:",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.8",
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "6.2.1",
+    "@workspace/tooling-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "catalog:",
+    "jsdom": "27.4.0",
     "typescript": "catalog:",
+    "vite": "catalog:",
     "vitest": "catalog:"
   }
 }

@@ -1,35 +1,44 @@
 {
   "name": "beluga",
-  "version": "0.0.0",
+  "version": "0.1.0-preview.1",
   "private": true,
-  "type": "module",
   "scripts": {
-    "lint": "oxlint . && eslint .",
-    "format": "oxfmt --check .",
-    "format:fix": "oxfmt .",
-    "check-types": "turbo run check-types //#check-types:root",
-    "check-types:root": "tsc --noEmit",
-    "check": "turbo run lint format check-types //#check-types:root test",
-    "test": "turbo run test",
-    "test:install": "bash scripts/test-install.sh",
-    "test:watch": "turbo run test:watch",
-    "dev": "turbo run dev",
-    "package": "turbo run package"
+    "dev:all": "turbo run dev",
+    "build:all": "turbo run build",
+    "check": "pnpm format:check && pnpm check:boundaries && pnpm lint && pnpm typecheck:all && pnpm test:all && pnpm build:all",
+    "lint": "turbo run lint:oxlint && turbo run lint:eslint lint:eslint:root",
+    "lint:oxlint": "oxlint .",
+    "lint:eslint:root": "eslint .",
+    "lint:fix": "turbo run lint:oxlint:fix && turbo run lint:eslint:fix lint:eslint:fix:root",
+    "lint:oxlint:fix": "oxlint --fix .",
+    "lint:eslint:fix:root": "eslint --fix .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "typecheck:all": "turbo run typecheck typecheck:root",
+    "typecheck:root": "tsc --noEmit && tsc -p test/tsconfig.json",
+    "test:all": "turbo run test test:integration",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "release:version": "changeset version && node scripts/version-release.mjs && pnpm release:check",
+    "release:check": "node scripts/version-release.mjs --check"
   },
   "devDependencies": {
-    "@repo/format-config": "workspace:*",
-    "@repo/lint-config": "workspace:*",
-    "@repo/typescript-config": "workspace:*",
+    "@changesets/cli": "3.0.3",
     "@types/node": "catalog:",
-    "eslint": "10.13.0",
+    "@workspace/client": "workspace:*",
+    "@workspace/host-plugins": "workspace:*",
+    "@workspace/tooling-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "catalog:",
     "oxfmt": "0.72.0",
     "oxlint": "1.89.0",
     "oxlint-tsgolint": "7.0.2005",
-    "turbo": "^2.11.10",
-    "typescript": "catalog:"
+    "turbo": "2.11.10",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
-    "node": ">=24.12"
+    "node": ">=24.0.0"
   },
-  "packageManager": "pnpm@12.16.1"
+  "packageManager": "pnpm@11.25.0"
 }
