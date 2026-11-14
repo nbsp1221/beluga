@@ -14,6 +14,32 @@ const definition = {
   capabilities: [],
 };
 
+test('stores only pinned preset revisions and assigns the first title once', () => {
+  using db = new DatabaseSync(':memory:');
+  const catalog = createWorkspaceCatalog(db);
+  const workspace = catalog.add(process.cwd()).workspace;
+  const preset = catalog.presets.create(definition);
+  const settings = { model: 'provider/model', effort: 'default' } as const;
+
+  expect(catalog.presets.revise('missing', 1, definition)).toBeUndefined();
+  expect(catalog.presets.revise(preset.id, 5, definition)).toBeUndefined();
+  expect(catalog.presets.revise(preset.id, 1, definition)?.version).toBe(2);
+  expect(catalog.presets.revise(preset.id, 1, definition)).toBeUndefined();
+  expect(() =>
+    catalog.createSession(workspace.id, { ...preset, version: 5 }, 'invalid', settings),
+  ).toThrow();
+  expect(catalog.list().sessions).toEqual([]);
+
+  const session = catalog.createSession(workspace.id, preset, 'session', settings);
+  expect(session.title).toBeNull();
+  catalog.setFirstTitle(session.id, 'New session');
+  catalog.setFirstTitle(session.id, 'Second message');
+  expect(createWorkspaceCatalog(db).findSession(session.id)).toMatchObject({
+    agentPresetVersion: 1,
+    title: 'New session',
+  });
+});
+
 test('keeps saved conversation settings when the default model changes', async ({
   onTestFinished,
 }) => {

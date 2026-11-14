@@ -29,7 +29,7 @@ function prepareChat(session: Session) {
 }
 
 function ChatPane({ session, active }: { session: Session; active?: boolean }) {
-  const view = chatView.useModule();
+  const { module: view, failed } = chatView.useModule();
   const hasAnswer = active && hasAnswerText(session);
 
   useEffect(() => {
@@ -38,6 +38,13 @@ function ChatPane({ session, active }: { session: Session; active?: boolean }) {
     }
   }, [hasAnswer]);
 
+  if (failed) {
+    return (
+      <p role="status" className="px-4 py-6 text-sm text-muted-foreground">
+        Chat could not load. Refresh the page to try again.
+      </p>
+    );
+  }
   return view ? createElement(view.ChatView, { session, active }) : null;
 }
 

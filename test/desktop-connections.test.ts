@@ -6,7 +6,7 @@ const base = '/api/desktop/connections';
 const sessionA = '00112233-4455-6677-8899-aabbccddeeff';
 const sessionB = '11223344-5566-7788-99aa-bbccddeeff00';
 
-test('binds browser sessions and product API requests to each HTTPS Host', async ({
+test('binds sessions and product requests to their configured HTTP or HTTPS Host', async ({
   onTestFinished,
 }) => {
   const service = createDesktopConnections(desktop, () => true);
@@ -16,7 +16,7 @@ test('binds browser sessions and product API requests to each HTTPS Host', async
   });
   const upstream = vi.fn((input: URL, init: RequestInit) => {
     const url = input;
-    const token = url.hostname === 'a.example' ? sessionA : sessionB;
+    const token = url.protocol === 'http:' ? sessionA : sessionB;
     const headers = new Headers(init.headers);
     expect(headers.get('origin')).toBe(url.origin);
     expect(headers.get('authorization')).toBeNull();
@@ -26,7 +26,9 @@ test('binds browser sessions and product API requests to each HTTPS Host', async
     if (url.pathname === '/api/auth/login' || url.pathname === '/api/auth/visit') {
       return new Response(null, {
         status: 204,
-        headers: { 'Set-Cookie': `beluga_session=${token}; Max-Age=86400; HttpOnly; Secure` },
+        headers: {
+          'Set-Cookie': `beluga_session=${token}; Max-Age=86400; HttpOnly${url.protocol === 'https:' ? '; Secure' : ''}`,
+        },
       });
     }
     if (url.pathname.endsWith('/usage')) {
@@ -47,7 +49,7 @@ test('binds browser sessions and product API requests to each HTTPS Host', async
         },
       );
     }
-    return Response.json({ host: url.hostname });
+    return Response.json({ origin: url.origin });
   });
   vi.stubGlobal('fetch', upstream);
 
@@ -70,32 +72,42 @@ test('binds browser sessions and product API requests to each HTTPS Host', async
     return response;
   };
 
-  const login = await request('', 'POST', { address: 'https://a.example', code: 'fixture' });
+  const http = 'http://a.example:8917';
+  const https = 'https://a.example:8917';
+  const login = await request('', 'POST', { address: http, code: 'fixture' });
   expect(login.status).toBe(201);
 
   const first = await readConnectionId(login);
   const cookies = login.headers.getSetCookie();
   expect(cookies[0]).toContain('HttpOnly');
+  expect(cookies[0]).toContain('Secure');
   expect(cookies[0]).toContain('Max-Age=86400');
   const reconnect = await request(
     '',
     'POST',
-    { address: 'https://a.example', code: '' },
+    { address: http, code: '' },
     cookies[0].split(';')[0],
   );
   expect(reconnect.status).toBe(201);
   const newLogin = await request(
     '',
     'POST',
-    { address: 'https://a.example', code: 'fixture' },
+    { address: http, code: 'fixture' },
     cookies[0].split(';')[0],
   );
   expect(newLogin.status).toBe(201);
-  const next = await request('', 'POST', { address: 'https://b.example', code: 'fixture' });
+  const crossOrigin = await request(
+    '',
+    'POST',
+    { address: https, code: '' },
+    cookies[0].split(';')[0],
+  );
+  expect(crossOrigin.status).toBe(401);
+  const next = await request('', 'POST', { address: https, code: 'fixture' });
   const second = await readConnectionId(next);
   const conversation = '/api/conversations/shared-id';
-  expect(await (await request('/' + first + conversation)).json()).toEqual({ host: 'a.example' });
-  expect(await (await request('/' + second + conversation)).json()).toEqual({ host: 'b.example' });
+  expect(await (await request('/' + first + conversation)).json()).toEqual({ origin: http });
+  expect(await (await request('/' + second + conversation)).json()).toEqual({ origin: https });
 
   const receipt = await request('/' + first + conversation, 'POST', { body: 'Hello' });
   expect(receipt.headers.get('set-cookie')).toBeNull();
@@ -112,7 +124,7 @@ test('binds browser sessions and product API requests to each HTTPS Host', async
   expect((await request('/' + first + '/api/auth/session')).status).toBe(404);
   expect((await request('/' + first, 'DELETE')).status).toBe(204);
   expect((await request('/' + first + conversation)).status).toBe(404);
-  expect(await (await request('/' + second + conversation)).json()).toEqual({ host: 'b.example' });
+  expect(await (await request('/' + second + conversation)).json()).toEqual({ origin: https });
 });
 
 test('requires local desktop authentication and a same-origin mutation', async () => {

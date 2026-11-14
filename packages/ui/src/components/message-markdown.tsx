@@ -7,8 +7,9 @@ import {
   CodeBlockLine,
   CodeBlockTitle,
 } from '@workspace/ui/components/code-block';
+import { toast } from '@workspace/ui/components/toast';
 import { useHighlightedCode } from '@workspace/ui/hooks/use-highlighted-code';
-import { Streamdown, type Components, defaultComponents } from 'streamdown';
+import { type Components, Streamdown, defaultComponents } from 'streamdown';
 
 function FencedCode({ value, language }: { value: string; language: string }) {
   const lines = useHighlightedCode(value, language);
@@ -17,7 +18,11 @@ function FencedCode({ value, language }: { value: string; language: string }) {
       <CodeBlockHeader>
         <CodeBlockTitle>{language || 'Code'}</CodeBlockTitle>
         <CodeBlockActions>
-          <CodeBlockCopyButton value={value} className="touch-target" />
+          <CodeBlockCopyButton
+            value={value}
+            className="touch-target"
+            onCopyError={() => toast.add({ title: 'Could not copy code.' })}
+          />
         </CodeBlockActions>
       </CodeBlockHeader>
       <CodeBlockContent lineNumbers>

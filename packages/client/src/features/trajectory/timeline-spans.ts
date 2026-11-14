@@ -7,16 +7,21 @@ export function timelineSpans(
   requests: readonly TrajectoryRequest[],
   duration: boolean,
   requestNumberOffset = 0,
+  positions?: readonly { turn: number; precedingModelRequests: number }[],
 ) {
   let requestNumber = requestNumberOffset;
   const items = requests.flatMap((request, turnIndex) => {
+    const position = positions?.[turnIndex];
+    if (position) {
+      requestNumber = position.precedingModelRequests;
+    }
     let step = 0;
     return request.records
       .filter((record) => !isSummaryRequest(record))
       .map((record, index) => ({
         key: recordKey(request, record),
         request,
-        turnIndex,
+        turnIndex: position ? position.turn - 1 : turnIndex,
         record,
         boundary:
           index === (request.records[0]?.kind === 'system' && request.records[0].initial ? 1 : 0),

@@ -29,7 +29,8 @@
     "@workspace/ui": "workspace:*",
     "lucide-react": "catalog:",
     "react": "catalog:",
-    "react-router": "catalog:"
+    "react-router": "catalog:",
+    "uuid": "14.0.3"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -26,11 +26,11 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { WorkspaceClient } from '../../workspaces/contract.js';
-import type { ConversationClient } from '../contract.js';
 import { useLayout } from '../../../workbench/contract.js';
+import { type ConversationClient, type Session, sessionTitle } from '../contract.js';
 import { WorkspaceDialogContent, WorkspaceStart } from './workspace-form.js';
 import { workspaceLabel } from './workspace-label.js';
 
@@ -94,14 +94,24 @@ export function ConversationSidebar({
       return next;
     });
 
-  const matchingSessions = snapshot.sessions.filter(
-    (session) => !session.isDraft && session.title.toLowerCase().includes(searchTerm),
-  );
-
-  function sessionsForWorkspace(workspaceId: string) {
-    const sessions = matchingSessions.filter((session) => session.workspaceId === workspaceId);
-    return sortByName ? sessions.sort((a, b) => a.title.localeCompare(b.title)) : sessions;
-  }
+  const sessionsByWorkspace = useMemo(() => {
+    const matches = snapshot.sessions.filter(
+      (session) => !session.isDraft && sessionTitle(session).toLowerCase().includes(searchTerm),
+    );
+    if (sortByName) {
+      matches.sort((a, b) => sessionTitle(a).localeCompare(sessionTitle(b)));
+    }
+    const groups = new Map<Session['workspaceId'], Session[]>();
+    for (const session of matches) {
+      const group = groups.get(session.workspaceId);
+      if (group) {
+        group.push(session);
+      } else {
+        groups.set(session.workspaceId, [session]);
+      }
+    }
+    return groups;
+  }, [snapshot.sessions, searchTerm, sortByName]);
 
   return (
     <Dialog open={adding} onOpenChange={setAdding}>
@@ -200,7 +210,7 @@ export function ConversationSidebar({
                 </div>
                 <div className="flex flex-col gap-2">
                   {workspaces.map((workspace) => {
-                    const sessions = sessionsForWorkspace(workspace.id);
+                    const sessions = sessionsByWorkspace.get(workspace.id) ?? [];
                     if (searchTerm && !sessions.length) {
                       return null;
                     }
@@ -233,14 +243,14 @@ export function ConversationSidebar({
                                 'flex min-h-12 items-center rounded-lg py-1 pr-2 pl-8 text-sm aria-[current=page]:font-medium md:min-h-8',
                               )}
                             >
-                              <span className="truncate">{session.title}</span>
+                              <span className="truncate">{sessionTitle(session)}</span>
                             </Link>
                           ))}
                         </CollapsibleContent>
                       </Collapsible>
                     );
                   })}
-                  {query && !matchingSessions.length && (
+                  {query && !sessionsByWorkspace.size && (
                     <div className="px-2 py-4 text-sm text-muted-foreground">
                       <p className="break-words">No sessions match “{query}”.</p>
                       <Button

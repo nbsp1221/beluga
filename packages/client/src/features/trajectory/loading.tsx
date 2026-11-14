@@ -19,7 +19,7 @@ export function TrajectoryLoading() {
   );
 }
 
-export function TrajectoryViewLoading() {
+export function TrajectoryViewFrame({ unavailable = false }: { unavailable?: boolean }) {
   return (
     <section aria-label="Trajectory" className="flex h-full min-h-0 min-w-0 flex-col">
       <div inert className="shrink-0">
@@ -30,7 +30,13 @@ export function TrajectoryViewLoading() {
         </TrajectoryTimelineFrame>
       </div>
       <div aria-label="Trajectory records" className="min-h-0 flex-1">
-        <TrajectoryLoading />
+        {unavailable ? (
+          <p role="status" className="px-2 py-1 text-xs text-muted-foreground">
+            Trajectory could not load. Refresh the page to try again.
+          </p>
+        ) : (
+          <TrajectoryLoading />
+        )}
       </div>
     </section>
   );

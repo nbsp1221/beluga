@@ -54,13 +54,15 @@ sidebar는 component와 description을 함께 등록하며 제목은 목적지 l
 
 [접속 코드 플러그인](../packages/host-plugins/src/auth/host.ts)은 Host 데이터 폴더의 auth.sqlite에 세션 토큰 해시·만료 시각·접속 코드 리비전을 저장하고 HttpOnly, SameSite Strict 쿠키를 발급한다. HTTPS에서는 Secure를 붙인다. 로그인과 인증된 사이트 진입 시 만료 시각을 그 시점으로부터 24시간 뒤로 설정하고, 스트림·이력 조회는 만료를 연장하지 않는다. 로컬 운영 명령이 무작위 코드를 발급하고 데이터 폴더에는 salt와 해시만 기록한다. 같은 데이터 폴더와 사이트 주소로 Host를 재시작하면 기존 세션이 이어진다. 로그아웃, 만료, 접속 코드 교체 시 세션은 무효화된다. 모델 인증은 [공급자 어댑터](../packages/host-plugins/src/model-providers/adapter.ts)가 별도로 소유한다.
 
+독립 Host의 수신 주소와 사용자가 여는 사이트 주소는 별도로 설정한다. HTTP와 HTTPS 모두 설정한 사이트 주소로 로그인과 변경 요청의 Origin을 검사한다. TLS 종료와 네트워크 접근 범위는 배포 환경이 관리한다. [Host 운영](hosting.md#access-the-host)
+
 ## Windows 데스크톱 수명
 
 데스크톱은 Tauri 2와 WebView2로 창과 트레이를 관리한다. 설치본에는 공식 Node 24, Host의 운영 의존성, 웹 자산이 함께 들어간다. [Host 시작 경로](../apps/host/src/desktop.ts)는 임의의 루프백 포트를 받아 공통 Host를 초기화하고, 준비 신호와 로컬 세션을 전용 파이프로 돌려준다. [데스크톱 인증 플러그인](../packages/host-plugins/src/auth/desktop.ts)은 해당 Host 프로세스가 발급한 세션과 정확한 요청 Origin을 검사한다. 네이티브 셸이 WebView에 HttpOnly 세션 쿠키를 넣으며 제품 화면에는 Tauri 명령 권한을 주지 않는다.
 
 창을 닫으면 화면과 Host를 트레이에 유지한다. 트레이의 **Exit**는 새 요청을 막고 이미 들어온 변경 요청을 정리한 뒤 Flue의 실행 취소를 기록한다. Windows Job Object가 앱이 시작한 Node와 그 자식 프로세스의 수명을 제한한다. 강제 종료로 취소를 기록하지 못한 경우 Flue의 기존 복구 규칙이 적용된다. 독립 실행 Host는 이 수명에 포함되지 않는다.
 
-기존 React **Settings → Connections**에서 HTTPS Host를 선택한다. 화면과 설정은 하나의 로컬 WebView2에 남고, [데스크톱 Host의 연결 어댑터](../apps/host/src/desktop-connections.ts)가 선택된 Host의 제품 API와 Flue 스트림에 요청을 전달한다. 각 연결의 요청 경로와 인증 값은 해당 Host에만 연결된다. WebView2의 HttpOnly 쿠키에는 원격 세션 값만 저장한다. 만료와 재접속 갱신은 원격 Host의 기존 인증 정책을 따른다. 앱에서 로컬로 돌아오거나 종료해도 원격 Host의 작업은 계속된다.
+기존 React **Settings → Connections**에서 HTTP 또는 HTTPS Host를 선택한다. 화면과 설정은 하나의 로컬 WebView2에 남고, [데스크톱 Host의 연결 어댑터](../apps/host/src/desktop-connections.ts)가 선택된 Host의 제품 API와 Flue 스트림에 요청을 전달한다. 각 연결의 요청 경로와 인증 값은 해당 Host에만 연결된다. WebView2의 HttpOnly 쿠키에는 원격 세션 값만 저장한다. 만료와 재접속 갱신은 원격 Host의 기존 인증 정책을 따른다. 앱에서 로컬로 돌아오거나 종료해도 원격 Host의 작업은 계속된다.
 
 ## 플러그인과 등록 수명
 
@@ -74,13 +76,13 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 
 ## 데이터와 상태 소유권
 
-[ConversationClient](../packages/client/src/features/conversation/contract.ts)는 snapshot/subscribe를 갖는 클라이언트 투영 계약이다. 세션·초안·전송을 소유한다. Workspace, Agent presets, Model providers는 각자 목록과 명령을 제공한다. Conversation은 새 세션을 처음 저장할 때 이 서비스에서 선택한 프리셋 버전과 기본 모델을 읽는다. [연결 어댑터](../packages/client/src/bootstrap/connected.ts)는 활성 세션의 Flue 관찰을 화면 메시지로 변환하고, 세션 전환 시 구독을 닫는다. 전송 응답을 받기 전에 연결이 끊긴 경우 같은 입력의 재시도에는 같은 제출 키를 사용한다.
+[ConversationClient](../packages/client/src/features/conversation/contract.ts)는 snapshot/subscribe를 갖는 클라이언트 투영 계약이다. 세션·초안·전송을 소유한다. Workspace, Agent presets, Model providers는 각자 목록과 명령을 제공한다. 공급자 설정과 Chat 모델 선택기는 같은 스냅샷을 읽고, 공급자 변경이 끝나면 변경 전에 시작한 조회는 그 스냅샷을 덮지 못한다. Conversation은 새 세션을 처음 저장할 때 이 서비스에서 선택한 프리셋 버전과 기본 모델을 읽는다. [연결 어댑터](../packages/client/src/bootstrap/connected.ts)는 활성 세션의 Flue 관찰을 화면 메시지로 변환하고, 세션 전환 시 구독을 닫는다. 전송 응답을 받기 전에 연결이 끊긴 경우 같은 입력의 재시도에는 같은 제출 키를 사용한다.
 
 새 대화의 워크스페이스는 현재 화면에서 지정한 폴더를 우선한다. 지정이 없으면 브라우저에 기억한 마지막 선택, 가장 최근에 생성된 저장 세션의 폴더, 가장 최근에 등록된 폴더 순으로 고른다. 기억한 폴더가 현재 Host 목록에 있을 때만 사용하며, 저장 위치는 브라우저별 로컬 환경설정이다.
 
 [Workspace Host](../packages/host-plugins/src/workspace/host.ts)는 로그인한 사용자에게 Host 홈에서 시작하는 폴더 탐색과 절대 경로 입력을 제공한다. 별도 허용 목록은 두지 않는다. 목록은 하위 폴더만 반환하며 링크는 입력 경로로 검증할 수 있다. Host에서 확인 가능한 기존 디렉터리를 정규 경로로 등록한다. 동일 경로는 같은 ID를 반환하고 이름이 같아도 경로가 다르면 별개다. 카탈로그는 실제 폴더 경로를 필수로 저장한다. 새 대화에서 폴더를 고르기 전 상태는 웹 초안에만 존재한다. 연결된 폴더가 사라지거나 다른 경로로 바뀌면 새 세션 생성을 거절하고 이력은 보존한다.
 
-[하네스 Host](../packages/host-plugins/src/harness/host.ts)는 카탈로그로 세션을 확인하고, Flue SQLite에 대화와 제출 기록을 저장한다. 워크스페이스 등록은 세션의 소속을 정하며, 경로·파일 내용·프로젝트 지침은 모델 입력에 주입하지 않는다. 샘플 모드 선택은 실행 설정과 별개이며 첨부를 포함한 전송은 거부한다.
+[하네스 Host](../packages/host-plugins/src/harness/host.ts)는 카탈로그로 세션을 확인하고, Flue SQLite에 대화와 제출 기록을 저장한다. 세션 제목은 첫 입력이 수락될 때까지 NULL이며 화면에서 기본 문구를 표시한다. 연결 Host는 플러그인을 시작하기 전에 프로세스 소유권을 획득한다. 이 경계는 Trajectory의 시작 복구와 Flue의 프로세스 전역 공급자 등록을 함께 보호한다. 종료 시 런타임과 공급자를 정리한 뒤 소유권을 반환한다. 워크스페이스 등록은 세션의 소속을 정하며, 경로·파일 내용·프로젝트 지침은 모델 입력에 주입하지 않는다. 샘플 모드 선택은 실행 설정과 별개이며 첨부를 포함한 전송은 거부한다.
 
 ### 에이전트 프리셋과 실행
 
@@ -99,6 +101,8 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 Flue 관찰의 미완료 사용자 제출은 실행 중 상태로 투영한다. 첫 텍스트가 보이면 대기 표시를 없애고, 중단 버튼은 제출 종료까지 유지한다. [Flue의 중단 API](https://flueframework.com/docs/reference/agent-api/)는 인증된 세션 라우트를 통해 현재 실행과 그 대화의 대기열을 중단한다. 제출 종료는 Flue가 기록한 결과로 확인한다. Host는 인증과 Flue 제출에 동일한 외부 origin을 전달한다. Flue가 반환하는 스트림 주소는 프록시 내부 연결과 무관하게 이 origin을 사용한다.
 
 Host의 [Trajectory 플러그인](../packages/host-plugins/src/trajectory/host.ts)은 Flue가 시작 중 미완료 제출을 정리하기 전에 관찰을 등록한다. 종료 시 Harness의 Flue runtime을 먼저 멈추고 관찰을 해제한 뒤 DB를 닫는다. Trajectory는 [Flue 관찰 어댑터](../packages/host-plugins/src/trajectory/flue-recorder.ts)에서 공개 실행 이벤트를 정규화하고, [Beluga SQLite 기록](../packages/host-plugins/src/trajectory/store.ts)에 전송·모델 요청·도구 호출을 보관한다. Trajectory가 이력·모델 입력·사용량 [라우트](../packages/host-plugins/src/trajectory/http.ts)를 소유하고 Harness는 인증 미들웨어 뒤, Flue 요청 위임 앞에 등록한다. 화면은 [HTTP 계약](../packages/protocol/src/host.ts)으로 기록을 읽는다. 새 실행부터 기록하고 예전 Flue 이력을 Trajectory로 변환하지 않는다. 제출 결과와 개별 도구 결과를 분리한다. 관찰 가능한 첫 출력의 시간은 공급자의 내부 첫 토큰 시각과 구분한다.
+
+이력은 최신 50턴을 반환하며, 커서로 이전 페이지를 가져온다. 브라우저는 요청을 시작한 목록에만 이전 페이지를 붙인다. 검색은 Host에서 대화 전체를 대상으로 실행하고 원래 턴·모델 요청 번호를 유지한다. 검색어는 공통 HTTP 계약으로 검증하며, 길이 제한을 넘으면 입력을 유지하고 조회를 중지한다. 타임라인은 불러온 기록만 사용한다. 모델 입력 전문은 개별 요청을 검사할 때 별도로 조회한다. 이력과 사용량이 같으면 Host는 ETag 조건부 요청에 본문 없이 응답한다. 모델 변경은 해당 세션의 사용량만 무효화한다.
 
 컨텍스트 구성은 사용량 표본과 같은 요청의 저장된 시스템 프롬프트·도구 정의·메시지에서 계산한다. Host는 텍스트와 JSON의 UTF-8 크기를 4바이트당 약 1토큰으로 추정하고, 추정 합계만 사용량 응답에 더한다. 공급자 보고 입력 토큰은 그대로 사용하며 상세 본문은 기존 인증된 Trajectory 입력 라우트가 제공한다.
 

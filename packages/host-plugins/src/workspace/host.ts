@@ -1,5 +1,5 @@
 import type { Plugin } from '@workspace/runtime';
-import { WORKSPACES_PATH, WORKSPACE_FOLDERS_PATH } from '@workspace/protocol/host';
+import { productRoutes } from '@workspace/protocol/host';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import '../auth/services.js';
@@ -31,23 +31,35 @@ export function createWorkspaceHost(catalogPath: string): Plugin {
 
       app.onError((error, c) => {
         if (error instanceof FolderError) {
+          if (error.status === 500) {
+            const cause = error.cause;
+            console.error(
+              'Host folder operation failed',
+              cause instanceof Error && 'code' in cause ? cause.code : undefined,
+            );
+          }
           return c.json({ error: error.message }, error.status);
         }
         throw error;
       });
 
-      app.get(WORKSPACE_FOLDERS_PATH, async (c) =>
+      app.on(productRoutes.browseFolders.method, productRoutes.browseFolders.path, async (c) =>
         c.json(await browseFolders(c.req.query('path'))),
       );
-      app.post(WORKSPACES_PATH, bodyLimit({ maxSize: 32 * 1024 }), async (c) => {
-        const body = await c.req.json<unknown>().catch(() => null);
-        const path = body && typeof body === 'object' && 'path' in body ? body.path : undefined;
-        if (typeof path !== 'string' || !path) {
-          return c.json({ error: 'Choose a folder on the Host.' }, 400);
-        }
-        const { workspace, created } = add(await resolveFolder(path));
-        return c.json(workspace, created ? 201 : 200);
-      });
+      app.on(
+        productRoutes.addWorkspace.method,
+        productRoutes.addWorkspace.path,
+        bodyLimit({ maxSize: 32 * 1024 }),
+        async (c) => {
+          const body = await c.req.json<unknown>().catch(() => null);
+          const path = body && typeof body === 'object' && 'path' in body ? body.path : undefined;
+          if (typeof path !== 'string' || !path) {
+            return c.json({ error: 'Choose a folder on the Host.' }, 400);
+          }
+          const { workspace, created } = add(await resolveFolder(path));
+          return c.json(workspace, created ? 201 : 200);
+        },
+      );
       context.provide('workspaceCatalog', conversationCatalog);
       context.provide('workspaceToolSessions', {
         workspaceRootForSession,

@@ -5,17 +5,24 @@ export function createClientModule<Module extends object>(load: () => Promise<Mo
   let request: Promise<Module> | undefined;
 
   function prepare() {
-    request ??= load().then((module) => {
-      loaded = module;
-      return module;
-    });
+    request ??= load().then(
+      (module) => {
+        loaded = module;
+        return module;
+      },
+      (error: unknown) => {
+        request = undefined;
+        console.error('Could not load a Chat module.', error);
+        throw error;
+      },
+    );
 
     return request;
   }
 
   function useModule() {
     const [module, setModule] = useState(() => loaded);
-    const [failure, setFailure] = useState<{ reason: unknown }>();
+    const [failed, setFailed] = useState(false);
 
     useEffect(() => {
       if (module !== undefined) {
@@ -29,9 +36,9 @@ export function createClientModule<Module extends object>(load: () => Promise<Mo
             setModule(() => result);
           }
         },
-        (reason: unknown) => {
+        () => {
           if (active) {
-            setFailure({ reason });
+            setFailed(true);
           }
         },
       );
@@ -41,11 +48,7 @@ export function createClientModule<Module extends object>(load: () => Promise<Mo
       };
     }, [module]);
 
-    if (failure) {
-      throw failure.reason;
-    }
-
-    return module;
+    return { module, failed };
   }
 
   return { prepare, useModule };

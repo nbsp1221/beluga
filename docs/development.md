@@ -13,11 +13,11 @@ Use Node.js 24 or newer for development and the Host, and the pnpm version in
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm dev
+pnpm dev:all
 ```
 
-Turborepo builds shared packages, starts their watchers and runs both apps. Open
-the URL printed by Vite. The Host defaults to `http://127.0.0.1:3001`; Vite proxies
+Root commands ending in `:all` delegate to Turbo. Turbo runs package tasks and the explicitly registered root checks. It builds shared packages, starts their watchers and runs both apps in development. Open
+the URL printed by Vite. The Host defaults to `http://127.0.0.1:8917`; Vite proxies
 `/api` to it. Set `PORT` for the Host and a matching `HOST_URL` for Vite when
 changing that address.
 
@@ -33,7 +33,7 @@ pnpm --filter @workspace/host start auth init --data-dir ../../.local/developmen
 pnpm --filter @workspace/host start serve --data-dir ../../.local/development-host
 ```
 
-These commands keep the local Host's data in `.local/development-host` at the repository root. Open `http://127.0.0.1:3001` and sign in with the code printed by `auth init`. Use an absolute `--data-dir` to put the data elsewhere.
+These commands keep the local Host's data in `.local/development-host` at the repository root. Open `http://127.0.0.1:8917` and sign in with the code printed by `auth init`. Use an absolute `--data-dir` to put the data elsewhere.
 
 ## Build the Windows desktop bundles
 
@@ -59,7 +59,7 @@ pnpm check
 ```
 
 Use `pnpm format:check` to check formatting and `pnpm format` to apply Oxfmt.
-`pnpm lint` runs Oxlint followed by ESLint. Shared presets extend the published
+`pnpm lint` runs Oxlint and ESLint. Shared presets extend the published
 `@retn0` configs in [packages/tooling-config](../packages/tooling-config).
 Both linters exclude `packages/ui/src/components` and `packages/ui/src/hooks`.
 Oxfmt, TypeScript, and the production build still cover those directories.
@@ -71,7 +71,7 @@ settings. The Host build emits JavaScript, and browser packages keep bundler
 resolution. Type checks and tests build the workspace declarations they consume.
 Check for another verification run before running the whole suite.
 
-Run `pnpm test` for the package suites, workspace boundary tests, and the connected
+Run `pnpm test:all` for the package suites, workspace boundary tests, and the connected
 Host and web integration test. To run an individual suite, use
 `pnpm --filter <package> test:watch` after the first build for local feedback.
 Runtime and Host integration tests use the Node environment. Host tests

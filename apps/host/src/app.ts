@@ -10,12 +10,39 @@ import { createRuntime } from '@workspace/runtime';
 import { type HostOptions, hostPlugins } from './product.js';
 
 const conversationRoutes = [CONVERSATION_PATH, PROVIDERS_PATH, AGENT_PRESETS_PATH];
+let connectedHostActive = false;
 
 export async function createHost(options: HostOptions = {}) {
   if (options.web && (!options.auth || !options.harness)) {
     throw new Error('The connected website requires authentication and a harness.');
   }
 
+  if (!options.harness) {
+    return startHost(options);
+  }
+  if (connectedHostActive) {
+    throw new Error('A connected Beluga Host is already active in this process.');
+  }
+
+  // Flue's process-wide state and startup recovery both need exclusive ownership.
+  connectedHostActive = true;
+  try {
+    const host = await startHost(options);
+    let disposal: Promise<void> | undefined;
+    return {
+      ...host,
+      dispose: () =>
+        (disposal ??= host.dispose().finally(() => {
+          connectedHostActive = false;
+        })),
+    };
+  } catch (error) {
+    connectedHostActive = false;
+    throw error;
+  }
+}
+
+async function startHost(options: HostOptions) {
   const runtime = await createRuntime(hostPlugins(options));
   const http = runtime.get('http');
   const conversation = options.harness ? runtime.get('conversationHttp') : undefined;

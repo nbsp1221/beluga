@@ -28,7 +28,7 @@ jobs:
       - name: Verify Linux archive
         run: |
           cd dist/release
-          sha256sum --check --strict beluga-linux-x64.tar.gz.sha256
+          test "$(sha256sum beluga-linux-x64.tar.gz)" = "$(cat beluga-linux-x64.tar.gz.sha256)"
           scratch=$(mktemp -d)
           tar -xzf beluga-linux-x64.tar.gz -C "$scratch"
           cd "$scratch/beluga"
@@ -93,7 +93,7 @@ jobs:
           Expand-Archive -LiteralPath $zip -DestinationPath $unpacked
           & "$unpacked/Beluga/beluga-node.exe" "$unpacked/Beluga/host/dist/main.js" --help
           if ($LASTEXITCODE) { throw "Portable Host failed to start." }
-          foreach ($file in 'Beluga.exe', 'web/index.html', 'LICENSE', 'NODE-LICENSE.txt', 'THIRD_PARTY_NOTICES.md') {
+          foreach ($file in 'Beluga.exe', 'web/index.html', 'LICENSE', 'NODE-LICENSE.txt', 'FLUE-SDK-LICENSE.txt', 'THIRD_PARTY_NOTICES.md') {
             Get-Item -LiteralPath "$unpacked/Beluga/$file" -ErrorAction Stop | Out-Null
           }
       - uses: actions/upload-artifact@v4

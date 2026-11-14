@@ -267,19 +267,15 @@ export function openModelProviders(databasePath: string, dataDir: string): OpenM
         },
         async connect({ name, baseUrl, apiKey, models }) {
           const url = new URL(baseUrl);
-          if (url.username || url.password || url.search || url.hash) {
-            throw new ProviderConnectionError(
-              'Use a base URL without credentials, query parameters, or a fragment.',
-            );
-          }
-
           if (
-            apiKey &&
-            url.protocol !== 'https:' &&
-            !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+            (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+            url.username ||
+            url.password ||
+            url.search ||
+            url.hash
           ) {
             throw new ProviderConnectionError(
-              'Use HTTPS when sending an API key to a remote endpoint.',
+              'Use an HTTP or HTTPS base URL without credentials, query parameters, or a fragment.',
             );
           }
 
@@ -330,8 +326,11 @@ export function openModelProviders(databasePath: string, dataDir: string): OpenM
 
           remove.run(id);
           connections.delete(id);
+          registry.deleteProvider(id);
           if (connection.hasKey) {
-            await rm(keyPath(id), { force: true });
+            await rm(keyPath(id), { force: true }).catch(() => {
+              console.error('Could not remove the disconnected provider credential.');
+            });
           }
           return true;
         },

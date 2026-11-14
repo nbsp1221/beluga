@@ -15,7 +15,7 @@ case "$boot" in
 esac
 [ "$(id -u)" -ne 0 ] || fail 'Run the installer as your regular user.'
 [ "$(uname -sm)" = 'Linux x86_64' ] || fail 'This package supports Linux x64.'
-for command in curl sha256sum tar flock systemctl loginctl; do
+for command in cmp curl sha256sum tar flock systemctl systemd-notify loginctl; do
   command -v "$command" >/dev/null || fail "Install $command before continuing."
 done
 systemctl --user show-environment >/dev/null || fail 'A systemd user session is required.'
@@ -35,7 +35,7 @@ archive=beluga-linux-x64.tar.gz
 release="https://github.com/nbsp1221/beluga/releases/download/v$version"
 curl -fsSL "$release/$archive" -o "$scratch/$archive"
 curl -fsSL "$release/$archive.sha256" -o "$scratch/$archive.sha256"
-(cd "$scratch" && sha256sum --check --strict "$archive.sha256")
+(cd "$scratch" && test "$(sha256sum "$archive")" = "$(cat "$archive.sha256")")
 tar -xzf "$scratch/$archive" -C "$scratch"
 [ "$(cat "$scratch/beluga/VERSION")" = "$version" ] || fail 'The archive version does not match.'
 target="$install_dir/releases/$version"
@@ -46,16 +46,24 @@ if [ ! -f "$data_dir/access-code.json" ]; then
   "$target/runtime/bin/node" "$target/host/dist/main.js" auth init --data-dir "$data_dir"
 fi
 
-if [ ! -f "$units/$unit" ]; then
-  cat > "$units/$unit" <<'UNIT'
+unit_path="$units/$unit"
+# Fingerprint of the original generated Type=exec unit, including its default origin.
+original_unit_sha256=8c8de56a7daec348a3923b268ad2ab30235cd15ad979e2756df12c2ceb77ad17
+if [ ! -L "$unit_path" ] && [ -f "$unit_path" ] &&
+  [ "$(sha256sum < "$unit_path")" = "$original_unit_sha256  -" ]; then
+  cp -p "$unit_path" "$scratch/previous.service"
+fi
+if { [ ! -e "$unit_path" ] && [ ! -L "$unit_path" ]; } || [ -f "$scratch/previous.service" ]; then
+  cat > "$scratch/new.service" <<'UNIT'
 [Unit]
 Description=Beluga Host
 
 [Service]
-Type=exec
+Type=notify
+NotifyAccess=all
+TimeoutStartSec=30s
 WorkingDirectory=%h
-Environment=BELUGA_ORIGIN=http://127.0.0.1:3001
-ExecStart="%h/.local/lib/beluga/current/runtime/bin/node" "%h/.local/lib/beluga/current/host/dist/main.js" serve --origin ${BELUGA_ORIGIN} --data-dir "%h/.local/share/beluga" --web-dir "%h/.local/lib/beluga/current/web"
+ExecStart="%h/.local/lib/beluga/current/runtime/bin/node" "%h/.local/lib/beluga/current/host/dist/main.js" serve --data-dir "%h/.local/share/beluga" --web-dir "%h/.local/lib/beluga/current/web"
 Restart=on-failure
 RestartSec=5s
 UMask=0077
@@ -63,32 +71,44 @@ UMask=0077
 [Install]
 WantedBy=default.target
 UNIT
+  if [ -f "$scratch/previous.service" ]; then
+    cmp -s "$scratch/previous.service" "$unit_path" || fail 'The Beluga unit changed during installation.'
+  fi
+  mv -fT "$scratch/new.service" "$unit_path"
+fi
+
+restore_unit() {
+  if [ -f "$scratch/previous.service" ]; then
+    mv -fT "$scratch/previous.service" "$unit_path"
+    systemctl --user daemon-reload
+  fi
+}
+
+if ! systemctl --user daemon-reload ||
+  [ "$(systemctl --user show --property=Type --value "$unit")" != notify ] ||
+  [ "$(systemctl --user show --property=NotifyAccess --value "$unit")" != all ]; then
+  restore_unit
+  fail 'Set Type=notify and NotifyAccess=all in your Beluga service before installing.'
 fi
 previous=$(readlink "$install_dir/current" || true)
 switch_release() {
-  ln -s "$1" "$scratch/current"
+  ln -s "$1" "$scratch/current" &&
   mv -Tf "$scratch/current" "$install_dir/current"
 }
-switch_release "$target"
-systemctl --user daemon-reload
-ready() {
-  attempt=0
-  while [ "$attempt" -lt 20 ]; do
-    if systemctl --user is-active --quiet "$unit" &&
-      curl -fsS --max-time 2 http://127.0.0.1:3001/api/status >/dev/null; then
-      return 0
-    fi
-    attempt=$((attempt + 1))
-    sleep 1
-  done
-  return 1
-}
-if ! systemctl --user restart "$unit" || ! ready; then
+if ! switch_release "$target"; then
+  restore_unit
+  fail 'Could not switch to the new Beluga build.'
+fi
+if ! systemctl --user restart "$unit"; then
   if [ -n "$previous" ]; then
     switch_release "$previous"
-    systemctl --user restart "$unit" || fail 'Could not restart the previous build. Check the service logs.'
+    restore_unit
+    if ! systemctl --user restart "$unit"; then
+      fail 'The previous build did not become ready. Check the service logs.'
+    fi
   else
     systemctl --user stop "$unit"
+    restore_unit
     rm -f -- "$install_dir/current"
   fi
   fail 'Beluga did not become ready. Check: journalctl --user -u beluga.service'
@@ -104,5 +124,5 @@ if [ "$boot" = --boot ]; then
   systemctl --user enable "$unit"
 fi
 printf '%s\n' "Beluga $version is running." \
-  'Local address for a new installation: http://127.0.0.1:3001' \
+  'Local address for a new installation: http://127.0.0.1:8917' \
   'Service status: systemctl --user status beluga.service'

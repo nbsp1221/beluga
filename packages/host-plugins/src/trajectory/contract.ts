@@ -1,5 +1,7 @@
 import type { Hono } from 'hono';
 
+export const primaryAgentName = 'BelugaPresetAgent';
+
 export interface TrajectoryService {
   bindModelContext(
     contextWindow: (providerId: string, modelId: string) => number | undefined,

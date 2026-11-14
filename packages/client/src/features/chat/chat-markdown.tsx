@@ -6,7 +6,10 @@ export const chatMarkdown = createClientModule(
 );
 
 export function ChatMarkdown(props: { text: string; streaming: boolean }) {
-  const module = chatMarkdown.useModule();
+  const { module, failed } = chatMarkdown.useModule();
 
+  if (failed) {
+    return <p className="text-sm leading-6 wrap-break-word whitespace-pre-wrap">{props.text}</p>;
+  }
   return module ? createElement(module.MessageMarkdown, props) : null;
 }

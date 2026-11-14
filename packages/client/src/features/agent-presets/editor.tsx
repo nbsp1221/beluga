@@ -14,6 +14,14 @@ import {
   FieldTitle,
 } from '@workspace/ui/components/field';
 import { Input } from '@workspace/ui/components/input';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@workspace/ui/components/select';
 import { Spinner } from '@workspace/ui/components/spinner';
 import { Textarea } from '@workspace/ui/components/textarea';
 import { ArrowLeft, Check, Plus } from 'lucide-react';
@@ -46,6 +54,7 @@ export function AgentPresetEditor({ client }: { client: AgentPresetsClient }) {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
+  const [settingDefault, setSettingDefault] = useState(false);
 
   useEffect(() => {
     void client.refresh().catch(() => setError('Could not refresh agent presets.'));
@@ -131,12 +140,55 @@ export function AgentPresetEditor({ client }: { client: AgentPresetsClient }) {
     }
   }
 
+  async function setDefault(presetId: string) {
+    setSettingDefault(true);
+    setError('');
+    setStatus('');
+    try {
+      await client.setDefault(presetId);
+      setStatus('Default agent preset saved.');
+    } catch {
+      setError('Could not save the default agent preset.');
+    } finally {
+      setSettingDefault(false);
+    }
+  }
+
   if (!editorOpen) {
     const newDraft =
       !original &&
       Boolean(draft.name || draft.description || draft.instructions || draft.capabilities.length);
     return (
       <FieldGroup>
+        {catalog.presets.length > 0 && (
+          <Field orientation="responsive">
+            <FieldLabel htmlFor={id + '-default'}>Default for new chats</FieldLabel>
+            <Select
+              value={catalog.defaultPresetId}
+              disabled={settingDefault}
+              onValueChange={(value) => {
+                if (value && value !== catalog.defaultPresetId) {
+                  void setDefault(value);
+                }
+              }}
+            >
+              <SelectTrigger id={id + '-default'} className="touch-target min-w-0">
+                <SelectValue placeholder="Choose an agent preset">
+                  {catalog.presets.find(({ id }) => id === catalog.defaultPresetId)?.name}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end" alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {catalog.presets.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id} className="touch-target">
+                      {preset.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
         <Button
           ref={listButtonRef}
           type="button"
@@ -180,6 +232,9 @@ export function AgentPresetEditor({ client }: { client: AgentPresetsClient }) {
           <FieldDescription>No agent presets yet.</FieldDescription>
         )}
         <FieldError>{error}</FieldError>
+        <span role="status" className="sr-only">
+          {status}
+        </span>
       </FieldGroup>
     );
   }

@@ -22,7 +22,7 @@ export function launchOptions(args: readonly string[], env: NodeJS.ProcessEnv) {
     },
   });
 
-  const port = Number(values.port ?? env.PORT ?? 3001);
+  const port = Number(values.port ?? env.PORT ?? 8917);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('Use a port between 1 and 65535.');
   }
@@ -34,11 +34,12 @@ export function launchOptions(args: readonly string[], env: NodeJS.ProcessEnv) {
     command: positionals.join(' ') || 'serve',
     port,
     bind: values.bind ?? '127.0.0.1',
-    origin: values.origin ?? `http://127.0.0.1:${port}`,
+    origin: values.origin ?? (env.BELUGA_ORIGIN || `http://127.0.0.1:${port}`),
     dataDir,
     databasePath: join(dataDir, 'chat.sqlite'),
     credentialPath: join(dataDir, 'access-code.json'),
     webDir: resolve(values['web-dir'] ?? resolve(import.meta.dirname, '../../web/dist')),
+    notifySystemd: process.platform === 'linux' && Boolean(env.NOTIFY_SOCKET),
     help: values.help,
   };
 }

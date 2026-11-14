@@ -6,7 +6,7 @@ last_reviewed: 2026-11-13
 
 # Release verification
 
-Add a Changesets entry for user-facing changes with `pnpm exec changeset` and select the root `beluga` package. Merge product changes through a pull request. The [version workflow](../.github/workflows/version.yml) prepares a separate PR for the next version and changelog. The root package owns the product version and `pnpm release:check` verifies the desktop metadata.
+Add a Changesets entry for user-facing changes with `pnpm exec changeset` and select the root `beluga` package. Merge product changes through a pull request. The [version workflow](../.github/workflows/version.yml) prepares a separate PR for the next version and changelog. The root package owns the product release version. Internal private packages follow the repository source revision. Give an SDK or plugin its own release sequence when it is distributed independently. `pnpm release:check` verifies the desktop metadata and installation references.
 
 Publish the Linux installer and Windows x64 portable ZIP and installer in the same GitHub Release. Publish the corresponding Docker image to GitHub Container Registry with the same release version. Open all three install paths together after the checks below pass for that tagged source.
 
@@ -26,7 +26,7 @@ Ship the unsigned Windows portable ZIP and optional NSIS installer with their SH
 
 ## Verify desktop assets
 
-Extract the portable ZIP and run the optional installer on separate clean systems. For each bundle, open the local Host, connect to the release's HTTPS Host, send a message, and return to **This computer**. Check that closing the window leaves local work running in the tray and **Exit** stops it. Check that exiting the desktop app leaves independent remote work running.
+Extract the portable ZIP and run the optional installer on separate clean systems. For each bundle, open the local Host, connect to a private HTTP Host and an HTTPS Host, send a message on each, and return to **This computer**. Check that closing the window leaves local work running in the tray and **Exit** stops it. Check that exiting the desktop app leaves independent remote work running.
 
 ## Verify the Docker image
 

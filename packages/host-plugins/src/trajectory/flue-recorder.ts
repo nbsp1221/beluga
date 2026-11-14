@@ -1,5 +1,6 @@
 import { type FlueObservation, observe } from '@flue/runtime';
 import type { TrajectoryStore } from './store.js';
+import { primaryAgentName } from './contract.js';
 
 const recordedEvents = new Set([
   'submission_running',
@@ -54,7 +55,7 @@ export function observeFlueTrajectory(store: TrajectoryStore, options: Observati
   return observe((event, context) => {
     if (
       !recordedEvents.has(event.type) ||
-      event.agentName !== 'BelugaPresetAgent' ||
+      event.agentName !== primaryAgentName ||
       !event.submissionId ||
       event.taskId ||
       event.parentSession ||
@@ -88,16 +89,19 @@ export function observeFlueTrajectory(store: TrajectoryStore, options: Observati
         contextBySubmission.get(submissionKey),
         options.contextWindow,
       );
-      if (event.type === 'submission_settled') {
-        outputTurnsBySubmission.delete(submissionKey);
-        contextBySubmission.delete(submissionKey);
-      } else if (isOutput && event.turnId) {
+      if (isOutput && event.turnId) {
         const seen = outputTurnsBySubmission.get(submissionKey) ?? new Set<string>();
         seen.add(event.turnId);
         outputTurnsBySubmission.set(submissionKey, seen);
       }
     } catch (error) {
       options.reportFailure(error);
+    } finally {
+      if (event.type === 'submission_settled') {
+        toolsBySubmission.delete(submissionKey);
+        outputTurnsBySubmission.delete(submissionKey);
+        contextBySubmission.delete(submissionKey);
+      }
     }
   });
 }
@@ -119,7 +123,6 @@ function capture(
   if (event.type === 'submission_running') {
     store.ensure(session, submission);
   } else if (event.type === 'submission_settled') {
-    toolsBySubmission.delete(submissionKey);
     if (context?.compactionId) {
       const record = store.get(session, submission, context.compactionId);
       if (record?.kind === 'compaction' && record.status === 'in-progress') {

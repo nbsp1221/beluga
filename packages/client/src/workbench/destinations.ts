@@ -19,6 +19,7 @@ export interface ContextPanel {
   label: string;
   description: string;
   component: ComponentType;
+  unavailable?: boolean;
 }
 
 export interface SettingsSection {

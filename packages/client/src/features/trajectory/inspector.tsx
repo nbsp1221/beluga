@@ -276,13 +276,14 @@ export function TrajectoryInspector({
   const currentTab = tabs.includes(activeTab) ? activeTab : tabs[0];
 
   const inputId = system?.modelRequestId ?? model?.id;
-  const inputKey = `${request.id}/${inputId}`;
+  const inputKey = `${sessionId}/${request.id}/${inputId}`;
   const needsInput =
     currentTab === 'Input' || currentTab === 'System Prompt' || currentTab === 'Tools';
   const [loadedInput, setLoadedInput] = useState<{
     key: string;
-    value?: TrajectoryModelInputResponse;
+    value: TrajectoryModelInputResponse;
   }>();
+  const [failedInput, setFailedInput] = useState<string>();
 
   useEffect(() => {
     if (!needsInput || !inputId || !loadModelInput || loadedInput?.key === inputKey) {
@@ -297,7 +298,7 @@ export function TrajectoryInspector({
       },
       () => {
         if (!controller.signal.aborted) {
-          setLoadedInput({ key: inputKey });
+          setFailedInput(inputKey);
         }
       },
     );
@@ -305,11 +306,11 @@ export function TrajectoryInspector({
   }, [inputId, inputKey, loadModelInput, loadedInput?.key, needsInput, request.id, sessionId]);
 
   const inputContent =
-    loadedInput?.key === inputKey && loadedInput.value ? (
+    loadedInput?.key === inputKey ? (
       <RequestInput input={loadedInput.value} section={currentTab} />
     ) : (
       <p role="status" className="text-muted-foreground">
-        {loadModelInput && loadedInput?.key !== inputKey
+        {loadModelInput && inputId && failedInput !== inputKey
           ? 'Loading model input…'
           : 'Model input unavailable'}
       </p>

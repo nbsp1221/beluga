@@ -24,6 +24,6 @@ COPY --from=build /src/apps/web/dist ./web
 COPY LICENSE THIRD_PARTY_NOTICES.md ./
 COPY --from=build /src/packages/client/node_modules/@flue/sdk/LICENSE ./FLUE-SDK-LICENSE.txt
 USER node
-EXPOSE 3001
+EXPOSE 8917
 ENTRYPOINT ["node", "/opt/beluga/host/dist/main.js"]
 CMD ["serve", "--bind", "0.0.0.0", "--data-dir", "/data", "--web-dir", "/opt/beluga/web"]

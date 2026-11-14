@@ -77,9 +77,11 @@ Chat은 기존 Message 안에서 모델의 본문을 Streamdown으로 렌더링�
 
 메시지 아래의 공식 MessageFooter는 사용자 말풍선 오른쪽에 전송 시각·복사·편집을, 완료된 AI 답변 왼쪽에 복사·분기·완료 시각을 순서대로 둔다. 시각은 브라우저 현지 시간으로 표시하고 지난 날짜에는 로케일의 짧은 월 표기를 포함한다. 복사는 사용자 입력 또는 최종 답변의 Markdown 원문을 담는다. 데스크톱에서는 대화 끝의 완료된 AI 답변에 조작을 기본 표시한다. 나머지 행은 본문에서 조작 줄까지 호버 또는 내부 키보드 포커스를 유지하는 동안 표시하고, 숨겨져도 높이를 확보한다. 모바일과 호버를 지원하지 않는 환경에서는 계속 표시한다. 조작 줄은 본문과 말풍선의 바깥 모서리를 기준으로 정렬한다. 본문과 조작 줄 사이는 데스크톱에서 `gap-1.5`를 쓴다. 조작 줄 안에서 아이콘 버튼은 `gap-1`로 묶고, 시각과 버튼 묶음 사이는 데스크톱 `gap-2.5`, 모바일 `gap-4.5`를 적용해 시각과 아이콘 영역 사이 간격을 아이콘끼리의 간격과 맞춘다. 대화 분기는 Lucide `GitFork`로 표시한다. 메시지 조작은 공식 ghost `icon-sm` Button, 공통 터치 영역, 공식 Tooltip을 사용한다. 편집·분기는 미지원 안내를 공식 Toast로 표시한다. [DSH 메시지 액션](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-chat/src/client/chat/MessageIconActions.tsx) · [shadcn Message](https://ui.shadcn.com/docs/ai-elements/base/message#actions)
 
+코드 블록 복사는 공식 버튼과 성공 피드백을 사용한다. 브라우저가 복사를 거부하면 Chat의 공통 Toast에 실패를 한 번 표시한다. [Clipboard API](https://www.w3.org/TR/clipboard-apis/#dom-clipboard-writetext)
+
 ### Trajectory
 
-Trajectory 진입 시 모듈을 기다리는 동안에도 조작줄과 빈 타임라인은 실제 화면과 같은 위치와 크기를 차지한다. 조작은 모듈이 준비되면 열린다. 모듈과 최초 기록을 기다리는 상태는 타임라인 아래 목록의 첫 행에 가운데 정렬한 공식 Spinner와 상태 문구로 표시한다. 행은 기록과 같은 데스크톱 32px·모바일 52px 높이를 쓰며, 동작 줄이기 모드에서는 Spinner를 정지한다. 이미 받은 기록은 다시 요청하는 동안 계속 표시한다. [DSH 초기 기록 로딩 행](https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/client/ui-trajectory/src/client/TrajectoryTable.module.css)
+Trajectory 진입 시 모듈을 기다리는 동안에도 조작줄과 빈 타임라인은 실제 화면과 같은 위치와 크기를 차지한다. 조작은 모듈이 준비되면 열린다. 모듈과 최초 기록을 기다리는 상태는 타임라인 아래 목록의 첫 행에 가운데 정렬한 공식 Spinner와 상태 문구로 표시한다. 행은 기록과 같은 데스크톱 32px·모바일 52px 높이를 쓰며, 동작 줄이기 모드에서는 Spinner를 정지한다. 모듈 다운로드가 실패하면 같은 영역에서 상태를 알리고 Chat과 작성 중인 입력은 유지한다. 새로고침은 사용자가 실행한다. 이미 받은 기록은 다시 요청하는 동안 계속 표시한다. [DSH 초기 기록 로딩 행](https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/client/ui-trajectory/src/client/TrajectoryTable.module.css)
 
 [Trajectory](../packages/client/src/features/trajectory/view.tsx)는 대화 패널 전폭의 검색 조작줄, Input·Model·Tools 타임라인, 턴별 기록 목록을 사용한다. 레이블과 막대는 같은 세 레인의 가운데에 정렬하고 상하에 공통 spacing 1을 둔다. 빈 플롯의 호버 기준선은 십자 커서 중심에 맞춘다. 호버 기준선과 범위 양쪽 경계는 동일한 spacing 0.5 두께와 `ring` 색을 쓴다. Table에 가시적 열 헤더를 두지 않는다. 턴은 역할과 별도의 열과 굵은 상단 경계로 구분한다. 기록 목록에는 열 사이 세로선을 두지 않으며, 레인 레이블 경계는 타임라인에만 표시한다. 턴 시작선은 기본 표면 위에 그린다. 호버 배경은 행에서 한 번만 표시하고 턴·요청 버튼은 공유 키보드 포커스를 유지한다. 좁은 목록에서는 턴을 `#N`으로 표시하면서 접근 가능한 이름은 `Turn N`을 유지한다. 타임라인의 Popover는 클릭·탭·키보드로 범위, 확대, 이동을 조작할 수 있다. 초기에는 최근 50개 턴을 표시하며, 이전 기록을 더할 때 읽던 위치를 보존한다.
 
@@ -94,6 +96,8 @@ Settings 셸은 등록된 섹션의 이름·아이콘·설명을 읽어 탐색�
 Settings의 Select는 단일 옵션 그룹도 `SelectContent → SelectGroup → SelectItem`으로 조합한다. 목록은 `align="end"`와 `alignItemWithTrigger={false}`로 버튼 가장자리에서 열고 끝선을 맞춘다. 뷰포트 가장자리에서는 Base UI의 충돌 회피를 따른다. [shadcn Select](https://ui.shadcn.com/docs/components/base/select#usage) · [Base UI Positioner](https://base-ui.com/react/components/select#positioner)
 
 General은 Appearance, Conversations, Agent defaults, Keyboard로 나눈다. 동작이 준비 중인 설정은 실제 값과 분리해 비활성 조작과 Not available yet으로 표시한다. Workspaces의 Git worktree 설정도 같은 표현을 쓴다. Built-in tools는 현재 Host가 등록한 기능을 읽기 전용으로 표시하고, 실제 프리셋에 적용하는 기능 선택은 Agent presets 편집기가 소유한다. [DSH General과 설정 패널](https://github.com/deepseek-ai/deepseek-harness/blob/e8f7b93a344964de3dca1ace9e72b6e4d6de87cb/packages/client/ui-settings-general/src/client/GeneralSection.tsx)
+
+Agent presets에서 새 대화의 기본 프리셋을 선택한다. Providers에서 공급자가 제공하는 기본 모델을 지정하거나 해제한다. 연결 모드의 Files와 첨부가 지원되기 전까지는 기존 위치의 비활성 버튼과 Tooltip을 사용한다. 데모의 샘플 파일과 첨부는 데모에서만 제공한다.
 
 ## 모바일 배치
 
@@ -111,7 +115,7 @@ General은 Appearance, Conversations, Agent defaults, Keyboard로 나눈다. 동
 
 소유: [공통 Composer](../packages/client/src/features/conversation/composer/composer.tsx).
 
-공식 InputGroup/Textarea 조합에 기존 `card/card-foreground`, `rounded-3xl`과 투명 내부 편집기를 사용한다. 카드가 사방 `p-2`와 행 사이 `gap-2`를 소유하고, 편집 영역은 가로·세로에 같은 spacing 1.5를 사용한다. 첨부와 도구는 카드의 별도 행으로 배치한다. 입력에 포커스하면 공식 InputGroup이 카드 바깥에 3px 링을 표시한다. 강제 색상에서는 정상 입력 포커스에 기존 2px Highlight 윤곽선을 표시한다. [DSH의 입력창 영역 분리](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-conversation/src/client/skeleton/InputBar.module.css#L182-L193)를 참고했다.
+공식 Textarea와 Button을 기존 `card/card-foreground`, `rounded-3xl` 표면에 조합한다. 카드가 사방 `p-2`와 행 사이 `gap-2`를 소유하고, 편집 영역은 가로·세로에 같은 spacing 1.5를 사용한다. 첨부와 도구는 카드의 별도 행으로 배치한다. 3px 카드 포커스 링과 오류 경계는 편집기의 상태에서 파생된다. 도구의 비활성 상태는 해당 도구에 적용한다. 강제 색상에서는 정상 입력 포커스에 기존 2px Highlight 윤곽선을 표시한다. [DSH의 입력창 영역 분리](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-conversation/src/client/skeleton/InputBar.module.css#L182-L193)를 참고했다.
 
 Composer 색만 바꾸려고 전역 input을 변경하면 일반 폼의 경계·다크 배경까지 바뀐다. 기존 card 역할을 사용하며, 별도 색 토큰은 card와 독립적으로 달라져야 하는 실제 요구가 있을 때만 재검토한다.
 

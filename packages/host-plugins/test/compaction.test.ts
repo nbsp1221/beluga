@@ -6,11 +6,10 @@ import {
 } from '@earendil-works/pi-ai';
 import {
   conversationUsageSchema,
-  trajectoryHistorySchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
 import { expect, test } from 'vitest';
-import { origin, setupHarness } from './fixtures/harness.js';
+import { origin, readTrajectory, setupHarness } from './fixtures/harness.js';
 import { fixtureProvider } from './fixtures/model-provider.js';
 
 const checkpoint = 'Keep the original decision to use port 4173.';
@@ -178,8 +177,7 @@ test(
     const usage = async () =>
       conversationUsageSchema.parse(await (await harness.fetch(`${url}/usage`)).json());
 
-    const history = async () =>
-      trajectoryHistorySchema.parse(await (await harness.fetch(`${url}/trajectory`)).json());
+    const history = async () => await readTrajectory(harness.fetch(`${url}/trajectory`));
 
     const send = (body: string) =>
       client.send({
@@ -325,9 +323,7 @@ test.for(['failed', 'interrupted', 'overflow'] as const)(
     }
     await settled;
     const base = `${origin}/api/conversations/${id}`;
-    const history = trajectoryHistorySchema.parse(
-      await (await harness.fetch(`${base}/trajectory`)).json(),
-    );
+    const history = await readTrajectory(harness.fetch(`${base}/trajectory`));
     const records = history.at(-1)?.records ?? [];
     expect(records.filter(({ kind }) => kind === 'compaction')).toMatchObject([
       {

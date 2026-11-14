@@ -28,6 +28,10 @@
     "lint:eslint:fix": {
       "cache": false
     },
+    "//#lint:eslint:root": {},
+    "//#lint:eslint:fix:root": {
+      "cache": false
+    },
     "//#lint:oxlint": {
       "dependsOn": [
         "@workspace/protocol#build",
@@ -45,7 +49,11 @@
       "cache": false
     },
     "//#typecheck:root": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": ["@workspace/host-plugins#build", "@workspace/runtime#build"]
+    },
+    "//#test:integration": {
+      "dependsOn": ["@workspace/host-plugins#build", "@workspace/runtime#build"],
+      "passThroughEnv": ["SystemRoot"]
     }
   }
 }

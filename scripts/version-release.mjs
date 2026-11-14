@@ -19,6 +19,25 @@ const guides = ['README.md', 'docs/hosting.md'];
 const releaseVersion =
   /(?<=(?:releases\/(?:tag|download)\/v|Download v|ghcr\.io\/nbsp1221\/beluga:|version=|Beluga_))\d+\.\d+\.\d+(?:-[\da-z.]+)?(?=[\s/_)`\]])/gi;
 
+const requiredReferences = {
+  'README.md': [/releases\/tag\/v/, /ghcr\.io\/nbsp1221\/beluga:/],
+  'docs/hosting.md': [
+    /^version=/m,
+    /\/beluga-windows-x64-portable\.zip\)/,
+    /\/beluga-windows-x64-portable\.zip\.sha256\)/,
+    /\/Beluga_[^/]+_x64-setup\.exe\)/,
+    /\/Beluga_[^/]+_x64-setup\.exe\.sha256\)/,
+    /ghcr\.io\/nbsp1221\/beluga:/,
+  ],
+};
+
+for (const path of guides) {
+  const content = read(path);
+  if (requiredReferences[path].some((pattern) => !pattern.test(content))) {
+    throw new Error('A required installation reference is missing from ' + path + '.');
+  }
+}
+
 if (process.argv.includes('--check')) {
   if (
     tauri.version !== '../package.json' ||

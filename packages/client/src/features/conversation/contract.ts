@@ -38,7 +38,7 @@ export type Message =
 export interface Session {
   id: string;
   workspaceId: string | null;
-  title: string;
+  title: string | null;
   agentPresetId?: AgentPresetId;
   agentPresetName?: string;
   agentPresetVersion?: number;
@@ -52,6 +52,8 @@ export interface Session {
   messages: readonly Message[];
   draft: string;
 }
+
+export const sessionTitle = ({ title }: Session) => title ?? 'New session';
 
 export interface ConversationSnapshot {
   sessions: readonly Session[];

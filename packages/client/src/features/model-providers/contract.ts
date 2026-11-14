@@ -5,10 +5,11 @@ import type { ReadStore } from '../../state/store.js';
 export interface ModelCatalog {
   models: readonly ModelOption[];
   defaultModel: string | null;
+  settings?: ProviderSettings;
 }
 
 export interface ModelProvidersClient extends ReadStore<ModelCatalog> {
-  getProviderSettings(): Promise<ProviderSettings>;
+  refresh(): Promise<void>;
   connectProvider(connection: ConnectProvider): Promise<ProviderSettings>;
   connectCodex(): Promise<ProviderSettings>;
   disconnectProvider(id: string): Promise<ProviderSettings>;

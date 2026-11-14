@@ -8,7 +8,6 @@ import {
   conversationCatalogSchema,
   providerSettingsSchema,
   sessionSummarySchema,
-  trajectoryHistorySchema,
   trajectoryModelInputResponseSchema,
   workspaceSchema,
 } from '@workspace/protocol/host';
@@ -16,7 +15,7 @@ import { expect, test } from 'vitest';
 import type { AgentCapability, AgentCapabilityPlugin } from '../src/agent-capabilities/host.js';
 import { fileReadCapability } from '../src/agent-capabilities/file/read/host.js';
 import type { ModelRequest } from './fixtures/model-provider.js';
-import { origin, resultText, setupHarness } from './fixtures/harness.js';
+import { origin, readTrajectory, resultText, setupHarness } from './fixtures/harness.js';
 
 declare module '@workspace/runtime' {
   interface Services {
@@ -208,7 +207,7 @@ test(
     expect(JSON.parse(resultText(readme))).toContain('project README\nsecond line');
 
     const trajectory = origin + '/api/conversations/' + reading.id + '/trajectory';
-    const history = trajectoryHistorySchema.parse(await (await fetch(trajectory)).json());
+    const history = await readTrajectory(fetch(trajectory));
     const submission = history.find(({ records }) => records.some(({ kind }) => kind === 'tool'));
     const call = submission?.records.find((record) => record.kind === 'tool');
     assert(submission && call?.kind === 'tool' && call.modelRequestId);
@@ -276,7 +275,7 @@ test(
     const missing = readToolResult(await turn(reading.id, '../other/missing.txt'));
     expect(missing.isError).toBe(true);
     expect(resultText(missing)).not.toContain(outside);
-    const beforeRestart = trajectoryHistorySchema.parse(await (await fetch(trajectory)).json());
+    const beforeRestart = await readTrajectory(fetch(trajectory));
     expect(
       beforeRestart.some(({ records }) =>
         records.some((record) => record.kind === 'tool' && record.status === 'failed'),
@@ -285,9 +284,7 @@ test(
 
     await restart();
 
-    expect(trajectoryHistorySchema.parse(await (await fetch(trajectory)).json())).toEqual(
-      beforeRestart,
-    );
+    expect(await readTrajectory(fetch(trajectory))).toEqual(beforeRestart);
     expect(
       trajectoryModelInputResponseSchema.parse(await (await fetch(modelInputPath)).json()),
     ).toEqual(input);

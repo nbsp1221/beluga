@@ -9,6 +9,7 @@ import {
   agentPresetInputSchema,
   availableAccessModes,
   createSessionSchema,
+  productRoutes,
   runSettingsSchema,
 } from '@workspace/protocol/host';
 import { Hono } from 'hono';
@@ -17,12 +18,12 @@ import * as v from 'valibot';
 import type { AgentCapability, CapabilityService } from '../agent-capabilities/host.js';
 import type { HttpService } from '../http/contract.js';
 import type { OpenModelProviders } from '../model-providers/contract.js';
-import type { WorkspaceCatalog } from '../workspace/services.js';
+import type { WorkspaceCatalog, WorkspaceToolSessions } from '../workspace/services.js';
 import { mountAgentPresets, validPresetCapabilities } from '../agent-presets/http.js';
-import '../trajectory/contract.js';
-import '../auth/services.js';
 import { mountProviders } from '../model-providers/http.js';
-import { allowsTools } from '../workspace/tool-access.js';
+import '../auth/services.js';
+import { primaryAgentName } from '../trajectory/contract.js';
+import { allowsTools, workspaceToolAccess } from '../workspace/tool-access.js';
 
 const initialData = v.object({ sessionId: v.string() });
 
@@ -45,17 +46,33 @@ export function createHarnessHost(
 ): Plugin {
   return {
     id: 'harness',
-    requires: ['auth', 'workspaceCatalog', 'trajectory', ...capabilityServices],
+    requires: [
+      'auth',
+      'workspaceCatalog',
+      'workspaceToolSessions',
+      'trajectory',
+      ...capabilityServices,
+    ],
     provides: ['conversationHttp'],
     async setup(context) {
+      const capabilitiesById = indexCapabilities(
+        capabilityServices.map((service) => context.get(service)),
+      );
+      let closeProviders: (() => void) | undefined;
+      let stopRuntime: (() => Promise<void>) | undefined;
+      context.onDispose(async () => {
+        try {
+          await stopRuntime?.();
+        } finally {
+          closeProviders?.();
+        }
+      });
+
       const auth = context.get('auth');
       const catalog = context.get('workspaceCatalog');
 
       const trajectory = context.get('trajectory');
 
-      const capabilitiesById = indexCapabilities(
-        capabilityServices.map((service) => context.get(service)),
-      );
       const capabilityMetadata = [...capabilitiesById.values()].map(
         (capability) => capability.metadata,
       );
@@ -72,7 +89,7 @@ export function createHarnessHost(
       }
 
       const providers = options.openProviders(setProvider);
-      context.onDispose(() => providers.close());
+      closeProviders = () => providers.close();
       trajectory.bindModelContext((providerId, modelId) =>
         providers.contextWindow(providerId, modelId),
       );
@@ -85,13 +102,17 @@ export function createHarnessHost(
         return option !== undefined && (effort === 'default' || option.efforts.includes(effort));
       };
 
-      const BelugaPresetAgent = createPresetAgent(catalog, capabilitiesById);
+      const BelugaPresetAgent = createPresetAgent(
+        catalog,
+        capabilitiesById,
+        context.get('workspaceToolSessions'),
+      );
       const runtime = await start({
         agents: [BelugaPresetAgent],
         db: sqlite(options.databasePath),
         providers: [],
       });
-      context.onDispose(() => runtime.stop());
+      stopRuntime = () => runtime.stop();
 
       const presetRouter = new Hono().route(
         CONVERSATION_PATH,
@@ -110,190 +131,221 @@ export function createHarnessHost(
       mountAgentPresets(app, catalog.presets, capabilityMetadata);
       mountProviders(app, providers, catalog);
 
-      app.get(CONVERSATION_PATH, async (c) =>
-        c.json({
-          ...catalog.list(),
-          models: await availableModels(),
-          defaultModel: catalog.defaultModel(),
-        }),
+      app.on(
+        productRoutes.listConversations.method,
+        productRoutes.listConversations.path,
+        async (c) =>
+          c.json({
+            ...catalog.list(),
+            models: await availableModels(),
+            defaultModel: catalog.defaultModel(),
+          }),
       );
 
-      app.post(CONVERSATION_PATH, bodyLimit({ maxSize: 2048 }), async (c) => {
-        const input = createSessionSchema.safeParse(await c.req.json().catch(() => null));
-        if (!input.success) {
-          return c.json({ error: 'Invalid session configuration.' }, 400);
-        }
-        const {
-          id,
-          workspaceId,
-          agentPresetId,
-          agentPresetVersion,
-          runSettings,
-          accessMode = 'read-only',
-        } = input.data;
-
-        const existing = id && catalog.findSession(id);
-        const presetId =
-          agentPresetId ?? (existing ? existing.agentPresetId : catalog.presets.defaultId());
-
-        function sameSession(session: NonNullable<ReturnType<typeof catalog.findSession>>) {
-          return (
-            session.workspaceId === workspaceId &&
-            session.agentPresetId === presetId &&
-            (agentPresetVersion === undefined || session.agentPresetVersion === agentPresetVersion)
-          );
-        }
-
-        if (existing) {
-          return sameSession(existing)
-            ? c.json(existing, 201)
-            : c.json(
-                {
-                  error: 'This session already uses a different configuration.',
-                },
-                409,
-              );
-        }
-
-        if (!presetId) {
-          return c.json({ error: 'Choose an available agent preset.' }, 409);
-        }
-
-        const defaultModel = catalog.defaultModel();
-        const selected =
-          runSettings ??
-          (defaultModel ? { model: defaultModel, effort: 'default' as const } : undefined);
-        if (!selected) {
-          return c.json({ error: 'Choose a model or set a default in Settings.' }, 409);
-        }
-        if (!(await supportsRunSettings(selected))) {
-          return c.json({ error: 'That model or effort is unavailable.' }, 400);
-        }
-
-        const workspace = catalog.find(workspaceId);
-        if (!workspace) {
-          return c.json({ error: 'Workspace not found.' }, 404);
-        }
-        if (!(await catalog.canStartSession(workspace))) {
-          return c.json(
-            {
-              error: 'This workspace folder is no longer available on the Host.',
-            },
-            409,
-          );
-        }
-
-        const preset = catalog.presets.get(presetId);
-        if (!preset) {
-          return c.json({ error: 'Invalid agent preset.' }, 400);
-        }
-        if (agentPresetVersion !== undefined && preset.version !== agentPresetVersion) {
-          return c.json(
-            {
-              error: 'This preset has changed. Select it again before sending.',
-            },
-            409,
-          );
-        }
-        if (preset.capabilities.some((id) => !capabilitiesById.has(id))) {
-          return c.json({ error: 'A capability used by this preset is unavailable.' }, 503);
-        }
-        if (
-          accessMode !== 'read-only' &&
-          !availableAccessModes(capabilityMetadata, preset.capabilities).includes(accessMode)
-        ) {
-          return c.json({ error: 'That access mode is unavailable for this preset.' }, 400);
-        }
-
-        const created = catalog.createSession(
-          workspaceId,
-          preset,
-          id ?? crypto.randomUUID(),
-          selected,
-          accessMode,
-        );
-        return sameSession(created)
-          ? c.json(created, 201)
-          : c.json({ error: 'This session already uses a different configuration.' }, 409);
-      });
-
-      app.put(`${CONVERSATION_PATH}/:id/run-settings`, bodyLimit({ maxSize: 2048 }), async (c) => {
-        const settings = runSettingsSchema.safeParse(await c.req.json().catch(() => null));
-        if (!settings.success || !(await supportsRunSettings(settings.data))) {
-          return c.json({ error: 'That model or effort is unavailable.' }, 400);
-        }
-        if (!catalog.setRunSettings(c.req.param('id'), settings.data)) {
-          return c.json({ error: 'Unknown session.' }, 404);
-        }
-        return c.json(settings.data);
-      });
-
-      app.put(`${CONVERSATION_PATH}/:id/access-mode`, bodyLimit({ maxSize: 2048 }), async (c) => {
-        const input = accessModeInputSchema.safeParse(await c.req.json().catch(() => null));
-        if (!input.success) {
-          return c.json({ error: 'Invalid access mode.' }, 400);
-        }
-        const id = c.req.param('id');
-        const preset = catalog.sessionPreset(id);
-        if (!preset) {
-          return c.json({ error: 'Unknown session.' }, 404);
-        }
-        const { mode } = input.data;
-        if (
-          mode !== 'read-only' &&
-          !availableAccessModes(capabilityMetadata, preset.capabilities).includes(mode)
-        ) {
-          return c.json({ error: 'That access mode is unavailable for this preset.' }, 400);
-        }
-        catalog.setAccessMode(id, mode);
-        return c.json({ mode });
-      });
-
-      app.post(`${CONVERSATION_PATH}/:id`, bodyLimit({ maxSize: 256 * 1024 }), async (c) => {
-        const id = c.req.param('id');
-        const session = catalog.findSession(id);
-        if (!session) {
-          return c.json({ error: 'Unknown session' }, 404);
-        }
-        if (!(await supportsRunSettings(session.runSettings))) {
-          return c.json(
-            {
-              error: 'Choose an available model and effort for this conversation.',
-            },
-            409,
-          );
-        }
-        if (session.agentPresetCapabilities.some((id) => !capabilitiesById.has(id))) {
-          return c.json({ error: 'A capability used by this preset is unavailable.' }, 503);
-        }
-
-        const message = await parseTextMessage(c.req.raw);
-        if (!message) {
-          return c.json({ error: 'Send a text message.' }, 400);
-        }
-        const response = await presetRouter.fetch(
-          bindSession(c.req.raw, options.origin, id, message),
-        );
-        if (response.status === 202) {
-          catalog.setFirstTitle(id, message.body.trim().slice(0, 60));
-          const submissionId = await acceptedSubmissionId(response);
-          if (submissionId !== undefined) {
-            trajectory.recordAcceptedInput(id, submissionId, message.body);
+      app.on(
+        productRoutes.createConversation.method,
+        productRoutes.createConversation.path,
+        bodyLimit({ maxSize: 2048 }),
+        async (c) => {
+          const input = createSessionSchema.safeParse(await c.req.json().catch(() => null));
+          if (!input.success) {
+            return c.json({ error: 'Invalid session configuration.' }, 400);
           }
-        }
-        return response;
-      });
+          const {
+            id,
+            workspaceId,
+            agentPresetId,
+            agentPresetVersion,
+            runSettings,
+            accessMode = 'read-only',
+          } = input.data;
+
+          const existing = id && catalog.findSession(id);
+          const presetId =
+            agentPresetId ?? (existing ? existing.agentPresetId : catalog.presets.defaultId());
+
+          function sameSession(session: NonNullable<ReturnType<typeof catalog.findSession>>) {
+            return (
+              session.workspaceId === workspaceId &&
+              session.agentPresetId === presetId &&
+              (agentPresetVersion === undefined ||
+                session.agentPresetVersion === agentPresetVersion)
+            );
+          }
+
+          if (existing) {
+            return sameSession(existing)
+              ? c.json(existing, 201)
+              : c.json(
+                  {
+                    error: 'This session already uses a different configuration.',
+                  },
+                  409,
+                );
+          }
+
+          if (!presetId) {
+            return c.json({ error: 'Choose an available agent preset.' }, 409);
+          }
+
+          const defaultModel = catalog.defaultModel();
+          const selected =
+            runSettings ??
+            (defaultModel ? { model: defaultModel, effort: 'default' as const } : undefined);
+          if (!selected) {
+            return c.json({ error: 'Choose a model or set a default in Settings.' }, 409);
+          }
+          if (!(await supportsRunSettings(selected))) {
+            return c.json({ error: 'That model or effort is unavailable.' }, 400);
+          }
+
+          const workspace = catalog.find(workspaceId);
+          if (!workspace) {
+            return c.json({ error: 'Workspace not found.' }, 404);
+          }
+          if (!(await catalog.canStartSession(workspace))) {
+            return c.json(
+              {
+                error: 'This workspace folder is no longer available on the Host.',
+              },
+              409,
+            );
+          }
+
+          const preset = catalog.presets.get(presetId);
+          if (!preset) {
+            return c.json({ error: 'Invalid agent preset.' }, 400);
+          }
+          if (agentPresetVersion !== undefined && preset.version !== agentPresetVersion) {
+            return c.json(
+              {
+                error: 'This preset has changed. Select it again before sending.',
+              },
+              409,
+            );
+          }
+          if (preset.capabilities.some((id) => !capabilitiesById.has(id))) {
+            return c.json({ error: 'A capability used by this preset is unavailable.' }, 503);
+          }
+          if (
+            accessMode !== 'read-only' &&
+            !availableAccessModes(capabilityMetadata, preset.capabilities).includes(accessMode)
+          ) {
+            return c.json({ error: 'That access mode is unavailable for this preset.' }, 400);
+          }
+
+          const created = catalog.createSession(
+            workspaceId,
+            preset,
+            id ?? crypto.randomUUID(),
+            selected,
+            accessMode,
+          );
+          return sameSession(created)
+            ? c.json(created, 201)
+            : c.json({ error: 'This session already uses a different configuration.' }, 409);
+        },
+      );
+
+      app.on(
+        productRoutes.setRunSettings.method,
+        productRoutes.setRunSettings.path,
+        bodyLimit({ maxSize: 2048 }),
+        async (c) => {
+          const settings = runSettingsSchema.safeParse(await c.req.json().catch(() => null));
+          if (!settings.success || !(await supportsRunSettings(settings.data))) {
+            return c.json({ error: 'That model or effort is unavailable.' }, 400);
+          }
+          if (!catalog.setRunSettings(c.req.param('id'), settings.data)) {
+            return c.json({ error: 'Unknown session.' }, 404);
+          }
+          return c.json(settings.data);
+        },
+      );
+
+      app.on(
+        productRoutes.setAccessMode.method,
+        productRoutes.setAccessMode.path,
+        bodyLimit({ maxSize: 2048 }),
+        async (c) => {
+          const input = accessModeInputSchema.safeParse(await c.req.json().catch(() => null));
+          if (!input.success) {
+            return c.json({ error: 'Invalid access mode.' }, 400);
+          }
+          const id = c.req.param('id');
+          const preset = catalog.sessionPreset(id);
+          if (!preset) {
+            return c.json({ error: 'Unknown session.' }, 404);
+          }
+          const { mode } = input.data;
+          if (
+            mode !== 'read-only' &&
+            !availableAccessModes(capabilityMetadata, preset.capabilities).includes(mode)
+          ) {
+            return c.json({ error: 'That access mode is unavailable for this preset.' }, 400);
+          }
+          catalog.setAccessMode(id, mode);
+          return c.json({ mode });
+        },
+      );
+
+      app.on(
+        productRoutes.sendMessage.method,
+        productRoutes.sendMessage.path,
+        bodyLimit({ maxSize: 256 * 1024 }),
+        async (c) => {
+          const id = c.req.param('id');
+          const session = catalog.findSession(id);
+          if (!session) {
+            return c.json({ error: 'Unknown session' }, 404);
+          }
+          if (!(await supportsRunSettings(session.runSettings))) {
+            return c.json(
+              {
+                error: 'Choose an available model and effort for this conversation.',
+              },
+              409,
+            );
+          }
+          if (session.agentPresetCapabilities.some((id) => !capabilitiesById.has(id))) {
+            return c.json({ error: 'A capability used by this preset is unavailable.' }, 503);
+          }
+
+          const message = await parseTextMessage(c.req.raw);
+          if (!message) {
+            return c.json({ error: 'Send a text message.' }, 400);
+          }
+          const response = await presetRouter.fetch(
+            bindSession(c.req.raw, options.origin, id, message),
+          );
+          if (response.status === 202) {
+            catalog.setFirstTitle(id, message.body.trim().slice(0, 60));
+            const submissionId = await acceptedSubmissionId(response);
+            if (submissionId !== undefined) {
+              trajectory.recordAcceptedInput(id, submissionId, message.body);
+            }
+          }
+          return response;
+        },
+      );
 
       trajectory.mountRoutes(app);
 
-      app.all(`${CONVERSATION_PATH}/:id/*`, (c) => {
-        const id = c.req.param('id');
+      const delegatedRoutes = [productRoutes.readConversation, productRoutes.abortConversation];
+      for (const { method, path } of delegatedRoutes) {
+        app.on(method, path, (c) => fetchPresetSession(c.req.param('id'), c.req.raw));
+      }
+      app.all(`${CONVERSATION_PATH}/:id/*`, (c) =>
+        fetchPresetSession(c.req.param('id'), c.req.raw),
+      );
+
+      function fetchPresetSession(id: string | undefined, request: Request) {
         const session = id && catalog.findSession(id);
         if (!session) {
-          return c.json({ error: 'Unknown session' }, 404);
+          return Response.json({ error: 'Unknown session' }, { status: 404 });
         }
-        return presetRouter.fetch(c.req.raw);
-      });
+        return presetRouter.fetch(request);
+      }
 
       context.provide('conversationHttp', {
         fetch: app.fetch,
@@ -327,6 +379,7 @@ async function acceptedSubmissionId(response: Response) {
 function createPresetAgent(
   catalog: Pick<WorkspaceCatalog, 'findSession' | 'sessionPreset' | 'sessionAccessMode'>,
   capabilitiesById: ReadonlyMap<string, AgentCapability>,
+  sessions: WorkspaceToolSessions,
 ) {
   function BelugaPresetAgent() {
     const { sessionId } = useInitialData<v.InferOutput<typeof initialData>>();
@@ -349,14 +402,23 @@ function createPresetAgent(
       return capability;
     });
     const mode = catalog.sessionAccessMode(sessionId);
-    const tools = capabilities.flatMap((capability) =>
-      allowsTools(capability.metadata.access, mode) ? capability.createTools(sessionId) : [],
-    );
+    const tools = capabilities.flatMap(({ metadata, createTools }) => {
+      if (!allowsTools(metadata.access, mode)) {
+        return [];
+      }
+      const { cwd, checkPermission, authorize } = workspaceToolAccess(
+        sessions,
+        sessionId,
+        metadata,
+      );
+      return createTools({ cwd, checkPermission }).map((tool) => tool.bind(authorize));
+    });
     tools.forEach(useTool);
     return preset.instructions;
   }
 
   BelugaPresetAgent.initialData = initialData;
+  BelugaPresetAgent.agentName = primaryAgentName;
   return BelugaPresetAgent;
 }
 

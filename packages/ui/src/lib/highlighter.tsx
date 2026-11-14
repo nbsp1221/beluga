@@ -37,6 +37,9 @@ function getHighlighter() {
     themes: [import('shiki/themes/github-light.mjs'), import('shiki/themes/github-dark.mjs')],
     langs: [],
     engine: createJavaScriptRegexEngine({ forgiving: true }),
+  }).catch((error: unknown) => {
+    highlighter = undefined;
+    throw error;
   });
 
   return highlighter;

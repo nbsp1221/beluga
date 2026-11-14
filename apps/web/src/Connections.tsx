@@ -102,9 +102,7 @@ export function Connections({
       );
     } finally {
       operationRef.current = null;
-      if (!controller.signal.aborted) {
-        setBusy(false);
-      }
+      setBusy(false);
     }
   }
 
@@ -122,7 +120,7 @@ export function Connections({
             className="touch-target self-center"
             onClick={() => {
               operationRef.current?.abort();
-              void selectLocal();
+              void selectLocal().catch(() => setError('Could not open this computer. Try again.'));
             }}
           >
             Open
@@ -188,7 +186,7 @@ export function Connections({
             <FieldDescription role="status">{busy ? 'Connecting…' : ''}</FieldDescription>
           </div>
           <Button type="submit" className="touch-target" disabled={busy}>
-            {busy && <Spinner data-icon="inline-start" />}
+            {busy && <Spinner data-icon="inline-start" aria-hidden="true" />}
             Connect
           </Button>
         </div>

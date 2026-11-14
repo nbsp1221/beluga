@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@workspace/ui/components/button';
+import { copyText } from '@workspace/ui/lib/clipboard';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from 'cn';
 import { CheckIcon, CopyIcon } from 'lucide-react';
@@ -85,18 +86,30 @@ function CodeBlockCopyButton({
   size = 'icon-xs',
   className,
   onClick,
+  onCopyError,
   ...props
-}: React.ComponentProps<typeof Button> & { value: string }) {
-  const [copied, setCopied] = React.useState(false);
+}: React.ComponentProps<typeof Button> & { value: string; onCopyError?: () => void }) {
+  const [feedback, setFeedback] = React.useState<{ copied: true }>();
+  const copied = Boolean(feedback);
 
   React.useEffect(() => {
-    if (!copied) {
+    if (!feedback) {
       return;
     }
 
-    const timeout = setTimeout(() => setCopied(false), 2000);
+    const timeout = setTimeout(() => setFeedback(undefined), 2000);
     return () => clearTimeout(timeout);
-  }, [copied]);
+  }, [feedback]);
+
+  async function copy() {
+    try {
+      await copyText(value);
+      setFeedback({ copied: true });
+    } catch {
+      setFeedback(undefined);
+      onCopyError?.();
+    }
+  }
 
   return (
     <>
@@ -109,10 +122,7 @@ function CodeBlockCopyButton({
         className={cn(className)}
         onClick={(event) => {
           onClick?.(event);
-          navigator.clipboard
-            .writeText(value)
-            .then(() => setCopied(true))
-            .catch(() => {});
+          void copy();
         }}
         {...props}
       >

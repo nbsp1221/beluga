@@ -26,14 +26,10 @@ jobs:
           node-version: 24.22.2
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Find release notes
+      - uses: changesets/action/select-mode@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         id: changesets
-        run: |
-          if find .changeset -maxdepth 1 -name '*.md' ! -name README.md -print -quit | grep -q .; then
-            echo 'found=true' >> "$GITHUB_OUTPUT"
-          fi
       - uses: changesets/action/version@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
-        if: steps.changesets.outputs.found == 'true'
+        if: steps.changesets.outputs.mode == 'version'
         with:
           script: pnpm release:version
           pr-title: Prepare the next Beluga release

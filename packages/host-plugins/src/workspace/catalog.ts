@@ -17,11 +17,12 @@ const tables = `
     id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE
   );
   CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY, title TEXT NOT NULL,
+    id TEXT PRIMARY KEY, title TEXT,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id),
     preset_id TEXT NOT NULL, preset_version INTEGER NOT NULL,
     model_id TEXT NOT NULL, effort TEXT NOT NULL, access_mode TEXT NOT NULL,
-    model_revision INTEGER NOT NULL DEFAULT 0
+    model_revision INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (preset_id, preset_version) REFERENCES agent_preset_revisions(id, version)
   );
   CREATE TABLE IF NOT EXISTS model_preferences (
     id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL
@@ -45,17 +46,8 @@ export function openWorkspaceCatalog(catalogPath: string) {
 }
 
 export function createWorkspaceCatalog(db: DatabaseSync) {
-  db.exec(tables);
-  if (
-    !db
-      .prepare('PRAGMA table_info(sessions)')
-      .all()
-      .some(({ name }) => name === 'model_revision')
-  ) {
-    db.exec('ALTER TABLE sessions ADD COLUMN model_revision INTEGER NOT NULL DEFAULT 0');
-  }
-
   const presets = createAgentPresetCatalog(db);
+  db.exec(tables);
 
   const readPreferences = db.prepare('SELECT value FROM model_preferences WHERE id = 1');
   const writePreferences = db.prepare(
@@ -69,7 +61,7 @@ export function createWorkspaceCatalog(db: DatabaseSync) {
   const selectWorkspaceById = db.prepare('SELECT * FROM workspaces WHERE id = ?');
 
   const insertSession = db.prepare(
-    'INSERT OR IGNORE INTO sessions (id, title, workspace_id, preset_id, preset_version, model_id, effort, access_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO sessions (id, workspace_id, preset_id, preset_version, model_id, effort, access_mode) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING',
   );
   const updateRunSettings = db.prepare(
     'UPDATE sessions SET model_revision = model_revision + (model_id <> ?), model_id = ?, effort = ? WHERE id = ?',
@@ -83,7 +75,7 @@ export function createWorkspaceCatalog(db: DatabaseSync) {
     JOIN workspaces AS w ON w.id = s.workspace_id
     WHERE s.id = ?`);
   const updateFirstTitle = db.prepare(
-    "UPDATE sessions SET title = ? WHERE id = ? AND title = 'New session'",
+    'UPDATE sessions SET title = ? WHERE id = ? AND title IS NULL',
   );
 
   const getPreset = (row: Record<string, unknown>) =>
@@ -97,7 +89,7 @@ export function createWorkspaceCatalog(db: DatabaseSync) {
 
     return {
       id: String(row.id),
-      title: String(row.title),
+      title: typeof row.title === 'string' ? row.title : null,
       workspaceId: String(row.workspace_id),
       agentPresetId: preset.id,
       agentPresetName: preset.name,
@@ -157,7 +149,6 @@ export function createWorkspaceCatalog(db: DatabaseSync) {
     ): SessionSummary {
       insertSession.run(
         id,
-        'New session',
         workspaceId,
         preset.id,
         preset.version,

@@ -8,6 +8,8 @@ import {
   runSettingsSchema,
   sessionSummarySchema,
 } from '@workspace/protocol/host';
+import { readPreference, writePreference } from '@workspace/ui/lib/browser-storage';
+import { v4 as uuid } from 'uuid';
 import type { AgentPresetsClient } from '../../agent-presets/contract.js';
 import type { ModelProvidersClient } from '../../model-providers/contract.js';
 import type { WorkspaceClient } from '../../workspaces/contract.js';
@@ -37,23 +39,14 @@ export function createConnectedConversation({
   agentPresets: AgentPresetsClient;
   modelProviders: ModelProvidersClient;
 }): ConversationClient {
-  let lastWorkspaceId: string | null = null;
-  try {
-    lastWorkspaceId = localStorage.getItem(workspaceStorageKey);
-  } catch {
-    // Workspace selection still works when browser storage is unavailable.
-  }
+  let lastWorkspaceId = readPreference(workspaceStorageKey);
 
   const rememberWorkspace = (id: string | null) => {
     if (!id || id === lastWorkspaceId) {
       return;
     }
     lastWorkspaceId = id;
-    try {
-      localStorage.setItem(workspaceStorageKey, id);
-    } catch {
-      // Keep the selection for the current browser session.
-    }
+    writePreference(workspaceStorageKey, id);
   };
 
   const preferredWorkspace = (sessions: readonly Session[]) => {
@@ -74,9 +67,9 @@ export function createConnectedConversation({
 
   function draftSession(workspaceId: string | null): Session {
     return {
-      id: crypto.randomUUID(),
+      id: uuid(),
       workspaceId,
-      title: 'New session',
+      title: null,
       agentPresetId: agentPresets.getSnapshot().defaultPresetId ?? undefined,
       isDraft: true,
       draft: '',
@@ -103,7 +96,9 @@ export function createConnectedConversation({
   const connect = (id: string) => connectConversation(id, fetchHost, prefix);
 
   let activeObservation: { id: string; refresh(): void } | undefined;
-  let usageEpoch = 0;
+  const usageEpochs = new Map<string, number>();
+
+  const usageEpoch = (id: string) => usageEpochs.get(id) ?? 0;
 
   return {
     mode: 'connected',
@@ -153,7 +148,7 @@ export function createConnectedConversation({
         if (item.runSettings?.model === runSettings.model) {
           return { ...item, runSettings };
         }
-        usageEpoch += 1;
+        usageEpochs.set(id, usageEpoch(id) + 1);
         return {
           ...item,
           runSettings,
@@ -201,7 +196,7 @@ export function createConnectedConversation({
         const first = messages.find((message) => message.role === 'user')?.text;
         update(id, (session) => ({
           ...session,
-          title: session.title === 'New session' && first ? first.slice(0, 60) : session.title,
+          title: session.title ?? first?.trim().slice(0, 60) ?? null,
           messages,
           activeSubmissionId: submissionId,
         }));
@@ -220,22 +215,20 @@ export function createConnectedConversation({
       const stopSignal = AbortSignal.any([signal, controller.signal]);
       const path = `${CONVERSATION_PATH}/${encodeURIComponent(id)}/usage`;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      let previous: string | undefined;
+      let etag: string | null = null;
       let previousEpoch: number | undefined;
 
       async function refresh() {
-        const epoch = usageEpoch;
+        const epoch = usageEpoch(id);
         try {
-          const response = await fetchHost(path, { signal: stopSignal });
+          const response = await fetchHost(path, {
+            signal: stopSignal,
+            ...(etag && epoch === previousEpoch ? { headers: { 'If-None-Match': etag } } : {}),
+          });
           if (response.ok) {
-            const body = await response.text();
-            if (
-              !stopSignal.aborted &&
-              epoch === usageEpoch &&
-              (body !== previous || epoch !== previousEpoch)
-            ) {
-              const usage = conversationUsageSchema.parse(JSON.parse(body));
-              previous = body;
+            const usage = conversationUsageSchema.parse(await response.json());
+            if (!stopSignal.aborted && epoch === usageEpoch(id)) {
+              etag = response.headers.get('ETag');
               previousEpoch = epoch;
               update(id, (session) => ({ ...session, usage }));
             }
@@ -378,7 +371,7 @@ function createSubmissionClient({
 
       // Reuse the delivery key when retrying the same text.
       const existing = pendingDeliveries.get(id);
-      const delivery = existing?.text === text ? existing : { text, key: crypto.randomUUID() };
+      const delivery = existing?.text === text ? existing : { text, key: uuid() };
       pendingDeliveries.set(id, delivery);
       const client = connect(id);
       const receipt = await client.send({

@@ -6,12 +6,17 @@ import { join } from 'node:path';
 import {
   type AccessMode,
   agentPresetSchema,
-  trajectoryHistorySchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
 import { type TestContext, expect, test, vi } from 'vitest';
 import type { fixtureProvider } from './fixtures/model-provider.js';
-import { allCapabilities, origin, resultText, setupHarness } from './fixtures/harness.js';
+import {
+  allCapabilities,
+  origin,
+  readTrajectory,
+  resultText,
+  setupHarness,
+} from './fixtures/harness.js';
 
 const windows = process.platform === 'win32';
 const shell = windows ? 'pwsh' : 'bash';
@@ -70,8 +75,7 @@ async function setupTools(
     expect(response.status).toBe(200);
   }
 
-  const history = async () =>
-    trajectoryHistorySchema.parse(await (await harness.fetch(trajectoryUrl)).json());
+  const history = async () => await readTrajectory(harness.fetch(trajectoryUrl));
 
   return { ...harness, session, client, execute, send, setMode, history, trajectoryUrl };
 }

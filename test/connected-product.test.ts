@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { visitSite } from '@workspace/client/auth';
 import {
   createAccessCodeAuth,
@@ -14,15 +15,17 @@ import { createWeb } from '../apps/host/src/web.js';
 import { createProduct } from '../apps/web/src/product.ts';
 import { fixtureProvider } from '../packages/host-plugins/test/fixtures/model-provider.js';
 
-const origin = 'https://beluga.example';
 const message = '{"path":"README.md"}';
 
-test(
-  'authenticates a deep link and restores recorded activity through the connected product',
+test.for([
+  { origin: 'https://beluga.example', secure: true },
+  { origin: 'http://192.0.2.10:8917', secure: false },
+])(
+  'authenticates and restores recorded activity when opened at $origin',
   {
     timeout: 20_000,
   },
-  async ({ onTestFinished }) => {
+  async ({ origin, secure }, { onTestFinished }) => {
     const directory = await mkdtemp(join(tmpdir(), 'beluga-connected-'));
     let host: Awaited<ReturnType<typeof createHost>> | undefined;
     let product: Awaited<ReturnType<typeof createProduct>> | undefined;
@@ -99,6 +102,22 @@ test(
       });
 
     host = await boot();
+    using trajectoryDb = new DatabaseSync(`${databasePath}.trajectory`);
+    trajectoryDb.exec(`
+      INSERT INTO trajectory_turn (session_id, submission_id, status)
+        VALUES ('active-session', 'active-submit', 'in-progress');
+      INSERT INTO trajectory_record (session_id, submission_id, record_id, value)
+        VALUES ('active-session', 'active-submit', 'compact',
+          '{"kind":"compaction","status":"in-progress"}');
+    `);
+    await expect(boot()).rejects.toThrow('already active in this process');
+    expect(
+      trajectoryDb
+        .prepare("SELECT json_extract(value, '$.status') AS status FROM trajectory_record")
+        .get(),
+    ).toEqual({ status: 'in-progress' });
+    trajectoryDb.exec("DELETE FROM trajectory_record WHERE session_id = 'active-session'");
+    trajectoryDb.exec("DELETE FROM trajectory_turn WHERE session_id = 'active-session'");
 
     let cookie: string | undefined;
     const requests: string[] = [];
@@ -114,9 +133,11 @@ test(
       if (cookie) {
         request.headers.set('cookie', cookie);
       }
-      // TLS ends at the proxy. The Host receives the same path over HTTP.
-      url.protocol = 'http:';
-      url.host = '127.0.0.1:3001';
+      if (secure) {
+        // TLS ends at the proxy. The Host receives the same path over HTTP.
+        url.protocol = 'http:';
+        url.host = '127.0.0.1:8917';
+      }
       const response = await host.fetch(new Request(url, request));
       if (response.status === 202) {
         admissions.push({
@@ -165,7 +186,10 @@ test(
 
     const login = await sendJson('/api/auth/login', { code });
     expect(login.status).toBe(204);
-    cookie = login.headers.get('set-cookie')?.split(';')[0];
+    const issuedCookie = login.headers.get('set-cookie');
+    assert(issuedCookie);
+    expect(/;\s*Secure(?:;|$)/i.test(issuedCookie)).toBe(secure);
+    cookie = issuedCookie.split(';')[0];
     assert(cookie);
     expect((await fetchHost(pathname + search)).status).toBe(200);
     expect(await visitSite()).toBe(true);
@@ -216,12 +240,12 @@ test(
     expect(admissions[0]?.location).toBe(streamUrl);
 
     const trajectory = product.get('trajectoryClient');
-    const stop = trajectory.observe(draftId);
+    const stop = trajectory.observe(draftId, '');
     const recorded = await vi
       .waitFor(
         () => {
           const snapshot = trajectory.getSnapshot(draftId);
-          const turn = snapshot?.requests.at(0);
+          const turn = snapshot?.requests.at(0)?.request;
           assert(turn?.status === 'completed');
           return turn;
         },
@@ -298,11 +322,13 @@ test(
     });
 
     const reopened = product.get('trajectoryClient');
-    const stopReopened = reopened.observe(draftId);
+    const stopReopened = reopened.observe(draftId, '');
     await vi
       .waitFor(
         () => {
-          expect(reopened.getSnapshot(draftId)?.requests).toEqual([recorded]);
+          expect(reopened.getSnapshot(draftId)?.requests.map(({ request }) => request)).toEqual([
+            recorded,
+          ]);
         },
         { timeout: 5_000 },
       )

@@ -42,8 +42,7 @@ export async function createDesktopProduct(publish: (target: Target) => void) {
     current = target;
     publish(target);
     if (previous.remote) {
-      await previous.runtime.dispose();
-      await release(previous.remote.id);
+      await disposeRemote(previous.runtime, previous.remote.id);
     }
   }
 
@@ -54,8 +53,8 @@ export async function createDesktopProduct(publish: (target: Target) => void) {
       body: JSON.stringify({ address, code }),
       signal,
     });
-    const result: unknown = await response.json();
     if (!response.ok) {
+      const result: unknown = await response.json().catch(() => undefined);
       const message =
         result &&
         typeof result === 'object' &&
@@ -65,6 +64,7 @@ export async function createDesktopProduct(publish: (target: Target) => void) {
           : 'Could not connect to the server.';
       throw new ConnectionError(message, response.status === 401);
     }
+    const result: unknown = await response.json().catch(() => undefined);
     if (
       !result ||
       typeof result !== 'object' ||
@@ -113,8 +113,7 @@ export async function createDesktopProduct(publish: (target: Target) => void) {
       signal.throwIfAborted();
       staging = false;
     } catch {
-      await runtime?.dispose();
-      await release(remote.id);
+      await disposeRemote(runtime, remote.id);
       throw new ConnectionError(
         'Could not load the remote workspace. Check the server and try again.',
       );
@@ -133,14 +132,26 @@ export async function createDesktopProduct(publish: (target: Target) => void) {
     },
     async dispose() {
       if (current.remote) {
-        await current.runtime.dispose();
-        await release(current.remote.id);
+        await disposeRemote(current.runtime, current.remote.id);
       }
       await local.dispose();
     },
   };
 }
 
-async function release(id: string) {
-  await fetch(DESKTOP_CONNECTIONS_PATH + '/' + id, { method: 'DELETE' }).catch(() => undefined);
+async function disposeRemote(runtime: Runtime | undefined, id: string) {
+  const results = await Promise.allSettled([
+    runtime?.dispose(),
+    fetch(DESKTOP_CONNECTIONS_PATH + '/' + id, {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(10_000),
+    }).then((response) => {
+      if (!response.ok) {
+        throw new Error('Could not release remote connection.');
+      }
+    }),
+  ]);
+  if (results.some(({ status }) => status === 'rejected')) {
+    console.warn('Could not finish cleaning up the previous desktop connection.');
+  }
 }

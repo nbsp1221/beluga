@@ -3,10 +3,10 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 
 export class FolderError extends Error {
-  readonly status: 400 | 403 | 404;
+  readonly status: 400 | 403 | 404 | 500;
 
-  constructor(message: string, status: 400 | 403 | 404) {
-    super(message);
+  constructor(message: string, status: FolderError['status'], cause?: unknown) {
+    super(message, { cause });
     this.status = status;
   }
 }
@@ -29,7 +29,10 @@ function folderError(error: unknown): FolderError {
   if (code === 'EACCES' || code === 'EPERM') {
     return new FolderError('The Host cannot access this folder.', 403);
   }
-  return new FolderError('Folder not found on the Host.', 404);
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    return new FolderError('Folder not found on the Host.', 404);
+  }
+  return new FolderError('The Host could not open this folder.', 500, error);
 }
 
 export async function resolveFolder(value: string) {

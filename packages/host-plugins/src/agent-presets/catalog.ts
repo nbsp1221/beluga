@@ -42,6 +42,11 @@ export function createAgentPresetCatalog(db: DatabaseSync) {
     INSERT OR IGNORE INTO agent_preset_revisions (id, version, definition)
     VALUES (?, ?, ?)
   `);
+  const insertSuccessor = db.prepare(`
+    INSERT INTO agent_preset_revisions (id, version, definition)
+    SELECT ?, ?, ?
+    WHERE (SELECT MAX(version) FROM agent_preset_revisions WHERE id = ?) = ?
+  `);
 
   function decodeRevision(row: Record<string, unknown>): AgentPreset {
     return {
@@ -91,9 +96,8 @@ export function createAgentPresetCatalog(db: DatabaseSync) {
     },
     create,
     revise(id: string, version: number, definition: AgentPresetInput): AgentPreset | undefined {
-      // Revisions are contiguous. A stale write conflicts with the existing successor.
       const nextVersion = version + 1;
-      const result = insertRevision.run(id, nextVersion, JSON.stringify(definition));
+      const result = insertSuccessor.run(id, nextVersion, JSON.stringify(definition), id, version);
       if (result.changes) {
         return { ...definition, id, version: nextVersion };
       }

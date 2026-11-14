@@ -1,10 +1,14 @@
-import type { ToolDefinition } from '@flue/runtime';
 import type { AgentCapabilityMetadata } from '@workspace/protocol/host';
 import type { Plugin, Services } from '@workspace/runtime';
+import type { workspaceToolAccess } from '../workspace/tool-access.js';
+import type { AgentToolRegistration } from './tool.js';
 
 export interface AgentCapability {
   metadata: AgentCapabilityMetadata;
-  createTools(sessionId: string): readonly ToolDefinition[];
+  createTools(
+    this: void,
+    access: Pick<ReturnType<typeof workspaceToolAccess>, 'cwd' | 'checkPermission'>,
+  ): readonly AgentToolRegistration[];
 }
 
 type ServiceName = Extract<keyof Services, string>;

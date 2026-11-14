@@ -14,22 +14,12 @@ const staging = await mkdtemp(join(tmpdir(), 'beluga-portable-'));
 const bundle = join(staging, 'Beluga');
 
 try {
-  await mkdir(bundle);
+  await cp(runtime, bundle, { recursive: true });
   await cp(join(release, 'beluga-desktop.exe'), join(bundle, 'Beluga.exe'));
   await cp(
     join(tauri, 'dist', 'binaries', 'beluga-node-x86_64-pc-windows-msvc.exe'),
     join(bundle, 'beluga-node.exe'),
   );
-  for (const entry of [
-    'host',
-    'web',
-    'LICENSE',
-    'THIRD_PARTY_NOTICES.md',
-    'FLUE-SDK-LICENSE.txt',
-    'NODE-LICENSE.txt',
-  ]) {
-    await cp(join(runtime, entry), join(bundle, entry), { recursive: true });
-  }
 
   const archive = join(staging, archiveName);
   execFileSync('tar.exe', ['-a', '-cf', archive, '-C', staging, 'Beluga'], { stdio: 'inherit' });

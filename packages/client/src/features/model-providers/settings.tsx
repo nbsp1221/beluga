@@ -24,7 +24,7 @@ import {
 import { Spinner } from '@workspace/ui/components/spinner';
 import { cn } from '@workspace/ui/lib/utils';
 import { Plus } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ModelProvidersClient } from './contract.js';
 
 type Provider = Settings['providers'][number];
@@ -41,7 +41,7 @@ function providerAction(provider: Provider): ConnectionAction | undefined {
 
 export function ProviderSettings({ client }: { client: ModelProvidersClient }) {
   const id = useId();
-  const [settings, setSettings] = useState<Settings>();
+  const { settings } = useSyncExternalStore(client.subscribe, client.getSnapshot);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -64,18 +64,11 @@ export function ProviderSettings({ client }: { client: ModelProvidersClient }) {
 
   useEffect(() => {
     let active = true;
-    void client
-      .getProviderSettings()
-      .then((value) => {
-        if (active) {
-          setSettings(value);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setError('Could not load providers.');
-        }
-      });
+    void client.refresh().catch(() => {
+      if (active) {
+        setError('Could not load providers.');
+      }
+    });
     return () => {
       active = false;
     };
@@ -92,7 +85,6 @@ export function ProviderSettings({ client }: { client: ModelProvidersClient }) {
     try {
       const result = await change();
       if (result) {
-        setSettings(result);
         setStatus(success);
         onSuccess?.(result);
       }
@@ -279,7 +271,7 @@ export function ProviderSettings({ client }: { client: ModelProvidersClient }) {
                   disabled={busy}
                   focusableWhenDisabled
                 >
-                  {busy && <Spinner data-icon="inline-start" />}
+                  {busy && <Spinner data-icon="inline-start" aria-hidden="true" />}
                   Connect provider
                 </Button>
               </div>
@@ -291,18 +283,26 @@ export function ProviderSettings({ client }: { client: ModelProvidersClient }) {
               <Field orientation="responsive">
                 <FieldLabel htmlFor={`${id}-default`}>Default model for new chats</FieldLabel>
                 <Select
-                  value={currentDefault?.id ?? ''}
+                  value={currentDefault?.id ?? 'none'}
                   disabled={busy}
                   onValueChange={(model) => {
                     if (model) {
-                      void apply(() => client.setDefaultModel(model), 'Default model saved.');
+                      void apply(
+                        () => client.setDefaultModel(model === 'none' ? null : model),
+                        'Default model saved.',
+                      );
                     }
                   }}
                 >
                   <SelectTrigger id={`${id}-default`} className="touch-target min-w-0">
-                    <SelectValue placeholder="Choose a model">{currentDefault?.name}</SelectValue>
+                    <SelectValue>{currentDefault?.name ?? 'No default'}</SelectValue>
                   </SelectTrigger>
                   <SelectContent align="end" alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      <SelectItem value="none" className="touch-target">
+                        No default
+                      </SelectItem>
+                    </SelectGroup>
                     {settings.providers
                       .filter(({ models }) => models.length > 0)
                       .map((provider) => (

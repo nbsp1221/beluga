@@ -3,8 +3,56 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { TrajectoryRecord } from '@workspace/protocol/host';
+import { Hono } from 'hono';
 import { expect, test } from 'vitest';
+import { mountTrajectoryRoutes } from '../src/trajectory/http.js';
 import { createTrajectoryStore } from '../src/trajectory/store.js';
+
+test('pages a long history, finds older matches, and skips unchanged responses', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const store = createTrajectoryStore(db);
+    for (let index = 1; index <= 210; index++) {
+      const id = String(index);
+      store.put('session', id, { id, kind: 'user', text: index === 3 ? '초기 설정' : 'Work' });
+      store.put('session', id, { id: 'model', kind: 'assistant', text: '', status: 'completed' });
+    }
+
+    const first = store.page('session', undefined, '', 50);
+    expect(first.requests.map(({ turn }) => turn)).toEqual(
+      Array.from({ length: 50 }, (_, index) => 161 + index),
+    );
+    expect(first.before).not.toBeNull();
+    const earlier = store.page('session', first.before ?? undefined, '', 50);
+    expect(earlier.requests[0]?.turn).toBe(111);
+    expect(earlier.requests.at(-1)?.turn).toBe(160);
+    expect(store.page('session', undefined, '초기', 50).requests[0]?.turn).toBe(3);
+    expect(store.page('session', undefined, 'request #32', 50).requests[0]).toMatchObject({
+      turn: 32,
+      precedingModelRequests: 31,
+    });
+
+    const app = new Hono();
+    mountTrajectoryRoutes(
+      app,
+      (id) => id === 'session',
+      store,
+      () => undefined,
+    );
+    const url = '/api/conversations/session/trajectory';
+    const response = await app.request(url);
+    const tag = response.headers.get('etag');
+    expect(response.status).toBe(200);
+    expect(tag).toBeTruthy();
+    const headers = { 'If-None-Match': tag ?? '' };
+    expect((await app.request(url, { headers })).status).toBe(304);
+
+    store.put('session', '210', { id: 'tool', kind: 'tool', name: 'read', status: 'completed' });
+    expect((await app.request(url, { headers })).status).toBe(200);
+  } finally {
+    db.close();
+  }
+});
 
 test('restores model inputs and only records initial or changed system prompts', async ({
   onTestFinished,
@@ -77,8 +125,8 @@ test('restores model inputs and only records initial or changed system prompts',
     expect(reopened.modelInput('another-session', 'turn', 'model:2')).toBe(undefined);
     expect(
       reopened
-        .history('session')[0]
-        .records.filter((record) => record.kind !== 'assistant')
+        .page('session', undefined, '', 1)
+        .requests[0].request.records.filter((record) => record.kind !== 'assistant')
         .map((record) => ('text' in record ? record.text : undefined)),
     ).toEqual(['Initial System Prompt', 'question', 'System Prompt Updated']);
     expect(
@@ -123,11 +171,16 @@ test('Trajectory records stay ordered and scoped to a session after updates', ()
     });
     store.settle('session', 'turn', 'completed', '2026-11-09T00:00:00Z');
 
-    const [turn] = createTrajectoryStore(db).history('session');
+    const [{ request: turn }] = createTrajectoryStore(db).page(
+      'session',
+      undefined,
+      '',
+      1,
+    ).requests;
     expect(turn.records.map(({ id }) => id)).toEqual(['input:turn', 'model:1', 'tool:1']);
     expect(turn.records[2]).toMatchObject({ durationMs: 100, status: 'failed' });
     expect(turn.status).toBe('completed');
-    expect(store.history('other')).toEqual([]);
+    expect(store.page('other', undefined, '', 1).requests).toEqual([]);
 
     store.put('session', 'second-turn', { ...first, status: 'interrupted' });
     store.put('other', 'turn', { ...first, usage: { totalTokens: 512 } });
@@ -180,7 +233,7 @@ test('Interruption ends unfinished records without changing completed steps', ()
     });
 
     store.settle('session', 'turn', 'interrupted', '2026-11-09T00:00:00Z');
-    const [turn] = store.history('session');
+    const [{ request: turn }] = store.page('session', undefined, '', 1).requests;
     expect(turn.records[0]).toMatchObject({ status: 'completed' });
     expect(turn.records[1]).toMatchObject({ status: 'interrupted' });
   } finally {

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { isLocalPreferenceEvent, readPreference, writePreference } from '../lib/browser-storage';
 
 type Theme = 'dark' | 'light' | 'system';
 type ResolvedTheme = 'dark' | 'light';
@@ -46,7 +47,7 @@ export function ThemeProvider({
   ...props
 }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
-    const storedTheme = localStorage.getItem(storageKey);
+    const storedTheme = readPreference(storageKey);
     if (isTheme(storedTheme)) {
       return storedTheme;
     }
@@ -56,8 +57,8 @@ export function ThemeProvider({
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
-      localStorage.setItem(storageKey, nextTheme);
       setThemeState(nextTheme);
+      writePreference(storageKey, nextTheme);
     },
     [storageKey],
   );
@@ -70,6 +71,7 @@ export function ThemeProvider({
     }
 
     const mediaQuery = window.matchMedia(COLOR_SCHEME_QUERY);
+
     const handleChange = () => {
       applyTheme('system');
     };
@@ -83,11 +85,7 @@ export function ThemeProvider({
 
   React.useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.storageArea !== localStorage) {
-        return;
-      }
-
-      if (event.key !== storageKey) {
+      if (!isLocalPreferenceEvent(event, storageKey)) {
         return;
       }
 
@@ -115,14 +113,14 @@ export function ThemeProvider({
   );
 
   return (
-    <ThemeProviderContext.Provider {...props} value={value}>
+    <ThemeProviderContext {...props} value={value}>
       {children}
-    </ThemeProviderContext.Provider>
+    </ThemeProviderContext>
   );
 }
 
 export const useTheme = () => {
-  const context = React.useContext(ThemeProviderContext);
+  const context = React.use(ThemeProviderContext);
 
   if (context === undefined) {
     throw new Error('useTheme must be used within a ThemeProvider');

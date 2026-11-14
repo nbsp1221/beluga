@@ -26,16 +26,16 @@ export function ToolbarSelect({
   label: string;
   value: string;
   options: readonly string[];
-  getLabel?(value: string): string;
-  getDescription?(value: string): string | undefined;
-  renderOption?(value: string): ReactNode;
-  renderValue?(value: string): ReactNode;
-  isOptionDisabled?(value: string): boolean;
+  getLabel?: (value: string) => string;
+  getDescription?: (value: string) => string | undefined;
+  renderOption?: (value: string) => ReactNode;
+  renderValue?: (value: string) => ReactNode;
+  isOptionDisabled?: (value: string) => boolean;
   disabled?: boolean;
   triggerRef?: Ref<HTMLButtonElement>;
   open?: boolean;
-  onOpenChange?(open: boolean): void;
-  onChange(value: string): void;
+  onOpenChange?: (open: boolean) => void;
+  onChange: (value: string) => void;
   className?: string;
   children?: ReactNode;
 }) {

@@ -26,13 +26,8 @@ export interface AccessCodeOptions {
 export function createAccessCodeAuth(options: AccessCodeOptions): Plugin {
   const origin = new URL(options.origin);
   const secure = origin.protocol === 'https:';
-  if (
-    options.origin !== origin.origin ||
-    (!secure &&
-      (origin.protocol !== 'http:' ||
-        !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)))
-  ) {
-    throw new Error('Use an HTTPS origin or a local HTTP origin for Beluga.');
+  if (options.origin !== origin.origin || (!secure && origin.protocol !== 'http:')) {
+    throw new Error('Use an HTTP or HTTPS origin for Beluga, without a path.');
   }
 
   return {
@@ -137,9 +132,9 @@ export function createAccessCodeAuth(options: AccessCodeOptions): Plugin {
           return c.json({ error: 'Try again in a minute.' }, 429);
         }
 
+        loginAttempts++;
         const body: unknown = await c.req.json().catch(() => null);
         const code = body && typeof body === 'object' && 'code' in body ? body.code : null;
-        loginAttempts++;
         if (
           typeof code !== 'string' ||
           !(await verifyAccessCode(code, verifier)) ||

@@ -33,7 +33,6 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
-    "@turbo/gen": "2.11.10",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",

@@ -176,8 +176,32 @@ function checkImport(source, specifier) {
 }
 
 export function findBoundaryViolations(source, contents) {
-  const { importedFiles } = ts.preProcessFile(contents, true, true);
-  return importedFiles.flatMap(({ fileName }) => {
+  const file = ts.createSourceFile(source, contents, ts.ScriptTarget.Latest);
+  const imports = new Set();
+
+  function visit(node) {
+    let specifier;
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      specifier = node.moduleSpecifier;
+    } else if (ts.isExternalModuleReference(node)) {
+      specifier = node.expression;
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      specifier = node.argument.literal;
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+    ) {
+      specifier = node.arguments[0];
+    }
+    if (specifier && ts.isStringLiteralLike(specifier)) {
+      imports.add(specifier.text);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(file);
+  return [...imports].flatMap((fileName) => {
     const message = checkImport(source, fileName);
     return message ? [`${source}: ${fileName}. ${message}`] : [];
   });

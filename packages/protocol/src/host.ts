@@ -9,6 +9,33 @@ export const DESKTOP_CONNECTIONS_PATH = '/api/desktop/connections';
 export const WORKSPACES_PATH = '/api/workspaces';
 export const WORKSPACE_FOLDERS_PATH = `${WORKSPACES_PATH}/folders`;
 
+// The explicitly supported product routes are shared by Host registration and Desktop forwarding.
+export const productRoutes = {
+  listConversations: { method: 'GET', path: CONVERSATION_PATH },
+  createConversation: { method: 'POST', path: CONVERSATION_PATH },
+  readConversation: { method: 'GET', path: `${CONVERSATION_PATH}/:id` },
+  sendMessage: { method: 'POST', path: `${CONVERSATION_PATH}/:id` },
+  abortConversation: { method: 'POST', path: `${CONVERSATION_PATH}/:id/abort` },
+  setRunSettings: { method: 'PUT', path: `${CONVERSATION_PATH}/:id/run-settings` },
+  setAccessMode: { method: 'PUT', path: `${CONVERSATION_PATH}/:id/access-mode` },
+  usage: { method: 'GET', path: `${CONVERSATION_PATH}/:id/usage` },
+  trajectory: { method: 'GET', path: `${CONVERSATION_PATH}/:id/trajectory` },
+  modelInput: { method: 'GET', path: `${CONVERSATION_PATH}/:id/trajectory/:submissionId/:modelId` },
+  listPresets: { method: 'GET', path: AGENT_PRESETS_PATH },
+  createPreset: { method: 'POST', path: AGENT_PRESETS_PATH },
+  setDefaultPreset: { method: 'PUT', path: `${AGENT_PRESETS_PATH}/default` },
+  revisePreset: { method: 'PUT', path: `${AGENT_PRESETS_PATH}/:id` },
+  listProviders: { method: 'GET', path: PROVIDERS_PATH },
+  connectProvider: { method: 'POST', path: PROVIDERS_PATH },
+  connectCodex: { method: 'PUT', path: `${PROVIDERS_PATH}/openai-codex` },
+  disconnectProvider: { method: 'DELETE', path: `${PROVIDERS_PATH}/:id` },
+  setDefaultModel: { method: 'PUT', path: `${PROVIDERS_PATH}/default-model` },
+  browseFolders: { method: 'GET', path: WORKSPACE_FOLDERS_PATH },
+  addWorkspace: { method: 'POST', path: WORKSPACES_PATH },
+} as const;
+export const trajectorySearchLimit = 512;
+export const trajectorySearchSchema = z.string().trim().toLowerCase().max(trajectorySearchLimit);
+
 export const trajectoryStatusSchema = z.enum([
   'in-progress',
   'completed',
@@ -98,6 +125,19 @@ export const trajectoryHistorySchema = z.array(
 export type TrajectoryRequest = z.infer<typeof trajectoryHistorySchema>[number];
 export type TrajectoryRecord = TrajectoryRequest['records'][number];
 export type TrajectoryStatus = TrajectoryRequest['status'];
+
+export const trajectoryPageSchema = z.object({
+  requests: z.array(
+    z.object({
+      turn: z.number().int().positive(),
+      precedingModelRequests: z.number().int().nonnegative(),
+      request: trajectoryHistorySchema.element,
+    }),
+  ),
+  before: z.number().int().positive().nullable(),
+});
+
+export type TrajectoryPage = z.infer<typeof trajectoryPageSchema>;
 
 export const conversationContextSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('unavailable') }),
@@ -279,7 +319,7 @@ export const createSessionSchema = z.strictObject({
 });
 export const sessionSummarySchema = z.object({
   id: z.string(),
-  title: z.string(),
+  title: z.string().nullable(),
   workspaceId: z.string(),
   agentPresetId: agentPresetIdSchema,
   agentPresetName: z.string(),
@@ -312,3 +352,5 @@ export type ModelOption = z.infer<typeof modelOptionSchema>;
 export type ConnectProvider = z.infer<typeof connectProviderSchema>;
 export type ProviderConnection = z.infer<typeof providerSchema>;
 export type ProviderSettings = z.infer<typeof providerSettingsSchema>;
+
+export { matchesRecord, payloadText, recordTitle, resultText } from './trajectory-search.js';

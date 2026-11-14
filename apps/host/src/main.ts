@@ -1,10 +1,14 @@
+import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { serve } from '@hono/node-server';
 import { issueAccessCode } from '@workspace/host-plugins/auth/host';
 import { createHost } from './app.js';
 import { hostOptions, launchOptions } from './config.js';
 import { startDesktopHost } from './desktop.js';
+
+const execFileAsync = promisify(execFile);
 
 const usage = `Beluga Host
   serve [--bind ADDRESS] [--port PORT] [--origin ORIGIN] [--data-dir DIR] [--web-dir DIR]
@@ -36,16 +40,21 @@ async function start() {
 
   const host = await createHost(await hostOptions(options));
 
+  let server: ReturnType<typeof serve> | undefined;
   try {
-    const server = serve({
+    const listener = serve({
       fetch: host.fetch,
       hostname: options.bind,
       port: options.port,
     });
-    await once(server, 'listening');
-    const info = server.address();
+    server = listener;
+    await once(listener, 'listening');
+    const info = listener.address();
     if (!info || typeof info === 'string') {
       throw new Error('Host did not bind');
+    }
+    if (options.command === 'serve' && options.notifySystemd) {
+      await execFileAsync('systemd-notify', ['--ready']);
     }
     console.log(`Host listening on http://${info.address}:${info.port}`);
 
@@ -53,9 +62,9 @@ async function start() {
 
     const stop = () => {
       stopping ??= new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
-        if ('closeAllConnections' in server) {
-          server.closeAllConnections();
+        listener.close((error) => (error ? reject(error) : resolve()));
+        if ('closeAllConnections' in listener) {
+          listener.closeAllConnections();
         }
       }).then(
         () => host.dispose(),
@@ -70,6 +79,10 @@ async function start() {
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
   } catch (error) {
+    server?.close();
+    if (server && 'closeAllConnections' in server) {
+      server.closeAllConnections();
+    }
     await host.dispose();
     throw error;
   }

@@ -10,7 +10,11 @@ export interface Workspace {
 
 export interface WorkspaceClient extends ReadStore<readonly Workspace[]> {
   addWorkspace(this: void, nameOrPath: string): string | Promise<string>;
-  browseWorkspaceFolders?(this: void, path?: string): Promise<WorkspaceFolders>;
+  browseWorkspaceFolders?(
+    this: void,
+    path: string | undefined,
+    signal: AbortSignal,
+  ): Promise<WorkspaceFolders>;
 }
 
 declare module '@workspace/runtime' {

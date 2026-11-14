@@ -2,9 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MessageMarkdown } from '@workspace/ui/components/message-markdown';
 import { ThemeProvider } from '@workspace/ui/components/theme-provider';
+import { Toaster } from '@workspace/ui/components/toast';
 import { TooltipProvider } from '@workspace/ui/components/tooltip';
 import { MemoryRouter } from 'react-router';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { App } from './App.tsx';
 import { createProduct } from './product.ts';
 
@@ -54,7 +55,7 @@ test('updates highlighted code when a streamed fence grows or is replaced', asyn
       (token) => token.textContent.trim() === text,
     );
 
-  await waitFor(() => expect(highlighted('continued')).toBeInTheDocument());
+  await waitFor(() => expect(highlighted('continued')).toBeInTheDocument(), { timeout: 5000 });
   expect(code()).toHaveTextContent('continued');
 
   rerender(<MessageMarkdown text={fence('/* open\ncontinued\n*/\nconst answer = 42')} streaming />);
@@ -65,4 +66,27 @@ test('updates highlighted code when a streamed fence grows or is replaced', asyn
   await waitFor(() => expect(highlighted('replacement')).toBeInTheDocument());
   expect(code()).toHaveTextContent('const replacement = 7');
   expect(code()).not.toHaveTextContent('continued');
+});
+
+test('announces when copying code is denied and clears the previous success', async ({
+  onTestFinished,
+}) => {
+  const user = userEvent.setup();
+  const writeText = vi.spyOn(navigator.clipboard, 'writeText');
+  onTestFinished(() => writeText.mockRestore());
+
+  render(
+    <Toaster limit={1}>
+      <MessageMarkdown text={'```js\nconst answer = 42\n```'} streaming={false} />
+    </Toaster>,
+  );
+
+  await user.click(screen.getByRole('button', { name: 'Copy' }));
+  expect(writeText).toHaveBeenCalledWith('const answer = 42\n');
+  expect(screen.queryByText('Could not copy code.')).not.toBeInTheDocument();
+
+  writeText.mockRejectedValueOnce(new DOMException('Permission denied', 'NotAllowedError'));
+  await user.click(screen.getByRole('button', { name: 'Copied' }));
+  expect(await screen.findByText('Could not copy code.')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeVisible();
 });

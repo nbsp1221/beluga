@@ -1,5 +1,5 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
-import { link, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { link, open, readFile, rename, rm } from 'node:fs/promises';
 import { promisify } from 'node:util';
 
 const derive = promisify(
@@ -59,12 +59,13 @@ export async function issueAccessCode(path: string, rotate: boolean) {
   const code = randomBytes(24).toString('base64url');
   const verifier = await createAccessCodeVerifier(code);
   const temporary = `${path}.${crypto.randomUUID()}`;
-  await writeFile(temporary, JSON.stringify(verifier), {
-    flag: 'wx',
-    mode: 0o600,
-  });
-
+  const file = await open(temporary, 'wx', 0o600);
   try {
+    try {
+      await file.writeFile(JSON.stringify(verifier));
+    } finally {
+      await file.close();
+    }
     if (rotate) {
       await rename(temporary, path);
     } else {

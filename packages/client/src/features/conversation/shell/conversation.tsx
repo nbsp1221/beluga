@@ -26,6 +26,7 @@ import type {
 import { getEmptySnapshot, subscribeToEmptyStore } from '../../../state/store.js';
 import { useLayout } from '../../../workbench/contract.js';
 import { Composer } from '../composer/composer.js';
+import { sessionTitle } from '../contract.js';
 import { resolveConversationView } from '../view-registry.js';
 import { ConversationStatistics } from './conversation-statistics.js';
 import { WorkspaceDialogContent, WorkspaceStart } from './workspace-form.js';
@@ -164,8 +165,8 @@ export function Conversation({
   );
 
   useEffect(() => {
-    document.title = `${mobile && !routeId ? 'Chats' : (session?.title ?? 'Session not found')} · Beluga`;
-  }, [mobile, routeId, session?.title]);
+    document.title = `${mobile && !routeId ? 'Chats' : session ? sessionTitle(session) : 'Session not found'} · Beluga`;
+  }, [mobile, routeId, session]);
 
   if (!session) {
     return (
@@ -479,7 +480,7 @@ function ConversationHeader({
                 : 'min-w-0 py-1.5 text-sm font-semibold [overflow-wrap:anywhere] break-words'
             }
           >
-            {isEmptyConversation ? 'Chats' : session.title}
+            {isEmptyConversation ? 'Chats' : sessionTitle(session)}
           </h1>
           {clientMode === 'connected' && !session.isDraft && session.agentPresetName ? (
             <span className="min-w-0 py-1.5 text-sm text-muted-foreground">
@@ -497,6 +498,10 @@ function ConversationHeader({
                 key={panel.id}
                 size="icon"
                 label={`${activePanel === panel.id ? 'Close' : 'Open'} ${panel.label}`}
+                hint={panel.unavailable ? `${panel.label} is not available yet` : undefined}
+                hintSide={panel.unavailable ? 'bottom' : undefined}
+                disabled={panel.unavailable}
+                focusableWhenDisabled={panel.unavailable}
                 aria-expanded={activePanel === panel.id}
                 onClick={() => togglePanel(panel.id)}
               >

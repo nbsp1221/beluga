@@ -2,13 +2,13 @@ import { Button } from '@workspace/ui/components/button';
 import { MessageFooter } from '@workspace/ui/components/message';
 import { toast } from '@workspace/ui/components/toast';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@workspace/ui/components/tooltip';
+import { copyText } from '@workspace/ui/lib/clipboard';
 import { cn } from '@workspace/ui/lib/utils';
 import { Check, Copy, GitFork, Pencil, X } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 
-function MessageTime({ timestamp }: { timestamp: number }) {
+function MessageTime({ timestamp, today }: { timestamp: number; today: Date }) {
   const date = new Date(timestamp);
-  const [today] = useState(() => new Date());
   const clock: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
   const calendar: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
   const display = new Intl.DateTimeFormat(undefined, {
@@ -65,14 +65,16 @@ export function MessageActions({
   role,
   text,
   timestamp,
+  today,
   alwaysVisible = false,
 }: {
   role: 'user' | 'assistant';
   text: string;
   timestamp?: number;
+  today: Date;
   alwaysVisible?: boolean;
 }) {
-  const [feedback, setFeedback] = useState<'copied' | 'failed'>();
+  const [feedback, setFeedback] = useState<{ result: 'copied' | 'failed' }>();
 
   useEffect(() => {
     if (!feedback) {
@@ -84,17 +86,18 @@ export function MessageActions({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(text);
-      setFeedback('copied');
+      await copyText(text);
+      setFeedback({ result: 'copied' });
     } catch {
-      setFeedback('failed');
+      setFeedback({ result: 'failed' });
     }
   }
 
   const label = role === 'user' ? 'Copy message' : 'Copy response';
-  const status = feedback === 'copied' ? 'Copied' : feedback === 'failed' ? 'Could not copy' : '';
-  const Icon = feedback === 'copied' ? Check : feedback === 'failed' ? X : Copy;
-  const time = timestamp === undefined ? null : <MessageTime timestamp={timestamp} />;
+  const result = feedback?.result;
+  const status = result === 'copied' ? 'Copied' : result === 'failed' ? 'Could not copy' : '';
+  const Icon = result === 'copied' ? Check : result === 'failed' ? X : Copy;
+  const time = timestamp === undefined ? null : <MessageTime timestamp={timestamp} today={today} />;
 
   return (
     <MessageFooter

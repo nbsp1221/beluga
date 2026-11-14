@@ -24,6 +24,16 @@ describe('workspace import boundaries', () => {
       'Host modules',
     ],
     [
+      'apps/host/src/example.ts',
+      'const view = import(`@workspace/runtime/react`);',
+      'Host modules',
+    ],
+    [
+      'apps/host/src/example.ts',
+      "type View = typeof import('@workspace/runtime/react');",
+      'Host modules',
+    ],
+    [
       'packages/client/src/features/chat/example.ts',
       "const load = import('@workspace/client/bootstrap/connected');",
       'product assembly',

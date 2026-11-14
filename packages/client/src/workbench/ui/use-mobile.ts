@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
-const query = '(width < 768px)';
+// Match Tailwind's max-md media query, including the browser's default font size.
+const query = '(width < 48rem)';
 
 const subscribe = (listener: () => void) => {
   const media = window.matchMedia(query);

@@ -60,7 +60,7 @@ export function Workbench({ destinations }: { destinations: Destinations }) {
   const Sidebar = active?.sidebar?.component;
   const mobileList = mobile && Boolean(Sidebar) && location.pathname === active?.path;
   const mobileDetail = mobile && Boolean(Sidebar) && !mobileList;
-  const panel = panels.find((item) => item.id === activePanel);
+  const panel = panels.find((item) => item.id === activePanel && !item.unavailable);
   const collapsed = collapsedPreference ?? frameWidth < SIDEBAR_AUTO_COLLAPSE;
   const layout = resolveLayout(frameWidth, collapsed, sidebarWidth, Boolean(panel));
   const sidebarVisible = Boolean(Sidebar) && !mobile && !collapsed && !layout.drawer;

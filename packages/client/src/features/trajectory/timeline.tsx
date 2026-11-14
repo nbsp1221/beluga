@@ -8,7 +8,7 @@ import {
   PopoverTrigger,
 } from '@workspace/ui/components/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@workspace/ui/components/tooltip';
-import { type PointerEvent, useRef, useState } from 'react';
+import { type PointerEvent, useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { TimeRange, TimelineSpan } from './timeline-spans.js';
 import {
   TimelineControlButton,
@@ -49,6 +49,7 @@ export function TrajectoryTimeline({
   const [to, setTo] = useState('');
 
   const hoverLineRef = useRef<HTMLDivElement>(null);
+  const plotRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     x: number;
     point: number;
@@ -88,6 +89,33 @@ export function TrajectoryTimeline({
     const next = Math.min(1, Math.max(minimumDomainWidth, width * factor));
     move(center - ((center - domain[0]) / width) * next, next);
   };
+
+  const wheelZoom = useEffectEvent((event: WheelEvent, plot: HTMLDivElement) => {
+    if (!spans.length || !event.deltaY || event.ctrlKey || event.metaKey || !event.cancelable) {
+      return;
+    }
+    if ((event.deltaY > 0 && width >= 1) || (event.deltaY < 0 && width <= minimumDomainWidth)) {
+      return;
+    }
+    const box = plot.getBoundingClientRect();
+    if (!box.width) {
+      return;
+    }
+    event.preventDefault();
+    const center = domain[0] + ((event.clientX - box.left) / box.width) * width;
+    zoom(event.deltaY > 0 ? 1.3 : 0.77, center);
+  });
+
+  useEffect(() => {
+    const plot = plotRef.current;
+    if (plot) {
+      const onWheel = (event: WheelEvent) => wheelZoom(event, plot);
+
+      plot.addEventListener('wheel', onWheel, { passive: false });
+
+      return () => plot.removeEventListener('wheel', onWheel);
+    }
+  }, []);
 
   const setRange = (value?: TimeRange) => {
     onRange(value);
@@ -165,18 +193,11 @@ export function TrajectoryTimeline({
   return (
     <TrajectoryTimelineFrame>
       <div
+        ref={plotRef}
         role="group"
         aria-label="Timeline overview"
         tabIndex={0}
         className={`relative cursor-crosshair touch-pan-y overflow-hidden select-none ${trajectoryPlotSize}`}
-        onWheel={(event) => {
-          if (!event.deltaY) {
-            return;
-          }
-          const box = event.currentTarget.getBoundingClientRect();
-          const center = domain[0] + ((event.clientX - box.left) / box.width) * width;
-          zoom(event.deltaY > 0 ? 1.3 : 0.77, center);
-        }}
         onContextMenu={(event) => event.preventDefault()}
         onDoubleClick={() => setRange()}
         onKeyDown={(event) => {

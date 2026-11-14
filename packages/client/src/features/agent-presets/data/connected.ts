@@ -3,6 +3,7 @@ import {
   type AgentPresets,
   agentPresetSchema,
   agentPresetsSchema,
+  defaultAgentPresetSchema,
 } from '@workspace/protocol/host';
 import type { HostRequest } from '../../../transport/host-http.js';
 import type { AgentPresetsClient } from '../contract.js';
@@ -27,6 +28,13 @@ export function createConnectedAgentPresets(
     getSnapshot: store.getSnapshot,
     subscribe: store.subscribe,
     refresh,
+    async setDefault(presetId) {
+      const saved = defaultAgentPresetSchema.parse(
+        await request(`${AGENT_PRESETS_PATH}/default`, { presetId }, 'PUT'),
+      );
+      presetRefreshGeneration++;
+      store.publish({ ...store.getSnapshot(), defaultPresetId: saved.presetId });
+    },
     async save(definition, previous) {
       const saved = agentPresetSchema.parse(
         await (previous

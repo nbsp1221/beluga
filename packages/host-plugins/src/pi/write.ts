@@ -1,7 +1,7 @@
 import type { Write, WriteOperations } from '../filesystem/write.js';
 import { adaptPiTool, loadPi } from './tool.js';
 
-export function createPiWrite(cwd: string, operations?: (signal?: AbortSignal) => WriteOperations) {
+function createTool(cwd: string, operations?: (signal?: AbortSignal) => WriteOperations) {
   const { createWriteTool } = loadPi();
   const tool = createWriteTool(cwd);
   return adaptPiTool(
@@ -10,5 +10,9 @@ export function createPiWrite(cwd: string, operations?: (signal?: AbortSignal) =
   );
 }
 
+export function createPiWrite(cwd: string, operations: (signal?: AbortSignal) => WriteOperations) {
+  return createTool(cwd, operations);
+}
+
 export const write: Write = (cwd, input, { operations, signal } = {}) =>
-  createPiWrite(cwd, operations && (() => operations)).execute(input, signal);
+  createTool(cwd, operations && (() => operations)).execute(input, signal);

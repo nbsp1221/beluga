@@ -13,7 +13,6 @@ import {
 } from '@workspace/ui/components/attachment';
 import { Button } from '@workspace/ui/components/button';
 import { Field, FieldError, FieldLabel } from '@workspace/ui/components/field';
-import { InputGroup, InputGroupTextarea } from '@workspace/ui/components/input-group';
 import {
   Select,
   SelectContent,
@@ -32,6 +31,7 @@ import {
 } from '@workspace/ui/components/sheet';
 import { ShellButton } from '@workspace/ui/components/shell-button';
 import { Spinner } from '@workspace/ui/components/spinner';
+import { Textarea } from '@workspace/ui/components/textarea';
 import { ArrowUp, Plus, SlidersHorizontal, Square, X } from 'lucide-react';
 import { type ReactNode, useId, useRef, useState } from 'react';
 import type { ConversationClient, Session } from '../contract.js';
@@ -202,9 +202,10 @@ export function Composer({
         void send();
       }}
     >
-      <InputGroup
+      <div
+        role="group"
         aria-label="Message composer"
-        className="h-auto flex-col gap-2 rounded-3xl border-border bg-card p-2 text-card-foreground dark:bg-card forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-2 forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-[Highlight] forced-colors:has-[[data-slot=input-group-control]:focus-visible]:not-has-[[aria-invalid=true]]:outline-solid"
+        className="flex min-w-0 flex-col gap-2 rounded-3xl border border-border bg-card p-2 text-card-foreground transition-colors has-[>textarea:focus-visible]:border-ring has-[>textarea:focus-visible]:ring-3 has-[>textarea:focus-visible]:ring-ring/50 has-[>textarea[aria-invalid=true]]:border-destructive has-[>textarea[aria-invalid=true]]:ring-3 has-[>textarea[aria-invalid=true]]:ring-destructive/20 dark:has-[>textarea[aria-invalid=true]]:ring-destructive/40 forced-colors:has-[>textarea:focus-visible]:not-has-[[aria-invalid=true]]:outline-2 forced-colors:has-[>textarea:focus-visible]:not-has-[[aria-invalid=true]]:outline-[Highlight] forced-colors:has-[>textarea:focus-visible]:not-has-[[aria-invalid=true]]:outline-solid"
         data-testid="composer-card"
       >
         {attachments.length > 0 && (
@@ -229,12 +230,12 @@ export function Composer({
             Choose a workspace to start
           </Button>
         ) : (
-          <InputGroupTextarea
+          <Textarea
             ref={editorRef}
             aria-label="Message"
             aria-describedby={error ? 'message-error' : undefined}
             aria-invalid={Boolean(error)}
-            className={`max-h-[min(20rem,25dvh)] min-h-14 md:max-h-80 ${editorInset}`}
+            className={`max-h-[min(20rem,25dvh)] min-h-14 flex-1 resize-none border-0 bg-transparent focus-visible:ring-0 aria-invalid:ring-0 md:max-h-80 dark:bg-transparent dark:aria-invalid:ring-0 ${editorInset}`}
             style={
               viewportHeight === undefined
                 ? undefined
@@ -262,24 +263,33 @@ export function Composer({
         )}
         <div className="flex w-full flex-wrap items-center justify-between gap-2 text-foreground">
           <div className="flex min-w-0 items-center gap-1">
-            <ShellButton label="Attach files" onClick={() => fileInputRef.current?.click()}>
+            <ShellButton
+              label="Attach files"
+              hint={preview ? undefined : 'File attachments are not available yet'}
+              hintSide={preview ? undefined : 'top'}
+              disabled={!preview}
+              focusableWhenDisabled={!preview}
+              onClick={() => fileInputRef.current?.click()}
+            >
               <Plus />
             </ShellButton>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              hidden
-              onChange={(event) => {
-                setAttachments((current) => [
-                  ...new Set([
-                    ...current,
-                    ...Array.from(event.target.files ?? [], (file) => file.name),
-                  ]),
-                ]);
-                event.target.value = '';
-              }}
-            />
+            {preview && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(event) => {
+                  setAttachments((current) => [
+                    ...new Set([
+                      ...current,
+                      ...Array.from(event.target.files ?? [], (file) => file.name),
+                    ]),
+                  ]);
+                  event.target.value = '';
+                }}
+              />
+            )}
             {!mobile && accessMode}
             {mobile && (
               <MobileComposerSettings
@@ -335,7 +345,7 @@ export function Composer({
             </ShellButton>
           </div>
         </div>
-      </InputGroup>
+      </div>
       <ComposerFeedback
         error={error}
         needsProvider={needsModel && !model}

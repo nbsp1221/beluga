@@ -20,7 +20,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': process.env.HOST_URL ?? 'http://127.0.0.1:3001',
+      '/api': process.env.HOST_URL ?? 'http://127.0.0.1:8917',
     },
   },
   resolve: {

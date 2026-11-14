@@ -104,17 +104,17 @@ function WorkspaceForm({
     if (!browse) {
       return;
     }
-    let active = true;
-    void browse(query.path).then(
+    const controller = new AbortController();
+    void browse(query.path, controller.signal).then(
       (folders) => {
-        if (!active) {
+        if (controller.signal.aborted) {
           return;
         }
         setResult({ query, folders });
         setValue((current) => (current === (query.path ?? '') ? folders.path : current));
       },
       (reason: unknown) => {
-        if (!active) {
+        if (controller.signal.aborted) {
           return;
         }
         setBrowseError({
@@ -123,9 +123,7 @@ function WorkspaceForm({
         });
       },
     );
-    return () => {
-      active = false;
-    };
+    return () => controller.abort();
   }, [browse, query, setValue]);
 
   const open = (path: string, focusFolders = false) => {

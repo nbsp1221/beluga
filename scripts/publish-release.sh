@@ -15,8 +15,12 @@ assets=(
 )
 
 for asset in "${assets[@]}"; do test -s "$asset"; done
-for dir in dist/linux dist/windows; do
-  (cd "$dir" && for checksum in *.sha256; do sha256sum --check --strict "$checksum"; done)
+for asset in "${assets[@]}"; do
+  if [[ "$asset" = *.sha256 ]]; then
+    expected=$(tr -d '\r' < "$asset")
+    actual=$(cd "$(dirname "$asset")" && sha256sum "$(basename "${asset%.sha256}")")
+    test "$actual" = "$expected"
+  fi
 done
 test "$(tar -xOf dist/linux/beluga-linux-x64.tar.gz beluga/VERSION)" = "$version"
 awk -v title="## $version" '$0==title {found=1; next} found && /^## / {exit} found {print}' CHANGELOG.md > dist/notes.md

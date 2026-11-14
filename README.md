@@ -22,7 +22,7 @@ Use chat for file work. The **Files** panel shows sample content, and chat suppo
 
 ## Work with a remote Host
 
-The Host runs the agent and stores its conversations. For example, when you connect from Windows to your Linux Host, workspace paths and shell commands refer to Linux. Use the [Host guide](docs/hosting.md) to set up HTTPS access, choose the execution account, and back up Host data.
+The Host runs the agent and stores its conversations. For example, when you connect from Windows to your Linux Host, workspace paths and shell commands refer to Linux. Use the [Host guide](docs/hosting.md) to configure network access, choose the execution account, and back up Host data.
 
 ## Documentation
 

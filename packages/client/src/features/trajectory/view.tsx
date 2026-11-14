@@ -19,13 +19,13 @@ import {
   TableRow,
 } from '@workspace/ui/components/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@workspace/ui/components/tooltip';
+import { readPreference, writePreference } from '@workspace/ui/lib/browser-storage';
 import { ChevronRight, Ellipsis, X } from 'lucide-react';
 import {
   type ComponentProps,
   Fragment,
   type Ref,
   type RefObject,
-  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -49,8 +49,7 @@ import { trajectoryRoles } from './roles.js';
 import { type TimeRange, type TimelineSpan, timelineSpans } from './timeline-spans.js';
 import { TrajectoryTimeline } from './timeline.js';
 
-const empty: readonly TrajectoryRequest[] = [];
-const pageSize = 50;
+const empty: TrajectorySnapshot['requests'] = [];
 const durationStorageKey = 'beluga.trajectory.duration';
 const defaultInspectorWidth = '38%';
 const inspectorWidthStepPx = 24;
@@ -73,7 +72,7 @@ function callGroup(
   return `${request.id}/${record.modelRequestId ?? 'tools'}`;
 }
 
-function matchingSpanKeys(spans: readonly TimelineSpan[], term: string, offset: number) {
+function matchingSpanKeys(spans: readonly TimelineSpan[], term: string) {
   if (!term) {
     return undefined;
   }
@@ -81,7 +80,7 @@ function matchingSpanKeys(spans: readonly TimelineSpan[], term: string, offset: 
     spans.flatMap(({ key, record, request, turnIndex, requestNumber }) => {
       if (
         !matchesRecord(record, term) &&
-        !`turn ${offset + turnIndex + 1}`.includes(term) &&
+        !`turn ${turnIndex + 1}`.includes(term) &&
         !(requestNumber && `request #${requestNumber}`.includes(term))
       ) {
         return [];
@@ -107,18 +106,24 @@ export function TrajectoryView({
   sessionId,
   loadModelInput,
   snapshot,
+  query,
+  term,
+  invalidSearch,
+  onSearch,
+  onLoadEarlier,
 }: {
   sessionId: string;
   snapshot?: TrajectorySnapshot;
   loadModelInput?: TrajectoryClient['loadModelInput'];
+  query: string;
+  term: string;
+  invalidSearch: boolean;
+  onSearch: (query: string) => void;
+  onLoadEarlier: () => void;
 }) {
   const requests = snapshot?.requests ?? empty;
 
-  const [query, setQuery] = useState('');
-  const [limit, setLimit] = useState(pageSize);
-  const [duration, setDuration] = useState(
-    () => localStorage.getItem(durationStorageKey) === 'true',
-  );
+  const [duration, setDuration] = useState(() => readPreference(durationStorageKey) === 'true');
   const [foldedTurns, setFoldedTurns] = useState<ReadonlySet<string>>(() => new Set());
   const [foldedCalls, setFoldedCalls] = useState<ReadonlySet<string>>(() => new Set());
   const [range, setRange] = useState<TimeRange>();
@@ -138,9 +143,7 @@ export function TrajectoryView({
   const prependHeightRef = useRef<number | null>(null);
   const panelRef = useRef<InspectorPanelHandle>(null);
 
-  const term = useDeferredValue(query.trim().toLowerCase());
-  const offset = Math.max(0, requests.length - limit);
-  const visible = useMemo(() => requests.slice(offset), [requests, offset]);
+  const visible = useMemo(() => requests.map(({ request }) => request), [requests]);
   const visibleCallGroups = visible.flatMap((request) =>
     request.records.flatMap((record) =>
       record.kind === 'tool' ? [callGroup(request, record)] : [],
@@ -150,29 +153,16 @@ export function TrajectoryView({
     visible.length > 0 && visible.every((request) => foldedTurns.has(request.id));
   const allCallsFolded =
     visibleCallGroups.length > 0 && visibleCallGroups.every((group) => foldedCalls.has(group));
-  const earlierModelRequests = useMemo(
-    () =>
-      requests
-        .slice(0, offset)
-        .reduce(
-          (count, turn) =>
-            count +
-            turn.records.filter(
-              (record) => record.kind === 'assistant' && !isSummaryRequest(record),
-            ).length,
-          0,
-        ),
-    [requests, offset],
-  );
   const spans = useMemo(
-    () => timelineSpans(visible, duration, earlierModelRequests),
-    [visible, duration, earlierModelRequests],
+    () => timelineSpans(visible, duration, 0, requests),
+    [visible, duration, requests],
   );
 
-  const matches = useMemo(() => matchingSpanKeys(spans, term, offset), [spans, term, offset]);
+  const matches = useMemo(() => matchingSpanKeys(spans, term), [spans, term]);
   const spanByKey = useMemo(() => new Map(spans.map((span) => [span.key, span])), [spans]);
 
-  const selectedRequest = requests.find(({ id }) => id === selected?.requestId);
+  const selectedTurn = requests.find(({ request }) => request.id === selected?.requestId);
+  const selectedRequest = selectedTurn?.request;
   const selectedRecord = selectedRequest?.records.find(({ id }) => id === selected?.recordId);
   const selectedKey =
     selectedRequest && selectedRecord ? recordKey(selectedRequest, selectedRecord) : undefined;
@@ -230,7 +220,7 @@ export function TrajectoryView({
         );
       }
       if (matches && !matches.has(pendingRevealRef.current)) {
-        setQuery('');
+        onSearch('');
       }
     }
     setSelected({ requestId: request.id, recordId: record?.id, modelRequest });
@@ -267,7 +257,7 @@ export function TrajectoryView({
       sessionId={sessionId}
       request={selectedRequest}
       record={selectedRecord}
-      turnNumber={requests.indexOf(selectedRequest) + 1}
+      turnNumber={selectedTurn.turn}
       requestNumber={selectedModelNumber}
       modelRequest={selected?.modelRequest === true}
       step={selectedKey ? spanByKey.get(selectedKey)?.step : undefined}
@@ -294,10 +284,11 @@ export function TrajectoryView({
           hasCalls: visibleCallGroups.length > 0,
           search: searchRef,
           query,
+          invalidSearch,
           toggleDuration: () => {
             setDuration(!duration);
             setRange(undefined);
-            localStorage.setItem(durationStorageKey, String(!duration));
+            writePreference(durationStorageKey, String(!duration));
           },
           toggleTurns: () =>
             setFoldedTurns(new Set(allTurnsFolded ? [] : visible.map(({ id }) => id))),
@@ -307,7 +298,7 @@ export function TrajectoryView({
             if (viewportRef.current && value.trim()) {
               viewportRef.current.scrollTop = 0;
             }
-            setQuery(value);
+            onSearch(value);
           },
         }}
       />
@@ -353,7 +344,9 @@ export function TrajectoryView({
               <TrajectoryLedger
                 phase={phase}
                 loading={phase === 'loading' && requests.length === 0}
-                offset={offset}
+                turns={requests}
+                hasEarlier={Boolean(snapshot?.before)}
+                loadingEarlier={Boolean(snapshot?.loadingEarlier)}
                 term={term}
                 visible={visible}
                 foldedTurns={foldedTurns}
@@ -370,7 +363,7 @@ export function TrajectoryView({
                 onLoadEarlier={() => {
                   prependHeightRef.current = viewportRef.current?.scrollHeight ?? null;
                   followTailRef.current = false;
-                  setLimit((count) => count + pageSize);
+                  onLoadEarlier();
                 }}
               />
             </div>
@@ -538,7 +531,9 @@ function TrajectoryDetails({
 function TrajectoryLedger({
   phase,
   loading,
-  offset,
+  turns,
+  hasEarlier,
+  loadingEarlier,
   term,
   visible,
   foldedTurns,
@@ -556,7 +551,9 @@ function TrajectoryLedger({
 }: {
   phase?: TrajectorySnapshot['phase'];
   loading: boolean;
-  offset: number;
+  turns: TrajectorySnapshot['requests'];
+  hasEarlier: boolean;
+  loadingEarlier: boolean;
   term: string;
   visible: readonly TrajectoryRequest[];
   foldedTurns: ReadonlySet<string>;
@@ -588,10 +585,16 @@ function TrajectoryLedger({
           <col />
         </colgroup>
         <TableBody>
-          {offset > 0 && !term && (
+          {hasEarlier && (
             <TableRow>
               <TableCell colSpan={3} className="px-2 py-1">
-                <Button variant="ghost" size="xs" className="touch-target" onClick={onLoadEarlier}>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="touch-target"
+                  onClick={onLoadEarlier}
+                  disabled={loadingEarlier}
+                >
                   Load earlier records
                 </Button>
               </TableCell>
@@ -613,7 +616,7 @@ function TrajectoryLedger({
               <TrajectoryRows
                 key={request.id}
                 request={request}
-                number={offset + index + 1}
+                number={turns[index].turn}
                 records={records}
                 hidden={hidden}
                 foldedCalls={term || folded ? noFolds : foldedCalls}

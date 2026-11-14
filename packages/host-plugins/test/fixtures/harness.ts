@@ -9,6 +9,7 @@ import {
   type ModelOption,
   agentPresetSchema,
   sessionSummarySchema,
+  trajectoryPageSchema,
   workspaceSchema,
 } from '@workspace/protocol/host';
 import { type Runtime, createRuntime } from '@workspace/runtime';
@@ -253,3 +254,8 @@ export const allCapabilities = [
   fileWriteCapability,
   shellExecCapability,
 ];
+
+export async function readTrajectory(response: Promise<Response>) {
+  const page = trajectoryPageSchema.parse(await (await response).json());
+  return page.requests.map(({ request }) => request);
+}

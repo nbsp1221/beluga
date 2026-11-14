@@ -1,7 +1,10 @@
 import type { ComponentProps, ReactNode, Ref } from 'react';
+import { trajectorySearchLimit } from '@workspace/protocol/host';
 import { Button } from '@workspace/ui/components/button';
+import { Field, FieldError } from '@workspace/ui/components/field';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@workspace/ui/components/input-group';
 import { Clock3, Columns2, Search, SlidersHorizontal } from 'lucide-react';
+import { useId } from 'react';
 
 export const trajectoryLanes = ['Input', 'Model', 'Tools'];
 
@@ -16,6 +19,7 @@ type ToolbarControls = {
   hasCalls: boolean;
   search: Ref<HTMLInputElement>;
   query: string;
+  invalidSearch: boolean;
   toggleDuration: () => void;
   toggleTurns: () => void;
   toggleCalls: () => void;
@@ -23,9 +27,10 @@ type ToolbarControls = {
 };
 
 export function TrajectoryToolbar({ controls }: { controls?: ToolbarControls }) {
+  const searchErrorId = useId();
   return (
     <div
-      role="toolbar"
+      role="group"
       aria-label="Trajectory toolbar"
       className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b bg-muted/30 px-2 py-1"
     >
@@ -64,20 +69,29 @@ export function TrajectoryToolbar({ controls }: { controls?: ToolbarControls }) 
           Calls
         </Button>
       </div>
-      <InputGroup className="ml-auto w-44 max-w-full max-md:h-11">
-        <InputGroupAddon>
-          <Search className="size-3" />
-        </InputGroupAddon>
-        <InputGroupInput
-          ref={controls?.search}
-          type="search"
-          aria-label="Search trajectory"
-          placeholder="Search"
-          disabled={!controls}
-          onChange={(event) => controls?.onSearch(event.target.value)}
-          value={controls?.query ?? ''}
-        />
-      </InputGroup>
+      <Field className="ml-auto w-44 max-w-full gap-1" data-invalid={controls?.invalidSearch}>
+        <InputGroup className="max-md:h-11">
+          <InputGroupAddon>
+            <Search className="size-3" />
+          </InputGroupAddon>
+          <InputGroupInput
+            ref={controls?.search}
+            type="search"
+            aria-label="Search trajectory"
+            aria-invalid={controls?.invalidSearch}
+            aria-describedby={controls?.invalidSearch ? searchErrorId : undefined}
+            placeholder="Search"
+            disabled={!controls}
+            onChange={(event) => controls?.onSearch(event.target.value)}
+            value={controls?.query ?? ''}
+          />
+        </InputGroup>
+        {controls?.invalidSearch && (
+          <FieldError id={searchErrorId}>
+            Shorten the search to {trajectorySearchLimit} characters or fewer.
+          </FieldError>
+        )}
+      </Field>
     </div>
   );
 }

@@ -26,12 +26,14 @@ export function AssistantResponse({
   activity,
   active,
   completedAt,
+  today,
   latest,
 }: {
   parts: readonly AssistantMessagePart[];
   activity?: TurnActivity;
   active: boolean;
   completedAt?: number;
+  today: Date;
   latest: boolean;
 }) {
   const [open, setOpen] = useState<boolean>();
@@ -80,6 +82,7 @@ export function AssistantResponse({
               role="assistant"
               text={copyText}
               timestamp={completedAt}
+              today={today}
               alwaysVisible={latest}
             />
           )}

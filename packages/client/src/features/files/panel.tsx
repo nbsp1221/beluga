@@ -9,6 +9,7 @@ import { PaneHeader } from '@workspace/ui/components/pane-header';
 import { ShellButton } from '@workspace/ui/components/shell-button';
 import { ArrowLeft, ChevronDown, FileText, Folder } from 'lucide-react';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { createStore } from '../../state/store.js';
 
 const sampleFiles = [
   {
@@ -26,24 +27,16 @@ const sampleFiles = [
 ];
 
 export function createFilesView() {
-  let snapshot: { selected: string | null; expanded: boolean } = {
+  const { getSnapshot, subscribe, publish } = createStore<{
+    selected: string | null;
+    expanded: boolean;
+  }>({
     selected: null,
     expanded: true,
-  };
-  const listeners = new Set<() => void>();
+  });
 
-  const subscribe = (listener: () => void) => {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  };
-
-  const getSnapshot = () => snapshot;
-
-  const update = (next: Partial<typeof snapshot>) => {
-    snapshot = { ...snapshot, ...next };
-    listeners.forEach((listener) => listener());
+  const update = (next: Partial<ReturnType<typeof getSnapshot>>) => {
+    publish({ ...getSnapshot(), ...next });
   };
 
   return function FilesPanel() {

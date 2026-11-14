@@ -1,3 +1,4 @@
+import { v4 as uuid } from 'uuid';
 import type { WorkspaceClient } from '../../workspaces/contract.js';
 import type { ConversationClient, ConversationSnapshot, Session } from '../contract.js';
 import { createStore } from '../../../state/store.js';
@@ -8,7 +9,7 @@ export function createDemoConversation(workspaces: WorkspaceClient): Conversatio
       {
         id: 'welcome',
         workspaceId: 'example',
-        title: 'New session',
+        title: null,
         messages: [],
         draft: '',
       },
@@ -59,14 +60,11 @@ export function createDemoConversation(workspaces: WorkspaceClient): Conversatio
       if (!workspaceId || !workspaces.getSnapshot().some(({ id }) => id === workspaceId)) {
         throw new Error('Workspace not found');
       }
-      const id = crypto.randomUUID();
+      const id = uuid();
       const snapshot = getSnapshot();
       publish({
         ...snapshot,
-        sessions: [
-          { id, workspaceId, title: 'New session', messages: [], draft: '' },
-          ...snapshot.sessions,
-        ],
+        sessions: [{ id, workspaceId, title: null, messages: [], draft: '' }, ...snapshot.sessions],
       });
       return id;
     },
@@ -74,31 +72,29 @@ export function createDemoConversation(workspaces: WorkspaceClient): Conversatio
       update(id, (session) => ({ ...session, draft }));
     },
     send(id) {
-      return new Promise<void>((resolve) => {
-        update(id, (session) => {
-          if (!session.draft.trim()) {
-            return session;
-          }
-          const text = session.draft.trim();
-          const sentAt = Date.now();
-          return {
-            ...session,
-            title: session.messages.length ? session.title : text.slice(0, 60),
-            draft: '',
-            messages: [
-              ...session.messages,
-              { id: crypto.randomUUID(), role: 'user', text, sentAt },
-              {
-                id: crypto.randomUUID(),
-                role: 'assistant',
-                parts: [{ type: 'text', id: 'reply', text: 'Message received.', streaming: false }],
-                completedAt: sentAt,
-              },
-            ],
-          };
-        });
-        resolve();
+      update(id, (session) => {
+        if (!session.draft.trim()) {
+          return session;
+        }
+        const text = session.draft.trim();
+        const sentAt = Date.now();
+        return {
+          ...session,
+          title: session.messages.length ? session.title : text.slice(0, 60),
+          draft: '',
+          messages: [
+            ...session.messages,
+            { id: uuid(), role: 'user', text, sentAt },
+            {
+              id: uuid(),
+              role: 'assistant',
+              parts: [{ type: 'text', id: 'reply', text: 'Message received.', streaming: false }],
+              completedAt: sentAt,
+            },
+          ],
+        };
       });
+      return Promise.resolve();
     },
   };
 }

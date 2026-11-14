@@ -1,8 +1,7 @@
 import type { AgentCapability, AgentCapabilityPlugin } from '../../host.js';
 import { createPiGlob } from '../../../pi/glob.js';
 import { createPiGrep } from '../../../pi/grep.js';
-import { workspaceToolAccess } from '../../../workspace/tool-access.js';
-import { bindAgentTool } from '../../tool.js';
+import { AgentToolRegistration } from '../../tool.js';
 
 const metadata = {
   id: 'file.search',
@@ -21,17 +20,15 @@ export const fileSearchCapability: AgentCapabilityPlugin = {
   service: 'fileSearchTools',
   plugin: {
     id: 'file-search',
-    requires: ['workspaceToolSessions'],
+    requires: [],
     provides: ['fileSearchTools'],
     setup(context) {
-      const sessions = context.get('workspaceToolSessions');
       context.provide('fileSearchTools', {
         metadata,
-        createTools(sessionId) {
-          const { cwd, authorize } = workspaceToolAccess(sessions, sessionId, metadata);
+        createTools({ cwd }) {
           return [
-            bindAgentTool('glob', createPiGlob(cwd), authorize),
-            bindAgentTool('grep', createPiGrep(cwd), authorize),
+            AgentToolRegistration.create('glob', createPiGlob(cwd)),
+            AgentToolRegistration.create('grep', createPiGrep(cwd)),
           ];
         },
       });

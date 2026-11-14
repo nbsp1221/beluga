@@ -9,11 +9,13 @@ export function ShellButton({
   size = 'icon-sm',
   variant = 'ghost',
   hintSide,
+  hint = label,
   className,
   ...props
 }: ComponentProps<typeof Button> & {
   label: string;
   hintSide?: 'right' | 'top' | 'bottom' | 'left';
+  hint?: string;
 }) {
   const button = (
     <Button
@@ -34,7 +36,7 @@ export function ShellButton({
   return (
     <Tooltip>
       <TooltipTrigger render={button} />
-      <TooltipContent side={hintSide}>{label}</TooltipContent>
+      <TooltipContent side={hintSide}>{hint}</TooltipContent>
     </Tooltip>
   );
 }

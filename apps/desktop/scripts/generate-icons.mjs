@@ -15,6 +15,13 @@ const [mark, stylesheet] = await Promise.all([
   readFile(new URL('../styles/globals.css', assets), 'utf8'),
 ]);
 
+if (
+  !/^<svg\b[^>]*\bviewBox="0 0 64 64"[^>]*>/.test(mark) ||
+  !/<path\b[^>]*\bfill="currentColor"/.test(mark)
+) {
+  throw new Error('The Beluga mark must have a 64 × 64 view box and a currentColor path.');
+}
+
 const lightTheme = stylesheet.match(/^:root \{([\s\S]*?)^\}/m)?.[1];
 const darkTheme = stylesheet.match(/^\.dark \{([\s\S]*?)^\}/m)?.[1];
 const light = themeColor(lightTheme, 'primary');

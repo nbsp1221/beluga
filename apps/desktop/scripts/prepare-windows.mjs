@@ -1,18 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  cp,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { cp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import process from 'node:process';
 import { URL, fileURLToPath } from 'node:url';
@@ -24,7 +13,8 @@ const host = join(runtime, 'host');
 const web = join(runtime, 'web');
 const binaries = join(desktop, 'dist', 'binaries');
 const node = join(binaries, 'beluga-node-x86_64-pc-windows-msvc.exe');
-const distribution = 'https://nodejs.org/dist/v24.22.2';
+const nodeVersion = '24.22.2';
+const distribution = `https://nodejs.org/dist/v${nodeVersion}`;
 const checksum = '1c331340fa6cac5e4294725959070a143fa0507195a78ad77eed7943f719aac9';
 
 if (process.platform !== 'win32' || process.arch !== 'x64') {
@@ -67,72 +57,40 @@ if (!current || sha256(current) !== checksum) {
   await writeFile(node, binary);
 }
 await mkdir(runtime, { recursive: true });
+// Both Windows bundles use this directory as their entire application payload.
+if ((await realpath(runtime)).toLowerCase() !== runtime.toLowerCase()) {
+  throw new Error('The desktop runtime directory must be local to the desktop package.');
+}
+for (const entry of await readdir(runtime, { withFileTypes: true })) {
+  if (entry.isSymbolicLink()) {
+    throw new Error('The desktop runtime must not contain junctions.');
+  }
+}
+await rm(runtime, { recursive: true });
+await mkdir(runtime);
 await cp(join(root, 'LICENSE'), join(runtime, 'LICENSE'));
 await cp(join(root, 'THIRD_PARTY_NOTICES.md'), join(runtime, 'THIRD_PARTY_NOTICES.md'));
 await cp(
   join(root, 'packages/client/node_modules/@flue/sdk/LICENSE'),
   join(runtime, 'FLUE-SDK-LICENSE.txt'),
 );
-const license = join(runtime, 'NODE-LICENSE.txt');
-try {
-  await readFile(license);
-} catch {
-  await writeFile(
-    license,
-    await download('https://raw.githubusercontent.com/nodejs/node/v24.22.2/LICENSE'),
-  );
-}
+await writeFile(
+  join(runtime, 'NODE-LICENSE.txt'),
+  await download(`https://raw.githubusercontent.com/nodejs/node/v${nodeVersion}/LICENSE`),
+);
 
 run(root, 'exec', 'turbo', 'run', 'build', '--filter=web', '--filter=@workspace/host');
 
-// These two directories contain only generated build inputs.
-if ((await realpath(runtime)).toLowerCase() !== runtime.toLowerCase()) {
-  throw new Error('The desktop runtime directory must be local to the desktop package.');
-}
-for (const target of [host, web]) {
-  const info = await lstat(target).catch((error) => {
-    if (error.code !== 'ENOENT') {
-      throw error;
-    }
-  });
-  if (info?.isSymbolicLink()) {
-    throw new Error('The desktop runtime must not contain junctions.');
-  }
-  await rm(target, { recursive: true, force: true });
-}
-// Apply deployment settings outside the checkout so the root lock and install state stay intact.
-const deployment = await mkdtemp(join(tmpdir(), 'beluga-desktop-deploy-'));
-try {
-  for (const file of ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml']) {
-    await cp(join(root, file), join(deployment, file));
-  }
-  const hostBuilds = new Set(['host', 'host-plugins', 'protocol', 'runtime']);
-  for (const parent of ['apps', 'packages']) {
-    for (const { name } of (await readdir(join(root, parent), { withFileTypes: true })).filter(
-      (entry) => entry.isDirectory(),
-    )) {
-      const directory = join(parent, name);
-      const destination = join(deployment, directory);
-      await mkdir(destination, { recursive: true });
-      await cp(join(root, directory, 'package.json'), join(destination, 'package.json'));
-      if (hostBuilds.has(name)) {
-        await cp(join(root, directory, 'dist'), join(destination, 'dist'), { recursive: true });
-      }
-    }
-  }
-  run(
-    deployment,
-    '--filter',
-    '@workspace/host',
-    '--config.node-linker=hoisted',
-    '--config.inject-workspace-packages=true',
-    'deploy',
-    '--prod',
-    host,
-  );
-} finally {
-  await rm(deployment, { recursive: true, force: true });
-}
+run(
+  root,
+  '--filter',
+  '@workspace/host',
+  '--config.node-linker=hoisted',
+  '--config.inject-workspace-packages=true',
+  'deploy',
+  '--prod',
+  host,
+);
 await cp(join(root, 'apps/web/dist'), web, { recursive: true });
 await readFile(join(host, 'dist/main.js'));
 

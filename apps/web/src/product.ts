@@ -1,7 +1,7 @@
 import { agentPresetsClient } from '@workspace/client/agent-presets';
 import { chatClient } from '@workspace/client/chat';
 import { createConversationPlugin } from '@workspace/client/conversation';
-import { filesClient } from '@workspace/client/files';
+import { createFilesPlugin } from '@workspace/client/files';
 import { modelProvidersClient } from '@workspace/client/model-providers';
 import { createTrajectoryPlugin } from '@workspace/client/trajectory';
 import { workbenchClient } from '@workspace/client/workbench';
@@ -24,7 +24,7 @@ export async function createProduct(
     workbenchClient,
     createConversationPlugin(connected),
     chatClient,
-    filesClient,
+    createFilesPlugin(connected),
     createTrajectoryPlugin(connected),
     dataPlugin,
     ...(options.plugins ?? []),

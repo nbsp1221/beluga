@@ -1,13 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  AGENT_PRESETS_PATH,
-  AUTH_PATH,
-  CONVERSATION_PATH,
-  DESKTOP_CONNECTIONS_PATH,
-  PROVIDERS_PATH,
-  WORKSPACES_PATH,
-  WORKSPACE_FOLDERS_PATH,
-} from '@workspace/protocol/host';
+import { AUTH_PATH, DESKTOP_CONNECTIONS_PATH, productRoutes } from '@workspace/protocol/host';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -21,27 +13,22 @@ const cookieOptions = {
   sameSite: 'Strict',
 } as const;
 const tokenPattern = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i;
-const item = '/[^/]+';
-const conversationItem = new RegExp('^' + CONVERSATION_PATH + item + '$');
-const apiRoutes = [
-  ['GET', CONVERSATION_PATH],
-  ['POST', CONVERSATION_PATH],
-  ['GET', CONVERSATION_PATH + item],
-  ['POST', CONVERSATION_PATH + item],
-  ['POST', CONVERSATION_PATH + item + '/abort'],
-  ['PUT', CONVERSATION_PATH + item + '/(?:run-settings|access-mode)'],
-  ['GET', CONVERSATION_PATH + item + '/(?:usage|trajectory)'],
-  ['GET', CONVERSATION_PATH + item + '/trajectory' + item + item],
-  ['GET', AGENT_PRESETS_PATH],
-  ['POST', AGENT_PRESETS_PATH],
-  ['PUT', AGENT_PRESETS_PATH + item],
-  ['GET', PROVIDERS_PATH],
-  ['POST', PROVIDERS_PATH],
-  ['PUT', PROVIDERS_PATH + '/(?:openai-codex|default-model)'],
-  ['DELETE', PROVIDERS_PATH + item],
-  ['GET', WORKSPACE_FOLDERS_PATH],
-  ['POST', WORKSPACES_PATH],
-].map(([method, path]) => ({ method, pattern: new RegExp(`^${path}$`) }));
+
+const productRoutePattern = (path: string) =>
+  new RegExp(
+    `^${path
+      .split('/')
+      .map((segment) =>
+        segment.startsWith(':') ? '[^/]+' : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      )
+      .join('/')}$`,
+  );
+
+const conversationItem = productRoutePattern(productRoutes.sendMessage.path);
+const apiRoutes = Object.values(productRoutes).map(({ method, path }) => ({
+  method,
+  pattern: productRoutePattern(path),
+}));
 
 interface Connection {
   origin: string;
@@ -71,9 +58,9 @@ export function createDesktopConnections(
   app.post('/', bodyLimit({ maxSize: 4096 }), async (c) => {
     const input: unknown = await c.req.json().catch(() => null);
     const { address, code } = (input ?? {}) as { address?: unknown; code?: unknown };
-    const origin = typeof address === 'string' ? httpsOrigin(address) : undefined;
+    const origin = typeof address === 'string' ? serverOrigin(address) : undefined;
     if (!origin || typeof code !== 'string') {
-      return c.json({ error: 'Enter an HTTPS server address without a path.' }, 400);
+      return c.json({ error: 'Enter an HTTP or HTTPS server address without a path.' }, 400);
     }
 
     const cookieName = 'beluga_remote_' + createHash('sha256').update(origin).digest('hex');
@@ -123,7 +110,7 @@ export function createDesktopConnections(
       setCookie(c, lastAddress, origin, { ...cookieOptions, maxAge: session.maxAge });
       return c.json({ address: origin, id }, 201);
     } catch {
-      return c.json({ error: 'Could not reach the server over trusted HTTPS.' }, 502);
+      return c.json({ error: 'Could not reach the server at this address.' }, 502);
     }
   });
 
@@ -152,6 +139,7 @@ export function createDesktopConnections(
       const response = await remoteFetch(connection.origin, connection.token, path + url.search, {
         method: c.req.method,
         body,
+        headers: c.req.raw.headers,
         signal: AbortSignal.any([lifetime.signal, c.req.raw.signal]),
       });
       if (response.status === 401) {
@@ -183,11 +171,11 @@ export function createDesktopConnections(
   };
 }
 
-function httpsOrigin(value: string) {
+function serverOrigin(value: string) {
   try {
     const url = new URL(value.trim());
     if (
-      url.protocol === 'https:' &&
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
       !url.username &&
       !url.password &&
       url.pathname === '/' &&
@@ -212,6 +200,10 @@ function remoteFetch(origin: string, token: string | undefined, path: string, in
   }
   if (init.body) {
     headers.set('Content-Type', 'application/json');
+  }
+  const validator = new Headers(init.headers).get('If-None-Match');
+  if (validator) {
+    headers.set('If-None-Match', validator);
   }
   return fetch(url, { ...init, headers, redirect: 'error' });
 }
@@ -239,6 +231,7 @@ async function productResponse(upstream: Response, streamUrl?: string) {
     'Stream-Closed',
     'Stream-Cursor',
     'Flue-Error-Ref',
+    'ETag',
   ]) {
     const value = upstream.headers.get(name);
     if (value !== null) {

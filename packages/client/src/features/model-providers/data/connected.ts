@@ -8,35 +8,51 @@ export function createConnectedModelProviders(
   initial: ModelCatalog,
 ): ModelProvidersClient {
   const store = createStore(initial);
+  let readGeneration = 0;
 
-  const publishProviderSettings = async (response: Promise<unknown>) => {
-    const settings = providerSettingsSchema.parse(await response);
+  const publish = (settings: ReturnType<typeof providerSettingsSchema.parse>) => {
     store.publish({
       models: settings.providers.flatMap((provider) => provider.models),
       defaultModel: settings.defaultModel,
+      settings,
     });
+  };
+
+  const apply = async (response: Promise<unknown>) => {
+    const settings = providerSettingsSchema.parse(await response);
+    // Reads started before this write completed no longer own the catalog.
+    readGeneration += 1;
+    publish(settings);
     return settings;
   };
 
   return {
     getSnapshot: store.getSnapshot,
     subscribe: store.subscribe,
-    getProviderSettings() {
-      return publishProviderSettings(request(PROVIDERS_PATH));
+    async refresh() {
+      const generation = ++readGeneration;
+      try {
+        const settings = providerSettingsSchema.parse(await request(PROVIDERS_PATH));
+        if (generation === readGeneration) {
+          publish(settings);
+        }
+      } catch (error) {
+        if (generation === readGeneration) {
+          throw error;
+        }
+      }
     },
     connectProvider(connection) {
-      return publishProviderSettings(request(PROVIDERS_PATH, connection));
+      return apply(request(PROVIDERS_PATH, connection));
     },
     connectCodex() {
-      return publishProviderSettings(request(`${PROVIDERS_PATH}/openai-codex`, undefined, 'PUT'));
+      return apply(request(`${PROVIDERS_PATH}/openai-codex`, undefined, 'PUT'));
     },
     disconnectProvider(id) {
-      return publishProviderSettings(
-        request(`${PROVIDERS_PATH}/${encodeURIComponent(id)}`, undefined, 'DELETE'),
-      );
+      return apply(request(`${PROVIDERS_PATH}/${encodeURIComponent(id)}`, undefined, 'DELETE'));
     },
     setDefaultModel(model) {
-      return publishProviderSettings(request(`${PROVIDERS_PATH}/default-model`, { model }, 'PUT'));
+      return apply(request(`${PROVIDERS_PATH}/default-model`, { model }, 'PUT'));
     },
   };
 }

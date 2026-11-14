@@ -23,12 +23,15 @@ export function createConnectedWorkspaces(
       }
       return workspace.id;
     },
-    async browseWorkspaceFolders(path) {
+    async browseWorkspaceFolders(path, signal) {
       return workspaceFoldersSchema.parse(
         await request(
           path === undefined
             ? WORKSPACE_FOLDERS_PATH
             : `${WORKSPACE_FOLDERS_PATH}?${new URLSearchParams({ path })}`,
+          undefined,
+          'GET',
+          signal,
         ),
       );
     },
