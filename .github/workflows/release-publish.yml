@@ -1,6 +1,7 @@
 name: Publish release
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       candidate-run:
@@ -11,20 +12,20 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: publish-release
-  cancel-in-progress: false
-
 jobs:
   publish:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    concurrency:
+      group: publish-release
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: write
       packages: write
     steps:
-      - name: Verify candidate run
+      - name: Verify manually selected candidate run
+        if: inputs.candidate-run != ''
         id: candidate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -42,34 +43,35 @@ jobs:
           ' <<< "$run")
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.candidate.outputs.sha }}
+          ref: ${{ steps.candidate.outputs.sha || github.sha }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          run-id: ${{ inputs.candidate-run }}
-          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate-run || github.run_id }}
+          github-token: ${{ inputs.candidate-run && github.token || '' }}
           name: beluga-linux-x64
           path: dist/linux
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          run-id: ${{ inputs.candidate-run }}
-          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate-run || github.run_id }}
+          github-token: ${{ inputs.candidate-run && github.token || '' }}
           name: beluga-windows-x64
           path: dist/windows
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          run-id: ${{ inputs.candidate-run }}
-          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate-run || github.run_id }}
+          github-token: ${{ inputs.candidate-run && github.token || '' }}
           name: beluga-container
           path: dist/container
       - name: Publish verified assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_SHA: ${{ steps.candidate.outputs.sha }}
+          RELEASE_SHA: ${{ steps.candidate.outputs.sha || github.sha }}
         run: bash scripts/publish-release.sh

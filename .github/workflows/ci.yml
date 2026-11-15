@@ -78,3 +78,12 @@ jobs:
     needs: [check, release-plan]
     if: needs.release-plan.outputs.build == 'true'
     uses: ./.github/workflows/release-build.yml
+
+  release-publish:
+    needs: release-build
+    if: github.event_name == 'push'
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    uses: ./.github/workflows/release-publish.yml
