@@ -81,7 +81,8 @@ test('reveals the related response in an older turn without clearing the search'
   );
 
   await user.click(screen.getByRole('tab', { name: 'Trajectory' }));
-  await screen.findByRole('button', { name: 'Turn 11' });
+  // The first visit loads the Trajectory module before requesting the latest page.
+  await screen.findByRole('button', { name: 'Turn 11' }, { timeout: 5_000 });
   const search = screen.getByRole('searchbox', { name: 'Search trajectory' });
   fireEvent.change(search, { target: { value: 'original question' } });
   await user.click(await screen.findByRole('button', { name: 'Turn 1' }));
@@ -93,10 +94,16 @@ test('reveals the related response in an older turn without clearing the search'
   await user.keyboard('{Enter}');
 
   expect(await within(inspector).findByText('Answer 1')).toBeVisible();
-  expect(screen.getByRole('row', responseRow)).toBeVisible();
+  const row = screen.getByRole('row', responseRow);
+  expect(row).toBeVisible();
   expect(search).toHaveValue('original question');
+
+  row.focus();
+  await user.keyboard('{Enter}');
+  expect(row).toBeVisible();
+  expect(row).toHaveFocus();
 
   await user.click(within(inspector).getByRole('button', { name: 'Close details' }));
   expect(screen.queryByRole('row', responseRow)).not.toBeInTheDocument();
   expect(search).toHaveValue('original question');
-});
+}, 10_000);

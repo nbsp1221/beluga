@@ -228,11 +228,18 @@ export function TrajectoryView({
         );
       }
     }
-    setSelected({
-      requestId: request.id,
-      recordId: record?.id,
-      modelRequest,
-      revealForTerm: reveal ? term : undefined,
+    const recordId = record?.id;
+    setSelected((current) => {
+      const alreadyRevealed =
+        current?.requestId === request.id &&
+        current.recordId === recordId &&
+        current.revealForTerm === term;
+      return {
+        requestId: request.id,
+        recordId,
+        modelRequest,
+        revealForTerm: reveal || alreadyRevealed ? term : undefined,
+      };
     });
   }
 
