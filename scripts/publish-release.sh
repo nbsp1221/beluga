@@ -25,7 +25,7 @@ done
 test "$(tar -xOf dist/linux/beluga-linux-x64.tar.gz beluga/VERSION)" = "$version"
 awk -v title="## $version" '$0==title {found=1; next} found && /^## / {exit} found {print}' CHANGELOG.md > dist/notes.md
 grep -q '[^[:space:]]' dist/notes.md
-printf '\nDocker: `%s`\n' "$image" >> dist/notes.md
+printf '\nDocker: %s%s%s\n' '`' "$image" '`' >> dist/notes.md
 
 if existing=$(gh release view "$tag" --json isDraft --jq .isDraft 2>&1); then
   test "$existing" = true

@@ -155,23 +155,11 @@ test(
 );
 
 test(
-  'opens workspace and explicit external files while rejecting forged session data',
+  'uses the registered preset and workspace for file reads',
   { timeout: 30_000 },
   async (context) => {
-    const {
-      project,
-      other,
-      outside,
-      prepareWorkspace,
-      registerWorkspace,
-      post,
-      create,
-      createPreset,
-      turn,
-      fetch,
-      restart,
-    } = await setupHarness(context);
-    await writeFile(join(project, 'AGENTS.md'), 'workspace instruction marker');
+    const { other, prepareWorkspace, registerWorkspace, post, create, createPreset, turn } =
+      await setupHarness(context);
     const workspace = await prepareWorkspace();
     const otherWorkspace = await registerWorkspace(other);
     const plainPreset = await createPreset();
@@ -205,7 +193,20 @@ test(
     );
     expect(readme.isError).toBe(false);
     expect(JSON.parse(resultText(readme))).toContain('project README\nsecond line');
+  },
+);
 
+test(
+  'restores successful and failed read calls and their model input after restart',
+  { timeout: 30_000 },
+  async (context) => {
+    const { project, outside, prepareWorkspace, create, createPreset, turn, fetch, restart } =
+      await setupHarness(context);
+    await writeFile(join(project, 'AGENTS.md'), 'workspace instruction marker');
+    const workspace = await prepareWorkspace();
+    const preset = await createPreset(['file.read']);
+    const reading = await create(workspace.id, preset.id);
+    readToolResult(await turn(reading.id, 'README.md', undefined, { limit: 2 }));
     const trajectory = origin + '/api/conversations/' + reading.id + '/trajectory';
     const history = await readTrajectory(fetch(trajectory));
     const submission = history.find(({ records }) => records.some(({ kind }) => kind === 'tool'));
@@ -224,6 +225,34 @@ test(
     expect(JSON.stringify(call.output)).toContain('project README');
     expect(call.status).toBe('completed');
     expect(input.systemPrompt).not.toMatch(/Working directory:|workspace instruction marker/);
+
+    const missing = readToolResult(await turn(reading.id, '../other/missing.txt'));
+    expect(missing.isError).toBe(true);
+    expect(resultText(missing)).not.toContain(outside);
+    const beforeRestart = await readTrajectory(fetch(trajectory));
+    expect(
+      beforeRestart.some(({ records }) =>
+        records.some((record) => record.kind === 'tool' && record.status === 'failed'),
+      ),
+    ).toBe(true);
+
+    await restart();
+
+    expect(await readTrajectory(fetch(trajectory))).toEqual(beforeRestart);
+    expect(
+      trajectoryModelInputResponseSchema.parse(await (await fetch(modelInputPath)).json()),
+    ).toEqual(input);
+  },
+);
+
+test(
+  'reads the requested line ranges and bounds large results',
+  { timeout: 30_000 },
+  async (context) => {
+    const { project, prepareWorkspace, create, createPreset, turn } = await setupHarness(context);
+    const workspace = await prepareWorkspace();
+    const preset = await createPreset(['file.read']);
+    const reading = await create(workspace.id, preset.id);
 
     const next = readToolResult(
       await turn(reading.id, 'README.md', undefined, { offset: 3, limit: 1 }),
@@ -254,6 +283,17 @@ test(
     const piRangeText: unknown = JSON.parse(resultText(piRange));
     expect(piRangeText).toContain('first\nsecond');
     expect(piRangeText).not.toContain('third');
+  },
+);
+
+test(
+  'reads nested files, explicit external paths and supported links',
+  { timeout: 30_000 },
+  async (context) => {
+    const { outside, prepareWorkspace, create, createPreset, turn } = await setupHarness(context);
+    const workspace = await prepareWorkspace();
+    const preset = await createPreset(['file.read']);
+    const reading = await create(workspace.id, preset.id);
 
     const notes = readToolResult(await turn(reading.id, 'docs/notes.txt'));
     expect(resultText(notes)).toMatch(/other in-project file/);
@@ -272,22 +312,6 @@ test(
       assert.equal(result.isError, false, file);
       expect(resultText(result)).toMatch(/outside marker/);
     }
-    const missing = readToolResult(await turn(reading.id, '../other/missing.txt'));
-    expect(missing.isError).toBe(true);
-    expect(resultText(missing)).not.toContain(outside);
-    const beforeRestart = await readTrajectory(fetch(trajectory));
-    expect(
-      beforeRestart.some(({ records }) =>
-        records.some((record) => record.kind === 'tool' && record.status === 'failed'),
-      ),
-    ).toBe(true);
-
-    await restart();
-
-    expect(await readTrajectory(fetch(trajectory))).toEqual(beforeRestart);
-    expect(
-      trajectoryModelInputResponseSchema.parse(await (await fetch(modelInputPath)).json()),
-    ).toEqual(input);
   },
 );
 

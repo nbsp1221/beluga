@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-13
+last_reviewed: 2026-11-15
 ---
 
 # Development
@@ -9,7 +9,8 @@ last_reviewed: 2026-11-13
 ## Run the development preview
 
 Use Node.js 24 or newer for development and the Host, and the pnpm version in
-[package.json](../package.json).
+[package.json](../package.json). CI uses the exact Node version in
+[.node-version](../.node-version).
 
 ```sh
 pnpm install --frozen-lockfile
@@ -46,6 +47,11 @@ pnpm --filter @workspace/desktop run package:windows
 The portable ZIP and SHA-256 checksum are under `apps/desktop/src-tauri/target/release/bundle/portable/`. The optional NSIS installer is under the adjacent `nsis/` directory. Both include Node, the Host and the web build. The installer can also provision WebView2.
 
 ## Checks
+
+[CI](../.github/workflows/ci.yml) runs `pnpm check` on Linux and Windows for
+pull requests to `main` and pushes to `main`. The Linux job also checks release
+metadata, GitHub Actions workflows, and shell scripts under `scripts/`.
+See [release verification](releasing.md) for native packaging.
 
 Desktop authentication and Connections regression tests use isolated Vitest
 fixtures. Check the installed Windows app, tray interactions, and performance
