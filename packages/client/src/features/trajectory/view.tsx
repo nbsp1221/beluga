@@ -131,6 +131,7 @@ export function TrajectoryView({
     requestId: string;
     recordId?: string;
     modelRequest?: boolean;
+    revealForTerm?: string;
   }>();
   const [tab, setTab] = useState('Summary');
   const { surface, narrow } = useTrajectoryWidth();
@@ -158,7 +159,6 @@ export function TrajectoryView({
     [visible, duration, requests],
   );
 
-  const matches = useMemo(() => matchingSpanKeys(spans, term), [spans, term]);
   const spanByKey = useMemo(() => new Map(spans.map((span) => [span.key, span])), [spans]);
 
   const selectedTurn = requests.find(({ request }) => request.id === selected?.requestId);
@@ -166,6 +166,14 @@ export function TrajectoryView({
   const selectedRecord = selectedRequest?.records.find(({ id }) => id === selected?.recordId);
   const selectedKey =
     selectedRequest && selectedRecord ? recordKey(selectedRequest, selectedRecord) : undefined;
+  const revealedKey = selected?.revealForTerm === term ? selectedKey : undefined;
+  const matches = useMemo(() => {
+    const keys = matchingSpanKeys(spans, term);
+    if (keys && revealedKey) {
+      keys.add(revealedKey);
+    }
+    return keys;
+  }, [spans, term, revealedKey]);
   const selectedModelNumber =
     selected?.modelRequest && selectedKey ? spanByKey.get(selectedKey)?.requestNumber : undefined;
   const inspectorOpen = Boolean(selectedRequest);
@@ -219,14 +227,17 @@ export function TrajectoryView({
           (current) => new Set([...current].filter((id) => id !== callGroup(request, record))),
         );
       }
-      if (matches && !matches.has(pendingRevealRef.current)) {
-        onSearch('');
-      }
     }
-    setSelected({ requestId: request.id, recordId: record?.id, modelRequest });
+    setSelected({
+      requestId: request.id,
+      recordId: record?.id,
+      modelRequest,
+      revealForTerm: reveal ? term : undefined,
+    });
   }
 
   function close(restore: boolean) {
+    pendingRevealRef.current = null;
     setSelected(undefined);
     if (restore) {
       requestAnimationFrame(() => {
@@ -294,6 +305,7 @@ export function TrajectoryView({
             setFoldedTurns(new Set(allTurnsFolded ? [] : visible.map(({ id }) => id))),
           toggleCalls: () => setFoldedCalls(new Set(allCallsFolded ? [] : visibleCallGroups)),
           onSearch: (value) => {
+            pendingRevealRef.current = null;
             followTailRef.current = false;
             if (viewportRef.current && value.trim()) {
               viewportRef.current.scrollTop = 0;

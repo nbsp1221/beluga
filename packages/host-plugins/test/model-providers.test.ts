@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { json } from 'node:stream/consumers';
 import { createModels } from '@earendil-works/pi-ai';
 import { expect, test } from 'vitest';
 import { openModelProviders } from '../src/model-providers/adapter.js';
@@ -14,6 +15,7 @@ test('discovers models and streams with an API key at the configured HTTP endpoi
   const apiKey = 'test-provider-key';
   const modelId = 'test-model';
   const requests: { method?: string; path?: string; authorization?: string }[] = [];
+  const completions: unknown[] = [];
   const endpoint = createServer((request, response) => {
     requests.push({
       method: request.method,
@@ -26,15 +28,21 @@ test('discovers models and streams with an API key at the configured HTTP endpoi
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ data: [{ id: modelId }] }));
     } else if (request.url === '/v1/chat/completions') {
-      const chunk = { id: 'chatcmpl-test', object: 'chat.completion.chunk', model: modelId };
-      response.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      response.write(
-        `data: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: { content: 'Hello' }, finish_reason: null }] })}\n\n`,
+      void json(request).then(
+        (body) => {
+          completions.push(body);
+          const chunk = { id: 'chatcmpl-test', object: 'chat.completion.chunk', model: modelId };
+          response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          response.write(
+            `data: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: { content: 'Hello' }, finish_reason: null }] })}\n\n`,
+          );
+          response.write(
+            `data: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`,
+          );
+          response.end('data: [DONE]\n\n');
+        },
+        () => response.writeHead(400).end(),
       );
-      response.write(
-        `data: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`,
-      );
-      response.end('data: [DONE]\n\n');
     } else {
       response.writeHead(404).end();
     }
@@ -75,12 +83,20 @@ test('discovers models and streams with an API key at the configured HTTP endpoi
   const model = models.getModel(compatible.id, modelId);
   assert(model);
 
-  const result = await models
-    .streamSimple(model, { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] })
-    .result();
+  const context = {
+    messages: [{ role: 'user' as const, content: 'Hello', timestamp: Date.now() }],
+  };
+  const result = await models.streamSimple(model, context).result();
   expect(result).toMatchObject({ stopReason: 'stop', content: [{ type: 'text', text: 'Hello' }] });
+  expect(completions[0]).not.toHaveProperty('max_tokens');
+  expect(completions[0]).not.toHaveProperty('max_completion_tokens');
+
+  const limited = await models.streamSimple(model, context, { maxTokens: 64 }).result();
+  expect(limited.stopReason).toBe('stop');
+  expect(completions[1]).toHaveProperty('max_tokens', 64);
   expect(requests).toEqual([
     { method: 'GET', path: '/v1/models', authorization: `Bearer ${apiKey}` },
+    { method: 'POST', path: '/v1/chat/completions', authorization: `Bearer ${apiKey}` },
     { method: 'POST', path: '/v1/chat/completions', authorization: `Bearer ${apiKey}` },
   ]);
 });

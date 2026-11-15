@@ -142,6 +142,10 @@ function customProvider(
     return fetch(input, { ...init, headers, redirect: 'error' });
   };
 
+  // The endpoint owns the default output budget when model limits are unknown.
+  const stream: typeof streams.stream = (model, context, options) =>
+    streams.stream(model, context, { ...options, fetch: endpointFetch });
+
   return createProvider({
     id,
     name: connection.name,
@@ -157,15 +161,7 @@ function customProvider(
         },
       },
     },
-    api: {
-      stream: (model, context, options) =>
-        streams.stream(model, context, { ...options, fetch: endpointFetch }),
-      streamSimple: (model, context, options) =>
-        streams.streamSimple(model, context, {
-          ...options,
-          fetch: endpointFetch,
-        }),
-    },
+    api: { stream, streamSimple: stream },
     models: connection.models.map((model) => ({
       id: model,
       name: model,
