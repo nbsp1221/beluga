@@ -32,9 +32,16 @@ cp -R apps/web/dist "$bundle/web"
 cp LICENSE THIRD_PARTY_NOTICES.md "$bundle/"
 cp packages/client/node_modules/@flue/sdk/LICENSE "$bundle/FLUE-SDK-LICENSE.txt"
 printf '%s\n' "$version" > "$bundle/VERSION"
-"$bundle/runtime/bin/node" "$bundle/host/dist/main.js" --help
 name=beluga-linux-x64.tar.gz
 tar -czf "$output/$name" -C "$scratch" beluga
+mkdir "$scratch/unpacked"
+tar -xzf "$output/$name" -C "$scratch/unpacked"
+packed="$scratch/unpacked/beluga"
+test "$(cat "$packed/VERSION")" = "$version"
+for file in web/index.html LICENSE runtime/LICENSE FLUE-SDK-LICENSE.txt THIRD_PARTY_NOTICES.md; do
+  test -f "$packed/$file"
+done
+"$packed/runtime/bin/node" "$packed/host/dist/main.js" --help
 (
   cd "$output"
   sha256sum "$name" > "$name.sha256"

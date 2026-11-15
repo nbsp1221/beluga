@@ -6,15 +6,14 @@ last_reviewed: 2026-11-15
 
 # Release verification
 
-Add a Changesets entry for user-facing changes with `pnpm exec changeset` and select the root `beluga` package. Merge product changes through a pull request. [Prepare release](../.github/workflows/release-prepare.yml) prepares a separate PR for the next version and changelog. The root package owns the product release version. Internal private packages follow the repository source revision. Give an SDK or plugin its own release sequence when it is distributed independently. `pnpm release:check` verifies the desktop metadata and installation references.
+Add a Changesets entry for user-facing changes with `pnpm exec changeset` and select the root `beluga` package. Merge product changes through a pull request. [Version](../.github/workflows/version.yml) prepares a separate PR for the next version and changelog. The root package owns the product release version. Internal private packages follow the repository source revision. Give an SDK or plugin its own release sequence when it is distributed independently. `pnpm release:check` verifies the desktop metadata and installation references.
 
-The release PR is the approval to publish. Use the checks below to verify the affected install paths before merging it. The Linux installer and Windows x64 portable ZIP and installer go into the same GitHub Release. The corresponding Docker image is published to GitHub Container Registry with the same version.
+The release PR is the approval to publish. If the checks on the Changesets PR await workflow approval, select **Approve workflows to run** on the PR. Use the checks below to verify the affected install paths before merging it. The Linux installer and Windows x64 portable ZIP and installer go into the same GitHub Release. The corresponding Docker image is published to GitHub Container Registry with the same version.
 
 When the product version changes on `main`, [CI](../.github/workflows/ci.yml) runs
-its Windows and Linux checks. If they pass, [Build release candidate](../.github/workflows/release-build.yml)
-packages the same commit and uploads the Linux archive and installer script,
-Windows bundles, and Docker image archive. Once packaging succeeds, [Publish release](../.github/workflows/release-publish.yml)
-uses the artifacts from that run and publishes automatically.
+its Windows and Linux checks. If they pass, [Release](../.github/workflows/release.yml)
+packages the same commit, uploads the Linux archive and installer script,
+Windows bundles, and Docker image archive, and publishes those artifacts automatically.
 
 To build the current `main` version again, select **Run workflow** in **CI** and
 enable **Build release candidate after CI**. This manual build creates a fresh set of artifacts for verification.
@@ -53,6 +52,6 @@ Extract the portable ZIP and run the optional installer on separate clean system
 
 The publish job verifies the checksums and publishes the image to GHCR. After an anonymous pull succeeds, it tags the candidate commit, uploads the Linux and Windows assets with their checksums, and publishes the GitHub Release with the changelog and image reference.
 
-The first GHCR push creates a private package. Set the package visibility to public once, then use **Re-run failed jobs** on the same CI run to retry publication. For other publishing failures, fix the reported cause and retry the failed job on the same run.
+The first GHCR push creates a private package. Set the package visibility to public once, then use **Re-run failed jobs** on the original CI run. Use the same retry for transient failures and external configuration changes. GitHub retries use the original workflow revision.
 
-To publish a verified candidate built before automatic publication or from a manual CI build, run **Publish release** on `main` with the successful CI run ID containing that candidate. This uses the candidate's original commit and artifacts.
+If the publishing code needs a fix, merge the fix with a Changesets entry, then merge the release PR for the next version. CI builds the new version with the fixed publisher. Leave any image or tag already pushed under the failed version in place.
