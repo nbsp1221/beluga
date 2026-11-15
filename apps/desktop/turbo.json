@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "prepare:windows": {
+      "cache": false,
+      "passThroughEnv": ["npm_execpath"]
+    }
+  }
+}

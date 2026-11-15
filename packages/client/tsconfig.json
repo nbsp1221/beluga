@@ -1,0 +1,7 @@
+{
+  "extends": "@workspace/typescript-config/react.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": ["src"]
+}

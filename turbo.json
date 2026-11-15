@@ -1,17 +1,59 @@
 {
-  "$schema": "https://turborepo.com/schema.json",
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "globalDependencies": ["packages/typescript-config/*.json"],
   "tasks": {
-    "//#lint": {},
-    "//#format": {},
-    "//#format:fix": { "cache": false },
-    "//#check-types:root": {},
-    "check-types": { "dependsOn": ["transit"] },
-    "test": { "dependsOn": ["transit"] },
-    "transit": { "dependsOn": ["^transit"] },
-    "@repo/web#test": { "dependsOn": ["transit"], "cache": false },
-    "test:watch": { "cache": false, "persistent": true },
-    "dev": { "cache": false, "persistent": true },
-    "package": { "cache": false, "outputs": ["dist/**"] },
-    "@repo/web#dev": { "cache": false, "persistent": true, "passThroughEnv": ["*"] }
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": ["dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build", "^typecheck"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "passThroughEnv": ["SystemRoot"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "env": ["PORT", "HOST_URL"],
+      "passThroughEnv": ["CODEX_HOME", "SystemRoot"],
+      "cache": false,
+      "persistent": true
+    },
+    "lint:eslint": {
+      "dependsOn": ["^lint:eslint"]
+    },
+    "lint:eslint:fix": {
+      "cache": false
+    },
+    "//#lint:eslint:root": {},
+    "//#lint:eslint:fix:root": {
+      "cache": false
+    },
+    "//#lint:oxlint": {
+      "dependsOn": [
+        "@workspace/protocol#build",
+        "@workspace/runtime#build",
+        "@workspace/host-plugins#build"
+      ],
+      "cache": false
+    },
+    "//#lint:oxlint:fix": {
+      "dependsOn": [
+        "@workspace/protocol#build",
+        "@workspace/runtime#build",
+        "@workspace/host-plugins#build"
+      ],
+      "cache": false
+    },
+    "//#typecheck:root": {
+      "dependsOn": ["@workspace/host-plugins#build", "@workspace/runtime#build"]
+    },
+    "//#test:integration": {
+      "dependsOn": ["@workspace/host-plugins#build", "@workspace/runtime#build"],
+      "passThroughEnv": ["SystemRoot"]
+    }
   }
 }

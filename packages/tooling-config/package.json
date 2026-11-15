@@ -1,0 +1,31 @@
+{
+  "name": "@workspace/tooling-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint": "./src/eslint.mts",
+    "./ignores": "./src/ignores.mts",
+    "./oxlint": "./src/oxlint.mts",
+    "./oxfmt": "./src/oxfmt.mts"
+  },
+  "scripts": {
+    "lint:eslint": "eslint .",
+    "lint:eslint:fix": "eslint --fix .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@retn0/eslint-config": "2.2.0",
+    "@retn0/eslint-config-oxlint": "0.2.0",
+    "@retn0/oxfmt-config": "0.3.0",
+    "@retn0/oxlint-config": "3.0.0",
+    "eslint-plugin-turbo": "2.11.10",
+    "globals": "17.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  }
+}

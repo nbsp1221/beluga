@@ -1,0 +1,9 @@
+.git
+.local
+.turbo
+**/.turbo
+**/node_modules
+**/dist
+**/target
+**/.env*
+**/*.log

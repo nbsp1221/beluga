@@ -1,3 +1,1 @@
-import config from '@repo/lint-config/oxlint';
-
-export default config;
+export { default } from '@workspace/tooling-config/oxlint';

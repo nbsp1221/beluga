@@ -1,0 +1,45 @@
+{
+  "name": "@workspace/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./trajectory": "./src/features/trajectory/plugin.tsx",
+    "./files": "./src/features/files/plugin.tsx",
+    "./conversation": "./src/features/conversation/plugin.tsx",
+    "./bootstrap/demo": "./src/bootstrap/demo.ts",
+    "./bootstrap/connected": "./src/bootstrap/connected.ts",
+    "./chat": "./src/features/chat/plugin.tsx",
+    "./agent-presets": "./src/features/agent-presets/plugin.tsx",
+    "./model-providers": "./src/features/model-providers/plugin.tsx",
+    "./auth": "./src/auth/login.tsx",
+    "./workbench": "./src/workbench/plugin.tsx"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc -p test/tsconfig.json",
+    "lint:eslint": "eslint .",
+    "lint:eslint:fix": "eslint --fix .",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@flue/sdk": "2.3.0",
+    "@workspace/protocol": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "@workspace/ui": "workspace:*",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-router": "catalog:",
+    "uuid": "14.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@workspace/tooling-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

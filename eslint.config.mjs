@@ -1,3 +1,4 @@
-import config from '@repo/lint-config/eslint';
+import { nodeConfig } from '@workspace/tooling-config/eslint';
+import { globalIgnores } from 'eslint/config';
 
-export default config;
+export default [...nodeConfig, globalIgnores(['apps/**', 'packages/**'])];

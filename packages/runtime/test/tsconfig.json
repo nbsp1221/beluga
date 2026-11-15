@@ -1,0 +1,5 @@
+{
+  "extends": "@workspace/typescript-config/base.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"], "jsx": "react-jsx" },
+  "include": ["*.test.ts"]
+}

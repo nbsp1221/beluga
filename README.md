@@ -1,94 +1,36 @@
 # Beluga
 
-An agent workspace built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
-Use Codex models, access your workspace remotely, and organize conversations by Git worktree.
+Run a coding agent on your computer or Linux server. Open a project, give the agent a task, and inspect its model requests and tool calls in **Trajectory**.
 
-## Getting started
+## Install
 
-On GNU/Linux x64 with systemd and curl:
+Beluga is in public preview. [Download v0.1.0-preview.1](https://github.com/nbsp1221/beluga/releases/tag/v0.1.0-preview.1).
 
-```sh
-curl -fsSL https://github.com/nbsp1221/beluga/releases/latest/download/install.sh | sh
-```
+- **Linux server** · Install the native Host as a `systemd` user service and open it in your browser. [Linux setup](docs/hosting.md#linux-user-service)
+- **Windows desktop** · Extract the x64 portable ZIP to run Beluga on your PC or connect to a Linux Host. [Windows setup](docs/hosting.md#windows-desktop)
+- **Docker** · Run `ghcr.io/nbsp1221/beluga:0.1.0-preview.1` with persistent data and the project folders you want to use. [Docker setup](docs/hosting.md#docker)
 
-The installer downloads and verifies the latest stable release, installs its
-bundled Node.js and pnpm, and starts a systemd user service. Installation and
-updates run under your account. To keep the service running after logout and
-start it at boot, the installer enables user lingering. Only this step may
-request sudo if your system requires administrator authentication.
-Beluga restarts after a failure.
-The bundled runtime and native dependencies require a compatible glibc-based system.
-Running Beluga as root gives agents full system privileges.
+## Start a conversation
 
-Open the browser authentication URL printed when installation finishes. In
-**GPT Auth** settings, sign in with ChatGPT or reuse an existing Codex CLI login,
-then select a Codex model. The default URL is local to the machine running Beluga;
-see [Workspaces and remote access](#workspaces-and-remote-access) for remote use.
+1. Open your Beluga Host and sign in with its access code. A desktop app running its own Host opens directly.
+2. Open **Settings → Providers**, connect a model provider, and choose a model. The Codex connection uses the Codex CLI login on the machine and account running the Host.
+3. Select **Add workspace**, choose a project folder on the Host, and send your first message. **Standard** is ready to use.
 
-For manual installation or running without a service, see the
-[installation notes](apps/web/packaging/README.md).
+New conversations start in **Read only**. Choose **Workspace write** to let the agent edit files in the workspace, or **Full access** to let it run commands with the Host account's permissions. Read and search tools can open explicitly named paths that the Host account can read, including paths outside the workspace.
 
-## Workspaces and remote access
+Use chat for file work. The **Files** panel shows sample content, and chat supports text messages.
 
-Open a project to start a conversation. Select **Worktree** in the sidebar to create
-or import Git worktrees and keep their conversations together. Worktree operations
-require Git on the host.
+## Work with a remote Host
 
-Configure authenticated remote access in **Settings → Reverse proxy**. Installation
-keeps the loopback defaults and does not configure a firewall, TLS, or tunnels.
+The Host runs the agent and stores its conversations. For example, when you connect from Windows to your Linux Host, workspace paths and shell commands refer to Linux. Use the [Host guide](docs/hosting.md) to configure network access, choose the execution account, and back up Host data.
 
-These features use bundled community plugins:
+## Documentation
 
-- [dsh-codex-auth](https://www.npmjs.com/package/dsh-codex-auth): Codex account integration.
-- [dsh-full-remote](https://github.com/JUANWANG-BUAA/dsh-full-remote): authenticated remote access.
-- [Clutch Worktree](https://github.com/Cerbur/clutch-dsh/tree/main/packages/clutch-dsh-worktree):
-  project, worktree, and conversation navigation.
-
-## Data and service management
-
-Conversations and settings are stored in `~/.beluga` under the account running
-Beluga. Set `DSH_HOME` to use another directory. Tools used by your projects must
-be available on the host.
-
-Service installation puts program files in `~/.local/lib/beluga`. To upgrade,
-run the same installation command. It replaces program files and preserves
-your account's conversations and settings. Stop other Beluga instances before
-switching installation methods.
-
-Check the service or apply custom service settings:
-
-```sh
-systemctl --user status beluga.service
-systemctl --user edit beluga.service
-```
-
-See the [installation notes](apps/web/packaging/README.md) for recovery guidance.
-
-## Development
-
-Requires Node.js 24.12 or later and the pnpm version declared in `package.json`.
-
-```sh
-pnpm install --frozen-lockfile
-pnpm dev
-```
-
-Run `pnpm check` for lint, formatting, types, and tests. Run `pnpm format:fix` to
-format files. See [AGENTS.md](AGENTS.md) for repository conventions.
-
-### Build a Linux package
-
-Build on Linux x64 with the Node.js version in `.node-version` and the pinned pnpm
-version so native dependencies match the target. Packaging also requires `tar`
-and `xz`:
-
-```sh
-pnpm install --frozen-lockfile
-pnpm package
-```
-
-The archive, SHA-256 checksum, and installation script are written to `apps/web/dist/`.
+- [Host setup and operations](docs/hosting.md)
+- [Build from source and contribute](docs/development.md)
+- [Architecture](docs/architecture.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## License
 
-[MIT](LICENSE).
+Beluga is released under the [MIT License](LICENSE).
