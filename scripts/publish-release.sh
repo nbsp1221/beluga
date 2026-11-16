@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version=$(node -p 'require("./package.json").version')
+version=$(jq -er '.version | strings | select(length > 0)' package.json)
 tag="v$version"
 image="ghcr.io/${GH_REPO,,}:$version"
 assets=(
@@ -23,19 +23,24 @@ for asset in "${assets[@]}"; do
   fi
 done
 test "$(tar -xOf dist/linux/beluga-linux-x64.tar.gz beluga/VERSION)" = "$version"
-awk -v title="## $version" '$0==title {found=1; next} found && /^## / {exit} found {print}' CHANGELOG.md > dist/notes.md
+awk -v title="## $version" '$0==title {found=1; next} /^## / {found=0} found {print}' CHANGELOG.md > dist/notes.md
 grep -q '[^[:space:]]' dist/notes.md
 printf '\nDocker: %s%s%s\n' '`' "$image" '`' >> dist/notes.md
 
 if existing=$(gh release view "$tag" --json isDraft --jq .isDraft 2>&1); then
-  test "$existing" = true
+  [[ "$existing" == true || "$existing" == false ]]
 else
   grep -qi 'release not found' <<< "$existing"
 fi
 remote=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")
 if [[ -n "$remote" ]]; then
   target=$(awk 'END {print $1}' <<< "$remote")
-  test "$target" = "$RELEASE_SHA"
+  [[ "$target" == "$RELEASE_SHA" ]] || { echo "Tag $tag points to a different commit." >&2; exit 1; }
+fi
+if [[ "$existing" == false ]]; then
+  [[ -n "$remote" ]] || { echo "Published release $tag has no remote tag." >&2; exit 1; }
+  printf 'Release %s is already published for %s.\n' "$tag" "$RELEASE_SHA"
+  exit 0
 fi
 
 docker load --input dist/container/beluga-image.tar

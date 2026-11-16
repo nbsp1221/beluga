@@ -6,17 +6,17 @@ last_reviewed: 2026-11-15
 
 # Release verification
 
-Add a Changesets entry for user-facing changes with `pnpm exec changeset` and select the root `beluga` package. Merge product changes through a pull request. [Prepare release](../.github/workflows/release-prepare.yml) prepares a separate PR for the next version and changelog. The root package owns the product release version. Internal private packages follow the repository source revision. Give an SDK or plugin its own release sequence when it is distributed independently. `pnpm release:check` verifies the desktop metadata and installation references.
+Add a Changesets entry for user-facing changes with `pnpm exec changeset` and select the root `beluga` package. Merge product changes through a pull request. [Version](../.github/workflows/version.yml) prepares a separate PR for the next version and changelog. The root package owns the product release version. Internal private packages follow the repository source revision. Give an SDK or plugin its own release sequence when it is distributed independently. `pnpm release:check` verifies the desktop metadata and installation references.
 
-Publish the Linux installer and Windows x64 portable ZIP and installer in the same GitHub Release. Publish the corresponding Docker image to GitHub Container Registry with the same release version. Open all three install paths together after the checks below pass for that tagged source.
+The release PR is the approval to publish. If the checks on the Changesets PR await workflow approval, select **Approve workflows to run** on the PR. Use the checks below to verify the affected install paths before merging it. The Linux installer and Windows x64 portable ZIP and installer go into the same GitHub Release. The corresponding Docker image is published to GitHub Container Registry with the same version.
 
 When the product version changes on `main`, [CI](../.github/workflows/ci.yml) runs
-its Windows and Linux checks, then calls [Build release candidate](../.github/workflows/release-build.yml)
-for the same commit. The CI run stores the Linux archive and installer script,
-Windows bundles, and Docker image archive as artifacts.
+its Windows and Linux checks. If they pass, [Release](../.github/workflows/release.yml)
+packages the same commit, uploads the Linux archive and installer script,
+Windows bundles, and Docker image archive, and publishes those artifacts automatically.
 
 To build the current `main` version again, select **Run workflow** in **CI** and
-enable **Build release candidate after CI**. This creates a fresh run and artifact set.
+enable **Build release candidate after CI**. This manual build creates a fresh set of artifacts for verification.
 
 Mark preview releases as **Pre-release** on GitHub. Use an explicit version in installation commands and on the container image so users can install the same build again.
 
@@ -43,11 +43,15 @@ Extract the portable ZIP and run the optional installer on separate clean system
 
 ## Verify the published instructions
 
-- Before publishing, verify the Linux archive and Windows bundles against their candidate checksums, and load the candidate Docker image archive for runtime checks. The public Linux one-command installer uses the versioned GitHub Release URL.
+- CI verifies the Linux and Windows bundles and checks the Docker runtime. For manual install checks, download the artifacts from the CI run and verify their checksums before use. The public Linux one-command installer uses the versioned GitHub Release URL.
 - Check that each artifact includes the Beluga license and the applicable third-party notices and license files.
 - Keep release notes focused on supported installs, changes users will see, and any action required before updating.
 - After publishing, verify the public download links, run the documented Linux one-command installer, and confirm that the published Docker tag resolves to the tested image.
 
-## Publish the verified assets
+## Recover a publication
 
-Once you have verified the candidate, run [Publish release](../.github/workflows/release-publish.yml) on `main` with the successful CI run ID that contains the candidate artifacts. The workflow downloads that run's artifacts, verifies checksums, and publishes the corresponding image to GHCR. After an anonymous pull succeeds, it tags the candidate commit, uploads the Linux and Windows assets with their checksums, and publishes the draft GitHub Release with the changelog and image reference. If publication stops, inspect the error and rerun with the same candidate once it is resolved.
+The publish job verifies the checksums and publishes the image to GHCR. After an anonymous pull succeeds, it tags the candidate commit, uploads the Linux and Windows assets with their checksums, and publishes the GitHub Release with the changelog and image reference.
+
+The first GHCR push creates a private package. Set the package visibility to public once, then use **Re-run failed jobs** on the original CI run. Use the same retry for transient failures and external configuration changes. GitHub retries use the original workflow revision.
+
+If the publishing code needs a fix, merge the fix with a Changesets entry, then merge the release PR for the next version. CI builds the new version with the fixed publisher. Leave any image or tag already pushed under the failed version in place.

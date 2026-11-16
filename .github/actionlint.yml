@@ -1,0 +1,5 @@
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      # Remove when the pinned actionlint release includes github.com/rhysd/actionlint/pull/654.
+      - '^unexpected key "queue" for "concurrency" section\.'

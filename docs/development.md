@@ -44,7 +44,7 @@ On Windows x64, install the [Tauri prerequisites](https://v2.tauri.app/start/pre
 pnpm --filter @workspace/desktop run package:windows
 ```
 
-The portable ZIP and SHA-256 checksum are under `apps/desktop/src-tauri/target/release/bundle/portable/`. The optional NSIS installer is under the adjacent `nsis/` directory. Both include Node, the Host and the web build. The installer can also provision WebView2.
+The portable ZIP, optional NSIS installer and their SHA-256 checksums are under `apps/desktop/src-tauri/target/release/bundle/windows-x64/`. Both bundles include Node, the Host and the web build. The installer can also provision WebView2.
 
 ## Checks
 
