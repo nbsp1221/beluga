@@ -18,8 +18,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc -p test/tsconfig.json",
-    "lint:eslint": "eslint .",
-    "lint:eslint:fix": "eslint --fix .",
+    "lint": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts . && eslint .",
+    "lint:fix": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts --fix . && eslint --fix .",
     "test:watch": "vitest"
   },
   "dependencies": {

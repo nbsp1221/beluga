@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Beluga",
-  "version": "../package.json",
+  "version": "../../cli/package.json",
   "identifier": "io.github.nbsp1221.beluga",
   "build": {
-    "beforeDevCommand": "pnpm dev:shell",
+    "beforeDevCommand": "pnpm prepare:windows && pnpm dev:shell",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
-    "frontendDist": "../dist"
+    "beforeBuildCommand": "pnpm prepare:windows",
+    "frontendDist": "../dist/shell"
   },
   "app": {
     "windows": [],

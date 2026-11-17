@@ -3,8 +3,7 @@ import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { serve } from '@hono/node-server';
 import { createDesktopAuth, desktopSessionCookie } from '@workspace/host-plugins/auth/host';
-import { createHost } from './app.js';
-import { connectedHostOptions } from './config.js';
+import { connectedHostOptions, createHost } from '@workspace/host-server';
 import { createDesktopConnections } from './desktop-connections.js';
 
 export async function startDesktopHost(dataDir: string, webDir: string) {
@@ -42,6 +41,7 @@ export async function startDesktopHost(dataDir: string, webDir: string) {
     },
   });
 
+  let startupStage: 'listener' | 'resources' | undefined = 'listener';
   try {
     await once(server, 'listening');
     const address = server.address();
@@ -49,16 +49,23 @@ export async function startDesktopHost(dataDir: string, webDir: string) {
       throw new Error('Desktop Host did not bind to loopback.');
     }
     const origin = `http://127.0.0.1:${address.port}`;
+    startupStage = 'resources';
     host = await createHost(
       await connectedHostOptions(dataDir, webDir, origin, createDesktopAuth(origin, token), true),
     );
     connections = createDesktopConnections(origin, host.authenticate);
     await announce({ type: 'ready', origin, cookie: desktopSessionCookie, token });
+    startupStage = undefined;
     await shutdown;
     stopping = true;
     connections.stop();
     await Promise.allSettled(mutations);
     await host.abortConversations();
+  } catch (error) {
+    if (startupStage) {
+      await announce({ type: 'failed', stage: startupStage }).catch(() => undefined);
+    }
+    throw error;
   } finally {
     stopping = true;
     const closed = new Promise<void>((resolve) => {

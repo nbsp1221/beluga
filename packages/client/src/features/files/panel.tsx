@@ -18,7 +18,7 @@ const sampleFiles = [
   },
   {
     path: 'docs/architecture.md',
-    text: '# Architecture\n\napps/web assembles the product.\npackages/ui supplies shared shadcn components.\npackages/client and packages/host-plugins own product features.\npackages/protocol defines HTTP contracts.\npackages/runtime owns plugin lifecycles.\napps/host hosts the server plugin graph.',
+    text: '# Architecture\n\napps/web assembles the product.\npackages/ui supplies shared shadcn components.\npackages/client and packages/host-plugins own product features.\npackages/protocol defines HTTP contracts.\npackages/runtime owns plugin lifecycles.\npackages/host-server assembles the server plugin graph.',
   },
   {
     path: 'docs/notes.md',

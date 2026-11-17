@@ -39,6 +39,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
+        if: runner.os == 'Windows'
+      - run: pnpm --filter @workspace/desktop prepare:windows
+        if: runner.os == 'Windows'
+      - run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+        if: runner.os == 'Windows'
       - run: pnpm release:check
         if: runner.os == 'Linux'
       - name: Check workflows and release scripts
@@ -68,8 +74,13 @@ jobs:
           BEFORE: ${{ github.event.before }}
         shell: bash
         run: |
-          previous=$(git show "${BEFORE}:package.json" | jq -er '.version | strings | select(length > 0)')
-          current=$(jq -er '.version | strings | select(length > 0)' package.json)
+          manifest=apps/cli/package.json
+          if ! git cat-file -e "$BEFORE:$manifest"; then
+            # The first preview is built manually when the CLI package is introduced.
+            exit 0
+          fi
+          previous=$(git show "$BEFORE:$manifest" | jq -er '.version | strings | select(length > 0)')
+          current=$(jq -er '.version | strings | select(length > 0)' "$manifest")
           if [[ "$previous" != "$current" ]]; then
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
@@ -80,4 +91,5 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
     uses: ./.github/workflows/release.yml

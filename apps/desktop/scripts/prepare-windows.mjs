@@ -79,12 +79,12 @@ await writeFile(
   await download(`https://raw.githubusercontent.com/nodejs/node/v${nodeVersion}/LICENSE`),
 );
 
-run(root, 'exec', 'turbo', 'run', 'build', '--filter=web', '--filter=@workspace/host');
+run(root, 'exec', 'turbo', 'run', 'build', '--filter=web', '--filter=@workspace/desktop');
 
 run(
   root,
   '--filter',
-  '@workspace/host',
+  '@workspace/desktop',
   '--config.node-linker=hoisted',
   '--config.inject-workspace-packages=true',
   'deploy',
@@ -92,7 +92,7 @@ run(
   host,
 );
 await cp(join(root, 'apps/web/dist'), web, { recursive: true });
-await readFile(join(host, 'dist/main.js'));
+await readFile(join(host, 'dist/host/main.js'));
 
 for (const entry of await readdir(host, { recursive: true, withFileTypes: true })) {
   if (entry.isSymbolicLink()) {

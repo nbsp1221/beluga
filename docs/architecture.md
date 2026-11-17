@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-11
+last_reviewed: 2026-11-17
 ---
 
 # 현재 아키텍처
@@ -10,10 +10,10 @@ Beluga는 웹 Client와 Node Host가 각각 플러그인을 조립하는 모노�
 
 ## 패키지 경계
 
-- [apps/desktop](../apps/desktop/src-tauri/src/lib.rs): Windows 설치와 창·트레이·로컬 Host 수명. 동봉된 Node로 기존 Host를 시작하고 WebView2에 그 Host의 웹 화면을 연다. 앱 소스 간 import 없이 빌드 산출물로 조립한다.
-
+- [apps/desktop](../apps/desktop/src-tauri/src/lib.rs): Windows 설치와 창·트레이·로컬 Host 수명. 동봉된 Node로 기존 Host를 시작하고 WebView2에 그 Host의 웹 화면을 연다. [host/](../apps/desktop/host/main.ts)에서 데스크톱 전용 Node 시작과 원격 연결을 담당한다.
 - [apps/web](../apps/web/src/main.tsx): Vite/React 시작, ThemeProvider·TooltipProvider·Router, 클라이언트 조립과 React 루트 수명. [App](../apps/web/src/App.tsx)은 `main` 슬롯을 렌더링한다.
-- [apps/host](../apps/host/src/main.ts): Hono 어댑터의 TCP 시작·종료. 기본 수신 주소는 loopback이다. Docker 이미지가 명시적으로 `--bind`를 지정하며, [Docker 배포 예시](hosting.md#docker)는 호스트의 loopback 포트만 게시한다. listener 종료 후 플러그인을 해제한다.
+- [apps/cli](../apps/cli/src/main.ts): npm과 Docker가 공유하는 공개 `beluga` 명령과 도움말. CLI 입력을 Host 실행 옵션으로 변환한다. [systemd 어댑터](../apps/cli/src/service.ts)가 사용자 서비스 등록과 리스너 준비 통지를 맡는다.
+- [packages/host-server](../packages/host-server/src/index.ts): 공통 Host 제품 조립과 라우팅, 웹 자산과 접근 코드 관리, CLI의 TCP 리스너. CLI의 기본 수신 주소는 loopback이다. Docker 이미지가 명시적으로 `--bind`를 지정하며, [Docker 배포 예시](hosting.md#docker)는 호스트의 loopback 포트만 게시한다. 각 실행 진입점은 리스너 종료 후 Host 플러그인을 해제한다.
 - [protocol](../packages/protocol/src/host.ts)은 HTTP 요청·응답과 검증 스키마를 공유한다. React, Node 구현, Cordis에 의존하지 않는다.
 - [runtime](../packages/runtime/src/index.ts): 의존성 검증과 서비스·자원 수명. 제품 계약과 엔진을 모른다. [React 슬롯 어댑터](../packages/runtime/src/react.tsx)는 별도 `@workspace/runtime/react` 진입점이다.
 - [ui](../packages/ui/components.json): 공식 shadcn 기본 요소, 테마와 재사용 표현 조합. 기능 명령·URL·ConversationClient를 소유하지 않는다.
@@ -42,7 +42,7 @@ sidebar는 component와 description을 함께 등록하며 제목은 목적지 l
 
 전역 Settings는 섹션 선택과 표현을 관리하며, 프리셋과 모델 공급자 상태·명령은 각각 해당 기능에 있다. 섹션은 같은 우선순위에서 등록 순서를 따르며, 기능은 필요한 경우 탐색의 우선순위를 등록할 수 있다. 브라우저는 연결 여부를 HTML의 모드 표시로 구분하고, 연결 모드에서 인증 방문 확인 후 제품을 조립한다.
 
-[Host 조립](../apps/host/src/product.ts)은 연결 설정이 있을 때 인증, Workspace, Trajectory, 에이전트 기능 플러그인과 Flue 하네스를 추가한다. Workspace는 인증된 폴더 API와 소비자별 계약을 제공한다. 하네스는 세션·프리셋·기본 모델 카탈로그, 도구 플러그인은 세션의 경로·프리셋 기능·권한 조회, Trajectory는 세션 존재 조회를 사용한다. 필요한 서비스가 빠지면 시작을 거부한다. `/api/status`는 Host 가용성만 보고한다.
+[Host 조립](../packages/host-server/src/product.ts)은 연결 설정이 있을 때 인증, Workspace, Trajectory, 에이전트 기능 플러그인과 Flue 하네스를 추가한다. Workspace는 인증된 폴더 API와 소비자별 계약을 제공한다. 하네스는 세션·프리셋·기본 모델 카탈로그, 도구 플러그인은 세션의 경로·프리셋 기능·권한 조회, Trajectory는 세션 존재 조회를 사용한다. 필요한 서비스가 빠지면 시작을 거부한다. `/api/status`는 Host 가용성만 보고한다.
 
 [카탈로그 모듈](../packages/host-plugins/src/workspace/catalog.ts)이 파일 경로, 현재 스키마 초기화, 세션의 모델·Effort와 기본 모델 저장을 소유한다. Host는 플러그인 수명 동안 연결을 유지한다. 기본값 변경은 새 대화에 적용되며 저장된 세션 설정은 세션의 명령으로 바꾼다.
 
@@ -50,7 +50,7 @@ sidebar는 component와 description을 함께 등록하며 제목은 목적지 l
 
 두 runtime은 HTTP로 연결한다. Host는 인증 전 대화 경로를 로그인으로 보내고, 대화·카탈로그 API도 인증으로 보호한다. 공개 경로는 로그인 문서와 그에 필요한 빌드 자산, 상태·인증 API로 한정된다. 샘플 개발 서버는 별도 진입점이다.
 
-[Host 웹 자산 제공](../apps/host/src/web.ts)은 정적 JS·CSS·SVG에 요청 헤더에 따른 압축을 적용한다. 내용 해시가 포함된 자산에는 장기 캐시를 적용하고, HTML은 저장하지 않도록 응답한다.
+[Host 웹 자산 제공](../packages/host-server/src/web.ts)은 정적 JS·CSS·SVG에 요청 헤더에 따른 압축을 적용한다. 내용 해시가 포함된 자산에는 장기 캐시를 적용하고, HTML은 저장하지 않도록 응답한다.
 
 [접속 코드 플러그인](../packages/host-plugins/src/auth/host.ts)은 Host 데이터 폴더의 auth.sqlite에 세션 토큰 해시·만료 시각·접속 코드 리비전을 저장하고 HttpOnly, SameSite Strict 쿠키를 발급한다. HTTPS에서는 Secure를 붙인다. 로그인과 인증된 사이트 진입 시 만료 시각을 그 시점으로부터 24시간 뒤로 설정하고, 스트림·이력 조회는 만료를 연장하지 않는다. 로컬 운영 명령이 무작위 코드를 발급하고 데이터 폴더에는 salt와 해시만 기록한다. 같은 데이터 폴더와 사이트 주소로 Host를 재시작하면 기존 세션이 이어진다. 로그아웃, 만료, 접속 코드 교체 시 세션은 무효화된다. 모델 인증은 [공급자 어댑터](../packages/host-plugins/src/model-providers/adapter.ts)가 별도로 소유한다.
 
@@ -58,11 +58,11 @@ sidebar는 component와 description을 함께 등록하며 제목은 목적지 l
 
 ## Windows 데스크톱 수명
 
-데스크톱은 Tauri 2와 WebView2로 창과 트레이를 관리한다. 설치본에는 공식 Node 24, Host의 운영 의존성, 웹 자산이 함께 들어간다. [Host 시작 경로](../apps/host/src/desktop.ts)는 임의의 루프백 포트를 받아 공통 Host를 초기화하고, 준비 신호와 로컬 세션을 전용 파이프로 돌려준다. [데스크톱 인증 플러그인](../packages/host-plugins/src/auth/desktop.ts)은 해당 Host 프로세스가 발급한 세션과 정확한 요청 Origin을 검사한다. 네이티브 셸이 WebView에 HttpOnly 세션 쿠키를 넣으며 제품 화면에는 Tauri 명령 권한을 주지 않는다.
+데스크톱은 Tauri 2와 WebView2로 창과 트레이를 관리한다. 설치본에는 공식 Node 24, Host의 운영 의존성, 웹 자산이 함께 들어간다. [Host 시작 경로](../apps/desktop/host/desktop.ts)는 임의의 루프백 포트를 받아 공통 Host를 초기화하고, 준비 신호와 로컬 세션을 전용 파이프로 돌려준다. [데스크톱 인증 플러그인](../packages/host-plugins/src/auth/desktop.ts)은 해당 Host 프로세스가 발급한 세션과 정확한 요청 Origin을 검사한다. 네이티브 셸이 WebView에 HttpOnly 세션 쿠키를 넣으며 제품 화면에는 Tauri 명령 권한을 주지 않는다.
 
 창을 닫으면 화면과 Host를 트레이에 유지한다. 트레이의 **Exit**는 새 요청을 막고 이미 들어온 변경 요청을 정리한 뒤 Flue의 실행 취소를 기록한다. Windows Job Object가 앱이 시작한 Node와 그 자식 프로세스의 수명을 제한한다. 강제 종료로 취소를 기록하지 못한 경우 Flue의 기존 복구 규칙이 적용된다. 독립 실행 Host는 이 수명에 포함되지 않는다.
 
-기존 React **Settings → Connections**에서 HTTP 또는 HTTPS Host를 선택한다. 화면과 설정은 하나의 로컬 WebView2에 남고, [데스크톱 Host의 연결 어댑터](../apps/host/src/desktop-connections.ts)가 선택된 Host의 제품 API와 Flue 스트림에 요청을 전달한다. 각 연결의 요청 경로와 인증 값은 해당 Host에만 연결된다. WebView2의 HttpOnly 쿠키에는 원격 세션 값만 저장한다. 만료와 재접속 갱신은 원격 Host의 기존 인증 정책을 따른다. 앱에서 로컬로 돌아오거나 종료해도 원격 Host의 작업은 계속된다.
+기존 React **Settings → Connections**에서 HTTP 또는 HTTPS Host를 선택한다. 화면과 설정은 하나의 로컬 WebView2에 남고, [데스크톱 Host의 연결 어댑터](../apps/desktop/host/desktop-connections.ts)가 선택된 Host의 제품 API와 Flue 스트림에 요청을 전달한다. 각 연결의 요청 경로와 인증 값은 해당 Host에만 연결된다. WebView2의 HttpOnly 쿠키에는 원격 세션 값만 저장한다. 만료와 재접속 갱신은 원격 Host의 기존 인증 정책을 따른다. 앱에서 로컬로 돌아오거나 종료해도 원격 Host의 작업은 계속된다.
 
 ## 플러그인과 등록 수명
 
@@ -86,7 +86,7 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 
 ### 에이전트 프리셋과 실행
 
-**Agent preset(에이전트 프리셋)**은 여러 세션에서 재사용하는 이름, 설명, 지침, 기능 ID 목록이다. Host는 [배포 선언](../apps/host/src/initial-agent-preset.json)의 **Standard**를 카탈로그 초기화에서 한 번 등록하고 그 ID를 새 대화의 기본 선택으로 저장한다. 등록과 기본 선택은 한 트랜잭션에 들어간다. [프리셋 카탈로그](../packages/host-plugins/src/agent-presets/catalog.ts)의 SQLite가 이후 정의·버전·기본 선택을 소유한다. 기본 제공 프리셋도 웹과 개발자 도구가 공유하는 [인증 API](development.md#agent-presets-api)로 편집한다. 저장 시 새 버전을 추가하고 기존 버전을 보존한다. 새 초안과 프리셋을 생략한 API 요청은 Host의 기본 선택을 사용한다. 기본 선택이 없으면 프리셋을 지정한다.
+**Agent preset(에이전트 프리셋)**은 여러 세션에서 재사용하는 이름, 설명, 지침, 기능 ID 목록이다. Host는 [배포 선언](../packages/host-server/src/initial-agent-preset.json)의 **Standard**를 카탈로그 초기화에서 한 번 등록하고 그 ID를 새 대화의 기본 선택으로 저장한다. 등록과 기본 선택은 한 트랜잭션에 들어간다. [프리셋 카탈로그](../packages/host-plugins/src/agent-presets/catalog.ts)의 SQLite가 이후 정의·버전·기본 선택을 소유한다. 기본 제공 프리셋도 웹과 개발자 도구가 공유하는 [인증 API](development.md#agent-presets-api)로 편집한다. 저장 시 새 버전을 추가하고 기존 버전을 보존한다. 새 초안과 프리셋을 생략한 API 요청은 Host의 기본 선택을 사용한다. 기본 선택이 없으면 프리셋을 지정한다.
 
 **세션**은 프리셋 ID·버전과 워크스페이스를 연결한다. 첫 전송 또는 API 생성에서 버전을 고정하고 재시작 후에도 그 버전을 사용한다. **에이전트**는 이 세션에서 실행되는 Flue 인스턴스다. 모델·Effort는 프리셋과 별개인 세션 설정이다. Host가 제공하는 모델과 Pi 카탈로그가 보고한 Effort로 제한한다. 새 대화는 첫 전송에서 저장하고, 진행 중인 대화는 `PUT /api/conversations/:id/run-settings`로 변경해 다음 전송부터 반영한다. [Flue의 제출 단위 설정](https://flueframework.com/docs/guide/models/)을 사용한다.
 

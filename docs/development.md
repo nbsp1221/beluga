@@ -14,10 +14,10 @@ Use Node.js 24 or newer for development and the Host, and the pnpm version in
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm dev:all
+pnpm dev
 ```
 
-Root commands ending in `:all` delegate to Turbo. Turbo runs package tasks and the explicitly registered root checks. It builds shared packages, starts their watchers and runs both apps in development. Open
+Turbo builds shared packages and starts the CLI status server and web preview. Open
 the URL printed by Vite. The Host defaults to `http://127.0.0.1:8917`; Vite proxies
 `/api` to it. Set `PORT` for the Host and a matching `HOST_URL` for Vite when
 changing that address.
@@ -29,16 +29,25 @@ request to display sample data. The theme is under **Settings → General**.
 ## Run connected mode from source
 
 ```sh
-pnpm exec turbo build --filter=@workspace/host --filter=web
-pnpm --filter @workspace/host start auth init --data-dir ../../.local/development-host
-pnpm --filter @workspace/host start serve --data-dir ../../.local/development-host
+pnpm exec turbo build --filter=@retn0/beluga --filter=web
+node apps/cli/dist/main.js auth init --data-dir .local/development-host
+node apps/cli/dist/main.js serve --data-dir .local/development-host --web-dir apps/web/dist
 ```
 
 These commands keep the local Host's data in `.local/development-host` at the repository root. Open `http://127.0.0.1:8917` and sign in with the code printed by `auth init`. Use an absolute `--data-dir` to put the data elsewhere.
 
-## Build the Windows desktop bundles
+## Develop and build the Windows desktop app
 
-On Windows x64, install the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#windows) and run:
+On Windows x64 with the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#windows),
+open the desktop app from a clean checkout with:
+
+```sh
+pnpm --filter @workspace/desktop tauri dev
+```
+
+Tauri prepares the bundled Host and web assets before opening the app.
+
+To build the installer and portable ZIP:
 
 ```sh
 pnpm --filter @workspace/desktop run package:windows
@@ -65,10 +74,13 @@ pnpm check
 ```
 
 Use `pnpm format:check` to check formatting and `pnpm format` to apply Oxfmt.
-`pnpm lint` runs Oxlint and ESLint. Shared presets extend the published
+`pnpm lint` runs Oxlint and ESLint. Use `pnpm lint:fix` to apply available fixes,
+or `pnpm --filter web lint:fix` to limit fixes to one package.
+Use `pnpm typecheck` and `pnpm build` to run those tasks on their own. Shared presets extend the published
 `@retn0` configs in [packages/tooling-config](../packages/tooling-config).
-Both linters exclude `packages/ui/src/components` and `packages/ui/src/hooks`.
-Oxfmt, TypeScript, and the production build still cover those directories.
+Both linters exclude the installed registry files listed in
+[the shared ignore config](../packages/tooling-config/src/ignores.mts).
+Oxfmt, TypeScript, and the production build still cover those files.
 Both linters use the shared rule severities. Errors fail the check and
 advisory warnings are reported in the same run.
 
@@ -77,7 +89,7 @@ settings. The Host build emits JavaScript, and browser packages keep bundler
 resolution. Type checks and tests build the workspace declarations they consume.
 Check for another verification run before running the whole suite.
 
-Run `pnpm test:all` for the package suites, workspace boundary tests, and the connected
+Run `pnpm test` for the package suites, workspace boundary tests, and the connected
 Host and web integration test. To run an individual suite, use
 `pnpm --filter <package> test:watch` after the first build for local feedback.
 Runtime and Host integration tests use the Node environment. Host tests

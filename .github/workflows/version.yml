@@ -3,7 +3,7 @@ name: Version
 on:
   push:
     branches: [main]
-    paths: ['.changeset/*.md']
+    paths: ['.changeset/**']
 
 permissions: {}
 
@@ -30,6 +30,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          version-script: pnpm release:version
           pr-title: Prepare the next Beluga release
           commit-message: Prepare the next Beluga release

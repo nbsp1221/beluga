@@ -1,33 +1,42 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-15
+last_reviewed: 2026-11-17
 ---
 
 # Release verification
 
-Add a Changesets entry for user-facing changes with `pnpm exec changeset` and select the root `beluga` package. Merge product changes through a pull request. [Version](../.github/workflows/version.yml) prepares a separate PR for the next version and changelog. The root package owns the product release version. Internal private packages follow the repository source revision. Give an SDK or plugin its own release sequence when it is distributed independently. `pnpm release:check` verifies the desktop metadata and installation references.
+Add a Changeset for user-facing changes with `pnpm exec changeset` and select `@retn0/beluga`, including for changes that affect Windows or Docker. [Version](../.github/workflows/version.yml) prepares a separate PR for the next version and [changelog](../apps/cli/CHANGELOG.md). The [CLI manifest](../apps/cli/package.json) owns the version shared by npm, Windows and Docker. Internal packages follow the repository source revision. `pnpm release:check` checks the packaged Node and pnpm versions against the repository pins.
 
-The release PR is the approval to publish. If the checks on the Changesets PR await workflow approval, select **Approve workflows to run** on the PR. Use the checks below to verify the affected install paths before merging it. The Linux installer and Windows x64 portable ZIP and installer go into the same GitHub Release. The corresponding Docker image is published to GitHub Container Registry with the same version.
+The release PR is the approval to publish. If its checks await workflow approval, select **Approve workflows to run** on the PR. Use the checks below to verify the affected install paths before merging it.
+
+Windows CI prepares the Desktop Host sidecar and checks the Rust shell. The release workflow builds and checks the installer and portable bundle.
 
 When the product version changes on `main`, [CI](../.github/workflows/ci.yml) runs
 its Windows and Linux checks. If they pass, [Release](../.github/workflows/release.yml)
-packages the same commit, uploads the Linux archive and installer script,
-Windows bundles, and Docker image archive, and publishes those artifacts automatically.
+packages the same commit. The workflow publishes `@retn0/beluga` to npm,
+the image to GitHub Container Registry, and the Windows bundles and checksums
+to GitHub Releases.
 
 To build the current `main` version again, select **Run workflow** in **CI** and
 enable **Build release candidate after CI**. This manual build creates a fresh set of artifacts for verification.
 
-Mark preview releases as **Pre-release** on GitHub. Use an explicit version in installation commands and on the container image so users can install the same build again.
+Preview builds use the npm `preview` dist-tag and GitHub's **Pre-release** flag. Keep container references versioned.
+
+To prepare a stable release, confirm the Git tag is available and update the stable install instructions. Run `pnpm exec changeset pre exit` and merge the prerelease state change. Changesets uses the archived and pending product changes to prepare the stable release PR. If there are no product Changesets yet, include one describing the stable release in the same PR as the state change.
+
+## First publication
+
+Build and review the candidate from `main` using the manual CI option above. Publish the verified npm tarball with `npm publish <tarball> --tag preview` using the npm account authorized for `@retn0`. On the package's npm settings, authorize `nbsp1221/beluga`, caller workflow `ci.yml`, for direct publication through [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/). Verify that the exact package installs from npm. Push the candidate image by its version, set the GHCR package visibility to public and verify anonymous pull. Tag that same commit and create the GitHub prerelease with the verified Windows assets and checksums.
 
 Ship the unsigned Windows portable ZIP and optional NSIS installer with their SHA-256 checksums. Keep the download guide explicit about the signing status and Windows restrictions.
 
 ## Verify the Host
 
-- Start with a clean account and the documented prerequisites. Check that installation prints the first access code and starts the service under that account. Inspect what the installation changed and confirm that project files and unrelated services are untouched.
+- Start with a clean account and the documented prerequisites. Install the npm tarball into that account's npm prefix. Check that `beluga service install` prints the first access code and starts the service under that account. Check that project files and unrelated services are untouched.
 - Sign in with the access code, connect a provider, add a project and send two messages without reloading. Repeat through HTTPS from a different computer. Check that each response finishes and appears in **Trajectory**.
 - In a disposable project, exercise Read only, Workspace write and Full access with the Standard preset. Check tool calls, command cancellation and the corresponding Trajectory records.
-- Restart the Host and check that the same browser session, workspace, provider and chat are available. Test both installer choices for boot startup. With it enabled, verify that the service survives logout and starts after reboot without an interactive login. With it skipped, verify that installation still starts the service and leaves the account's lingering setting intact.
+- Restart the Host and check that the same browser session, workspace, provider and chat are available. With `--boot`, verify that the service survives logout and starts after reboot without an interactive login. Without `--boot`, verify that the service starts and leaves the account's lingering setting intact.
 - Test a repeat install, an update and a failed update against a populated data directory. Verify that the access code and user data are preserved. Verify the documented recovery procedure with a copy of that data. Test program removal separately from data deletion.
 
 ## Verify desktop assets
@@ -43,15 +52,15 @@ Extract the portable ZIP and run the optional installer on separate clean system
 
 ## Verify the published instructions
 
-- CI verifies the Linux and Windows bundles and checks the Docker runtime. For manual install checks, download the artifacts from the CI run and verify their checksums before use. The public Linux one-command installer uses the versioned GitHub Release URL.
+- CI installs and runs the npm CLI from its tarball, checks the Windows bundles and verifies the Docker runtime. For manual install checks, use artifacts from the same CI run and verify the Windows checksums before use.
 - Check that each artifact includes the Beluga license and the applicable third-party notices and license files.
 - Keep release notes focused on supported installs, changes users will see, and any action required before updating.
-- After publishing, verify the public download links, run the documented Linux one-command installer, and confirm that the published Docker tag resolves to the tested image.
+- After publishing, verify the Windows download links, install via the npm `preview` dist-tag, and confirm that the published Docker tag resolves to the tested image.
 
 ## Recover a publication
 
-The publish job verifies the checksums and publishes the image to GHCR. After an anonymous pull succeeds, it tags the candidate commit, uploads the Linux and Windows assets with their checksums, and publishes the GitHub Release with the changelog and image reference.
+The npm publish job runs before publishing the GitHub Release. The GitHub publish job verifies the Windows checksums and publishes the image to GHCR. After an anonymous pull succeeds, it tags the candidate commit and publishes the GitHub Release with the Windows assets and changelog.
 
-The first GHCR push creates a private package. Set the package visibility to public once, then use **Re-run failed jobs** on the original CI run. Use the same retry for transient failures and external configuration changes. GitHub retries use the original workflow revision.
+Use **Re-run failed jobs** for transient failures and external configuration changes. This reuses the original workflow revision and skips publishing the npm tarball a second time when that job already passed.
 
 If the publishing code needs a fix, merge the fix with a Changesets entry, then merge the release PR for the next version. CI builds the new version with the fixed publisher. Leave any image or tag already pushed under the failed version in place.

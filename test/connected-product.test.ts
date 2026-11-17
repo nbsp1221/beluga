@@ -10,10 +10,10 @@ import {
   readAccessCodeVerifier,
 } from '@workspace/host-plugins/auth/host';
 import { expect, test, vi } from 'vitest';
-import { createHost } from '../apps/host/src/app.js';
-import { createWeb } from '../apps/host/src/web.js';
 import { createProduct } from '../apps/web/src/product.ts';
 import { fixtureProvider } from '../packages/host-plugins/test/fixtures/model-provider.js';
+import { createHost } from '../packages/host-server/src/app.js';
+import { createWeb } from '../packages/host-server/src/web.js';
 
 const message = '{"path":"README.md"}';
 

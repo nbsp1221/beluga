@@ -3,6 +3,9 @@ import { findBoundaryViolations } from '../scripts/check-boundaries.mjs';
 
 describe('workspace import boundaries', () => {
   test.each([
+    ['apps/desktop/src/App.tsx', "import '../host/desktop.js';", 'Browser code'],
+    ['apps/desktop/src/App.tsx', "import '@hono/node-server';", 'Browser code'],
+    ['apps/desktop/host/desktop.ts', "import '../src/App.js';", 'Host modules'],
     [
       'apps/web/src/example.ts',
       "import '../../../packages/client/src/features/trajectory/view.js';",
@@ -19,17 +22,17 @@ describe('workspace import boundaries', () => {
       'wire protocol',
     ],
     [
-      'apps/host/src/example.ts',
+      'packages/host-server/src/example.ts',
       "const view = import('@workspace/runtime/react');",
       'Host modules',
     ],
     [
-      'apps/host/src/example.ts',
+      'packages/host-server/src/example.ts',
       'const view = import(`@workspace/runtime/react`);',
       'Host modules',
     ],
     [
-      'apps/host/src/example.ts',
+      'packages/host-server/src/example.ts',
       "type View = typeof import('@workspace/runtime/react');",
       'Host modules',
     ],
@@ -93,6 +96,7 @@ describe('workspace import boundaries', () => {
   });
 
   test.each([
+    ['apps/desktop/host/desktop.ts', "import '@hono/node-server';"],
     ['apps/web/src/product.ts', "const boot = import('@workspace/client/bootstrap/connected');"],
     ['apps/web/vite.config.ts', "import { resolve } from 'node:path';"],
     ['apps/web/src/main.tsx', "import '@workspace/ui/components/button';"],

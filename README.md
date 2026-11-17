@@ -4,11 +4,23 @@ Run a coding agent on your computer or Linux server. Open a project, give the ag
 
 ## Install
 
-Beluga is in public preview. [Download v0.1.0-preview.1](https://github.com/nbsp1221/beluga/releases/tag/v0.1.0-preview.1).
+Beluga is in public preview.
 
-- **Linux server** · Install the native Host as a `systemd` user service and open it in your browser. [Linux setup](docs/hosting.md#linux-user-service)
+### Linux server
+
+On Linux x64, use Node.js 24 LTS, a systemd user session, and a [writable npm global prefix](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally/). Run as your regular user:
+
+```sh
+npm install -g @retn0/beluga@preview
+beluga service install
+```
+
+Open `http://127.0.0.1:8917` on the Host and sign in with the printed access code. [Linux setup and remote access](docs/hosting.md#linux-user-service)
+
+### Windows and Docker
+
 - **Windows desktop** · Extract the x64 portable ZIP to run Beluga on your PC or connect to a Linux Host. [Windows setup](docs/hosting.md#windows-desktop)
-- **Docker** · Run `ghcr.io/nbsp1221/beluga:0.1.0-preview.1` with persistent data and the project folders you want to use. [Docker setup](docs/hosting.md#docker)
+- **Docker** · Run the image listed in the release notes with persistent data and your project folders. [Docker setup](docs/hosting.md#docker)
 
 ## Start a conversation
 
@@ -18,7 +30,7 @@ Beluga is in public preview. [Download v0.1.0-preview.1](https://github.com/nbsp
 
 New conversations start in **Read only**. Choose **Workspace write** to let the agent edit files in the workspace, or **Full access** to let it run commands with the Host account's permissions. Read and search tools can open explicitly named paths that the Host account can read, including paths outside the workspace.
 
-Use chat for file work. The **Files** panel shows sample content, and chat supports text messages.
+Use chat to ask the agent to read or edit project files. Chat supports text messages.
 
 ## Work with a remote Host
 

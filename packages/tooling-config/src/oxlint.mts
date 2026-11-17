@@ -15,8 +15,10 @@ export default retn0(
       },
       {
         files: [
-          'apps/host/**',
+          'apps/desktop/host/**',
+          'apps/cli/**',
           'packages/host-plugins/**',
+          'packages/host-server/**',
           'scripts/**',
           '**/test/**/*.{ts,mts}',
           '**/*.config.{js,mjs,ts,mts}',

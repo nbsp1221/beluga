@@ -1,0 +1,46 @@
+{
+  "name": "@retn0/beluga",
+  "version": "0.1.0-preview.1",
+  "private": true,
+  "description": "Run Beluga's coding agent Host and web app on Linux.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nbsp1221/beluga.git"
+  },
+  "bin": {
+    "beluga": "dist/main.js"
+  },
+  "files": [
+    "dist",
+    "FLUE-SDK-LICENSE.txt",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "node --watch dev.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts . && eslint .",
+    "lint:fix": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts --fix . && eslint --fix ."
+  },
+  "dependencies": {
+    "@workspace/host-server": "workspace:*",
+    "commander": "15.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workspace/tooling-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  },
+  "bundleDependencies": true,
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

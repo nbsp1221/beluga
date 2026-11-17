@@ -1,22 +1,28 @@
 {
   "name": "@workspace/desktop",
-  "version": "0.1.0-preview.1",
+  "version": "0.0.0",
   "private": true,
+  "files": [
+    "dist/host"
+  ],
   "type": "module",
   "scripts": {
     "dev:shell": "vite",
-    "build": "pnpm typecheck && vite build",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
-    "lint:eslint": "eslint .",
+    "build": "pnpm typecheck && vite build && tsc -p host/tsconfig.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p host/tsconfig.json",
+    "lint": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts . && eslint .",
+    "lint:fix": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts --fix . && eslint --fix .",
     "tauri": "tauri",
     "icons": "node scripts/generate-icons.mjs",
     "prepare:windows": "node scripts/prepare-windows.mjs",
-    "package:windows": "pnpm prepare:windows && tauri build --bundles nsis && node scripts/package-windows.mjs"
+    "package:windows": "tauri build --bundles nsis && node scripts/package-windows.mjs"
   },
   "dependencies": {
-    "@workspace/ui": "workspace:*",
-    "react": "catalog:",
-    "react-dom": "catalog:"
+    "@hono/node-server": "2.1.6",
+    "@workspace/host-plugins": "workspace:*",
+    "@workspace/host-server": "workspace:*",
+    "@workspace/protocol": "workspace:*",
+    "hono": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
@@ -27,7 +33,10 @@
     "@vitejs/plugin-react": "6.2.1",
     "@workspace/tooling-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
+    "@workspace/ui": "workspace:*",
     "eslint": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:"
   }

@@ -1,14 +1,14 @@
 FROM node:24.22.2-trixie-slim AS build
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json .npmrc ./
-COPY apps/host apps/host
+COPY apps/cli apps/cli
 COPY apps/web apps/web
 COPY packages packages
 RUN npm install --global pnpm@11.25.0 \
     && pnpm install --frozen-lockfile \
-    && pnpm exec turbo run build --filter=@workspace/host --filter=web \
-    && pnpm --filter @workspace/host --config.node-linker=hoisted --config.inject-workspace-packages=true deploy --prod /out/host \
-    && test -f /out/host/dist/main.js
+    && pnpm exec turbo run build --filter=@retn0/beluga --filter=web \
+    && pnpm --filter @retn0/beluga --config.node-linker=hoisted --config.inject-workspace-packages=true deploy --prod /out/cli \
+    && test -f /out/cli/dist/main.js
 
 FROM node:24.22.2-trixie-slim
 WORKDIR /opt/beluga
@@ -19,11 +19,11 @@ RUN apt-get update \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && fd --no-require-git --help >/dev/null \
     && install -d -o node -g node -m 0700 /data
-COPY --from=build /out/host ./host
+COPY --from=build /out/cli ./cli
 COPY --from=build /src/apps/web/dist ./web
 COPY LICENSE THIRD_PARTY_NOTICES.md ./
 COPY --from=build /src/packages/client/node_modules/@flue/sdk/LICENSE ./FLUE-SDK-LICENSE.txt
 USER node
 EXPOSE 8917
-ENTRYPOINT ["node", "/opt/beluga/host/dist/main.js"]
+ENTRYPOINT ["node", "/opt/beluga/cli/dist/main.js"]
 CMD ["serve", "--bind", "0.0.0.0", "--data-dir", "/data", "--web-dir", "/opt/beluga/web"]
