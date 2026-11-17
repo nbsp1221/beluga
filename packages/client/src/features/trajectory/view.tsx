@@ -20,7 +20,7 @@ import {
 } from '@workspace/ui/components/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@workspace/ui/components/tooltip';
 import { readPreference, writePreference } from '@workspace/ui/lib/browser-storage';
-import { ChevronRight, Ellipsis, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Ellipsis, X } from 'lucide-react';
 import {
   type ComponentProps,
   Fragment,
@@ -638,6 +638,8 @@ function TrajectoryLedger({
                 number={turns[index].turn}
                 records={records}
                 hidden={hidden}
+                canFoldTurn={!term && source.length > (initialPrompt ? 2 : 1)}
+                canFoldCalls={!term && !folded}
                 foldedCalls={term || folded ? noFolds : foldedCalls}
                 selectedKey={selectedKey}
                 modelRequestSelected={modelRequestSelected}
@@ -661,6 +663,8 @@ function TrajectoryRows({
   number,
   records,
   hidden,
+  canFoldTurn,
+  canFoldCalls,
   foldedCalls,
   selectedKey,
   modelRequestSelected,
@@ -675,6 +679,8 @@ function TrajectoryRows({
   number: number;
   records: readonly TrajectoryRecord[];
   hidden: number;
+  canFoldTurn: boolean;
+  canFoldCalls: boolean;
   foldedCalls: ReadonlySet<string>;
   selectedKey?: string;
   modelRequestSelected?: boolean;
@@ -691,15 +697,13 @@ function TrajectoryRows({
       continue;
     }
     const group = callGroup(request, record);
-    if (foldedCalls.has(group)) {
-      callCounts.set(group, (callCounts.get(group) ?? 0) + 1);
-    }
+    callCounts.set(group, (callCounts.get(group) ?? 0) + 1);
   }
 
   const firstRecord = records.at(0);
   const firstTurnRow = firstRecord?.kind === 'system' && firstRecord.initial ? 1 : 0;
   const ungroupedCallsKey = `${request.id}/tools`;
-  const ungroupedCalls = callCounts.get(ungroupedCallsKey);
+  const ungroupedCalls = foldedCalls.has(ungroupedCallsKey) && callCounts.get(ungroupedCallsKey);
 
   return (
     <>
@@ -726,7 +730,9 @@ function TrajectoryRows({
         const labelTitle = tool ? `${role.label} ${tool.name}` : role.label;
         const labelDetail = description?.slice(0, 160) || recordTitle(record);
         const recordLabel = `${labelTitle}${failed ? ', failed' : ''}: ${labelDetail}`;
-        const collapsedCalls = callCounts.get(key);
+        const hasCalls = record.kind === 'assistant' && callCounts.has(key);
+        const callsFolded = foldedCalls.has(key);
+        const collapsedCalls = callsFolded && callCounts.get(key);
         return (
           <Fragment key={key}>
             <TableRow
@@ -753,16 +759,6 @@ function TrajectoryRows({
                 event.preventDefault();
                 select({ request, record }, event.currentTarget);
               }}
-              onDoubleClick={(event) => {
-                if (record.kind !== 'assistant' || window.getSelection()?.isCollapsed === false) {
-                  return;
-                }
-                const target = event.target;
-                if (target instanceof Element && target.closest('button')) {
-                  return;
-                }
-                toggleCalls(key);
-              }}
             >
               <TableCell
                 className={`relative px-0 py-1 text-center ${selected || failed ? 'before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:w-0.5' : ''} ${selected ? 'before:bg-ring' : failed ? 'before:bg-destructive' : ''}`}
@@ -778,7 +774,6 @@ function TrajectoryRows({
                       event.stopPropagation();
                       select({ request }, event.currentTarget);
                     }}
-                    onDoubleClick={toggleTurn}
                   >
                     <span className="@max-[620px]:hidden">Turn {number}</span>
                     <span className="hidden @max-[620px]:inline">#{number}</span>
@@ -853,6 +848,20 @@ function TrajectoryRows({
                             : 'Tool call only'))}
                     </span>
                   )}
+                  {turnStart && canFoldTurn && (
+                    <FoldButton
+                      label={`Turn ${number} records`}
+                      expanded={hidden === 0}
+                      onToggle={toggleTurn}
+                    />
+                  )}
+                  {hasCalls && canFoldCalls && (
+                    <FoldButton
+                      label="Tool calls"
+                      expanded={!callsFolded}
+                      onToggle={() => toggleCalls(key)}
+                    />
+                  )}
                 </div>
               </TableCell>
             </TableRow>
@@ -879,6 +888,32 @@ function TrajectoryRows({
         </TableRow>
       )}
     </>
+  );
+}
+
+function FoldButton({
+  label,
+  expanded,
+  onToggle,
+}: {
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      size="icon-xs"
+      variant="ghost"
+      className="ml-auto touch-target"
+      aria-label={label}
+      aria-expanded={expanded}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle();
+      }}
+    >
+      {expanded ? <ChevronDown /> : <ChevronRight />}
+    </Button>
   );
 }
 

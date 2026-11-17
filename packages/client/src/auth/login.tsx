@@ -58,38 +58,40 @@ export function Login() {
   };
 
   return (
-    <main className="grid min-h-dvh place-items-center p-4">
-      <section className="w-full max-w-sm rounded-xl border bg-card p-6 text-card-foreground">
-        <h1 className="mb-4 flex items-center gap-2 text-xl font-semibold">
-          <BelugaMark />
-          Sign in to Beluga
-        </h1>
+    <main className="h-full overflow-y-auto">
+      <div className="grid min-h-full place-items-center p-4">
+        <section className="w-full max-w-sm rounded-xl border bg-card p-6 text-card-foreground">
+          <h1 className="mb-4 flex items-center gap-2 text-xl font-semibold">
+            <BelugaMark />
+            Sign in to Beluga
+          </h1>
 
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit(new FormData(event.currentTarget).get('code'));
-          }}
-        >
-          <Field data-invalid={Boolean(error)}>
-            <FieldLabel htmlFor="access-code">Access code</FieldLabel>
-            <Input
-              id="access-code"
-              name="code"
-              type="password"
-              autoComplete="current-password"
-              required
-              aria-invalid={Boolean(error)}
-              aria-describedby={error ? 'login-error' : undefined}
-            />
-            <FieldError id="login-error">{error}</FieldError>
-          </Field>
-          <Button type="submit" disabled={pending}>
-            Sign in
-          </Button>
-        </form>
-      </section>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit(new FormData(event.currentTarget).get('code'));
+            }}
+          >
+            <Field data-invalid={Boolean(error)}>
+              <FieldLabel htmlFor="access-code">Access code</FieldLabel>
+              <Input
+                id="access-code"
+                name="code"
+                type="password"
+                autoComplete="current-password"
+                required
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? 'login-error' : undefined}
+              />
+              <FieldError id="login-error">{error}</FieldError>
+            </Field>
+            <Button type="submit" disabled={pending}>
+              Sign in
+            </Button>
+          </form>
+        </section>
+      </div>
     </main>
   );
 }

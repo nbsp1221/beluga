@@ -27,6 +27,18 @@ test('reveals the related response in an older turn without clearing the search'
             text: turn === 1 ? 'Original question' : `Question ${turn}`,
           },
           { id: `output-${turn}`, kind: 'assistant', text: `Answer ${turn}`, status: 'completed' },
+          ...(turn === 11
+            ? [
+                {
+                  id: 'read-11',
+                  kind: 'tool' as const,
+                  name: 'read',
+                  status: 'completed' as const,
+                  modelRequestId: 'output-11',
+                  input: { path: 'README.md' },
+                },
+              ]
+            : []),
         ],
       },
     };
@@ -83,6 +95,28 @@ test('reveals the related response in an older turn without clearing the search'
   await user.click(screen.getByRole('tab', { name: 'Trajectory' }));
   // The first visit loads the Trajectory module before requesting the latest page.
   await screen.findByRole('button', { name: 'Turn 11' }, { timeout: 5_000 });
+  const assistantRow = { name: 'Assistant: Answer 11' };
+  const toolRow = { name: /^Tool read:/ };
+  const turnFold = screen.getByRole('button', { name: 'Turn 11 records' });
+  turnFold.focus();
+  await user.keyboard('{Enter}');
+  expect(turnFold).toHaveAttribute('aria-expanded', 'false');
+  expect(turnFold).toHaveFocus();
+  expect(screen.queryByRole('row', assistantRow)).not.toBeInTheDocument();
+  expect(screen.queryByRole('complementary', { name: 'Event details' })).not.toBeInTheDocument();
+  await user.keyboard(' ');
+  expect(turnFold).toHaveAttribute('aria-expanded', 'true');
+  const toolFold = within(screen.getByRole('row', assistantRow)).getByRole('button', {
+    name: 'Tool calls',
+  });
+  toolFold.focus();
+  await user.keyboard('{Enter}');
+  expect(toolFold).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('row', toolRow)).not.toBeInTheDocument();
+  await user.keyboard(' ');
+  expect(toolFold).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('row', toolRow)).toBeVisible();
+
   const search = screen.getByRole('searchbox', { name: 'Search trajectory' });
   fireEvent.change(search, { target: { value: 'original question' } });
   await user.click(await screen.findByRole('button', { name: 'Turn 1' }));
