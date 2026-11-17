@@ -58,8 +58,9 @@ The portable ZIP, optional NSIS installer and their SHA-256 checksums are under 
 ## Checks
 
 [CI](../.github/workflows/ci.yml) runs `pnpm check` on Linux and Windows for
-pull requests to `main` and pushes to `main`. The Linux job also checks release
-metadata, GitHub Actions workflows, and shell scripts under `scripts/`.
+pull requests to `main`. [Release](../.github/workflows/release.yml) calls the
+same checks on pushes to `main`. The Linux job also checks release metadata,
+GitHub Actions workflows, and shell scripts under `scripts/`.
 See [release verification](releasing.md) for native packaging.
 
 Desktop authentication and Connections regression tests use isolated Vitest
