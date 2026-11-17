@@ -8,8 +8,8 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
-    "lint:eslint": "eslint .",
-    "lint:eslint:fix": "eslint --fix .",
+    "lint": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts . && eslint .",
+    "lint:fix": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts --fix . && eslint --fix .",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -81,6 +81,8 @@ Chat은 기존 Message 안에서 모델의 본문을 Streamdown으로 렌더링�
 
 ### Trajectory
 
+자식 기록을 가진 턴과 도구 그룹에는 공식 ghost Button 화살표를 표시한다. Enter·Space로 접고 펼치며, 접기 동작은 검사기를 열지 않는다. 행 선택은 상세 열기를 유지한다. [Langfuse의 그룹 접기](https://github.com/langfuse/langfuse/blob/544371c537aa2c9a46499fb2559822b1292f36c8/web/src/features/traces/components/VirtualizedTreeNodeWrapper.tsx#L153-L177)
+
 Trajectory 진입 시 모듈을 기다리는 동안에도 조작줄과 빈 타임라인은 실제 화면과 같은 위치와 크기를 차지한다. 조작은 모듈이 준비되면 열린다. 모듈과 최초 기록을 기다리는 상태는 타임라인 아래 목록의 첫 행에 가운데 정렬한 공식 Spinner와 상태 문구로 표시한다. 행은 기록과 같은 데스크톱 32px·모바일 52px 높이를 쓰며, 동작 줄이기 모드에서는 Spinner를 정지한다. 모듈 다운로드가 실패하면 같은 영역에서 상태를 알리고 Chat과 작성 중인 입력은 유지한다. 새로고침은 사용자가 실행한다. 이미 받은 기록은 다시 요청하는 동안 계속 표시한다. [DSH 초기 기록 로딩 행](https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/client/ui-trajectory/src/client/TrajectoryTable.module.css)
 
 [Trajectory](../packages/client/src/features/trajectory/view.tsx)는 대화 패널 전폭의 검색 조작줄, Input·Model·Tools 타임라인, 턴별 기록 목록을 사용한다. 레이블과 막대는 같은 세 레인의 가운데에 정렬하고 상하에 공통 spacing 1을 둔다. 빈 플롯의 호버 기준선은 십자 커서 중심에 맞춘다. 호버 기준선과 범위 양쪽 경계는 동일한 spacing 0.5 두께와 `ring` 색을 쓴다. Table에 가시적 열 헤더를 두지 않는다. 턴은 역할과 별도의 열과 굵은 상단 경계로 구분한다. 기록 목록에는 열 사이 세로선을 두지 않으며, 레인 레이블 경계는 타임라인에만 표시한다. 턴 시작선은 기본 표면 위에 그린다. 호버 배경은 행에서 한 번만 표시하고 턴·요청 버튼은 공유 키보드 포커스를 유지한다. 좁은 목록에서는 턴을 `#N`으로 표시하면서 접근 가능한 이름은 `Turn N`을 유지한다. 타임라인의 Popover는 클릭·탭·키보드로 범위, 확대, 이동을 조작할 수 있다. 초기에는 최근 50개 턴을 표시하며, 이전 기록을 더할 때 읽던 위치를 보존한다.

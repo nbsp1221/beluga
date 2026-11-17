@@ -26,37 +26,69 @@ pub struct Ready {
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Message {
     Ready(Ready),
+    Failed { stage: StartupFailure },
     Stopped,
 }
 
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StartupFailure {
+    Listener,
+    Resources,
+    Process,
+    Timeout,
+    Window,
+}
+
+impl StartupFailure {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Listener => "listener",
+            Self::Resources => "resources",
+            Self::Process => "process",
+            Self::Timeout => "timeout",
+            Self::Window => "window",
+        }
+    }
+}
+
 impl LocalHost {
-    pub fn start(node: &Path, entry: &Path, data: &Path, web: &Path) -> io::Result<Self> {
-        let (mut process, output, mut diagnostics) = process::spawn(node, entry, data, web)?;
+    pub fn start(
+        node: &Path,
+        entry: &Path,
+        data: &Path,
+        web: &Path,
+    ) -> Result<Self, StartupFailure> {
+        let (mut process, output, mut diagnostics) =
+            process::spawn(node, entry, data, web).map_err(|_| StartupFailure::Process)?;
         let (sender, receiver) = mpsc::sync_channel(1);
         thread::spawn(move || {
             // Stdout contains the local session credential. Never log or replay it.
             let mut sender = Some(sender);
             for line in BufReader::new(output).lines().map_while(Result::ok) {
-                if let Ok(Message::Ready(ready)) = serde_json::from_str(&line)
-                    && let Some(sender) = sender.take()
-                {
-                    let _ = sender.send(ready);
+                let report = match serde_json::from_str(&line) {
+                    Ok(Message::Ready(ready)) => Ok(ready),
+                    Ok(Message::Failed { stage }) => Err(stage),
+                    _ => continue,
+                };
+                if let Some(sender) = sender.take() {
+                    let _ = sender.send(report);
                 }
             }
         });
         thread::spawn(move || {
             let _ = io::copy(&mut diagnostics, &mut io::sink());
         });
-        writeln!(process.input, "start")?;
-        let ready = receiver
-            .recv_timeout(Duration::from_secs(20))
-            .map_err(|error| {
-                io::Error::other(format!("The local Host did not report readiness: {error}"))
-            })?;
+        writeln!(process.input, "start").map_err(|_| StartupFailure::Process)?;
+        let ready =
+            receiver
+                .recv_timeout(Duration::from_secs(20))
+                .map_err(|error| match error {
+                    mpsc::RecvTimeoutError::Timeout => StartupFailure::Timeout,
+                    mpsc::RecvTimeoutError::Disconnected => StartupFailure::Process,
+                })??;
         if !ready.valid() {
-            return Err(io::Error::other(
-                "The local Host returned an invalid readiness message.",
-            ));
+            return Err(StartupFailure::Process);
         }
         Ok(Self { ready, process })
     }

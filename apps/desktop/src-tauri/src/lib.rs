@@ -1,7 +1,7 @@
 mod host;
 mod process;
 
-use host::{LocalHost, Ready};
+use host::{LocalHost, Ready, StartupFailure};
 use std::{
     io,
     sync::{
@@ -66,8 +66,7 @@ pub fn run() {
             let app = app.handle().clone();
             thread::spawn(move || {
                 if let Err(error) = start(&app) {
-                    eprintln!("Beluga desktop: {error}");
-                    show_recovery(&app);
+                    show_recovery(&app, error);
                 }
             });
             Ok(())
@@ -93,15 +92,25 @@ pub fn run() {
         });
 }
 
-fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let node = std::env::current_exe()?.with_file_name("beluga-node.exe");
+fn start(app: &AppHandle) -> Result<(), StartupFailure> {
+    let node = std::env::current_exe()
+        .map_err(|_| StartupFailure::Resources)?
+        .with_file_name("beluga-node.exe");
     let entry = app
         .path()
-        .resolve("host/dist/main.js", BaseDirectory::Resource)?;
-    let web = app.path().resolve("web", BaseDirectory::Resource)?;
-    let data = app.path().app_local_data_dir()?.join("host");
+        .resolve("host/dist/host/main.js", BaseDirectory::Resource)
+        .map_err(|_| StartupFailure::Resources)?;
+    let web = app
+        .path()
+        .resolve("web", BaseDirectory::Resource)
+        .map_err(|_| StartupFailure::Resources)?;
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| StartupFailure::Resources)?
+        .join("host");
     let host = LocalHost::start(&node, &entry, &data, &web)?;
-    let waiter = host.waiter()?;
+    let waiter = host.waiter().map_err(|_| StartupFailure::Process)?;
     let ready = host.ready.clone();
     let state = app.state::<Desktop>();
     {
@@ -111,6 +120,13 @@ fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
         *owner = Some(host);
     }
+    if open_local(app, &ready).is_err() {
+        if let Some(host) = state.host.lock().unwrap().take() {
+            let _ = host.stop();
+        }
+        return Err(StartupFailure::Window);
+    }
+
     let watch_app = app.clone();
     thread::spawn(move || {
         process::wait(waiter);
@@ -120,15 +136,9 @@ fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             if let Some(window) = watch_app.get_webview_window(LOCAL) {
                 let _ = window.destroy();
             }
-            show_recovery(&watch_app);
+            show_recovery(&watch_app, StartupFailure::Process);
         }
     });
-    if let Err(error) = open_local(app, &ready) {
-        if let Some(host) = state.host.lock().unwrap().take() {
-            let _ = host.stop();
-        }
-        return Err(error.into());
-    }
     Ok(())
 }
 
@@ -175,11 +185,12 @@ fn show(app: &AppHandle) {
     }
 }
 
-fn show_recovery(app: &AppHandle) {
+fn show_recovery(app: &AppHandle, reason: StartupFailure) {
     if app.state::<Desktop>().exiting.load(Ordering::Acquire) {
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, SHELL, WebviewUrl::App("index.html".into()))
+    let url = WebviewUrl::App(format!("index.html?reason={}", reason.code()).into());
+    let _ = WebviewWindowBuilder::new(app, SHELL, url)
         .title("Beluga")
         .inner_size(520.0, 300.0)
         .build();

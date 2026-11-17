@@ -22,30 +22,12 @@
       "cache": false,
       "persistent": true
     },
-    "lint:eslint": {
-      "dependsOn": ["^lint:eslint"]
-    },
-    "lint:eslint:fix": {
-      "cache": false
-    },
-    "//#lint:eslint:root": {},
-    "//#lint:eslint:fix:root": {
-      "cache": false
-    },
     "//#lint:oxlint": {
-      "dependsOn": [
-        "@workspace/protocol#build",
-        "@workspace/runtime#build",
-        "@workspace/host-plugins#build"
-      ],
+      "dependsOn": ["@workspace/host-server#build"],
       "cache": false
     },
     "//#lint:oxlint:fix": {
-      "dependsOn": [
-        "@workspace/protocol#build",
-        "@workspace/runtime#build",
-        "@workspace/host-plugins#build"
-      ],
+      "dependsOn": ["@workspace/host-server#build"],
       "cache": false
     },
     "//#typecheck:root": {

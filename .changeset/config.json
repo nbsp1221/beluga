@@ -3,5 +3,6 @@
   "changelog": "@changesets/cli/changelog",
   "commit": false,
   "baseBranch": "main",
+  "ignore": ["@workspace/*", "web"],
   "privatePackages": { "version": true, "tag": false }
 }

@@ -16,8 +16,8 @@
     "build": "tsc",
     "dev": "tsc --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit",
-    "lint:eslint": "eslint .",
-    "lint:eslint:fix": "eslint --fix ."
+    "lint": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts . && eslint .",
+    "lint:fix": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts --fix . && eslint --fix ."
   },
   "dependencies": {
     "zod": "catalog:"

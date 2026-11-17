@@ -6,7 +6,9 @@ import { basename, join } from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
 
 const tauri = fileURLToPath(new URL('../src-tauri/', import.meta.url));
-const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const { version } = JSON.parse(
+  await readFile(new URL('../../cli/package.json', import.meta.url), 'utf8'),
+);
 const runtime = join(tauri, 'dist', 'runtime');
 const release = join(tauri, 'target', 'release');
 const output = join(release, 'bundle', 'windows-x64');
@@ -41,7 +43,7 @@ try {
   ]) {
     await access(join(app, file));
   }
-  execFileSync(join(app, 'beluga-node.exe'), [join(app, 'host/dist/main.js'), '--help'], {
+  execFileSync(join(app, 'beluga-node.exe'), [join(app, 'host/dist/host/main.js'), '--help'], {
     stdio: 'inherit',
   });
 

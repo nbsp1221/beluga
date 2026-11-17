@@ -116,7 +116,6 @@ pub fn spawn(
         node.as_os_str(),
         OsStr::new("--use-system-ca"),
         entry.as_os_str(),
-        OsStr::new("desktop"),
         OsStr::new("--data-dir"),
         data.as_os_str(),
         OsStr::new("--web-dir"),

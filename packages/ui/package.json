@@ -12,12 +12,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint:eslint": "eslint .",
-    "lint:eslint:fix": "eslint --fix ."
+    "lint": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts . && eslint .",
+    "lint:fix": "pnpm --filter \"{.}^...\" run --if-present build && oxlint --config ../../oxlint.config.mts --fix . && eslint --fix ."
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
-    "@fontsource-variable/geist": "5.3.0",
     "@shadcn/react": "0.3.1",
     "class-variance-authority": "0.7.1",
     "cn": "0.5.2",

@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest';
-import { createDesktopConnections } from '../apps/host/src/desktop-connections.js';
+import { createDesktopConnections } from '../apps/desktop/host/desktop-connections.js';
 
 const desktop = 'http://127.0.0.1:32100';
 const base = '/api/desktop/connections';

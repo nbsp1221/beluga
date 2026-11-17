@@ -19,7 +19,8 @@ const workspaces = new Map(
 const byName = new Map([...workspaces].map(([directory, manifest]) => [manifest.name, directory]));
 const sharedPackages = new Set(['packages/protocol', 'packages/runtime', 'packages/ui']);
 const browserPackages = new Set(['apps/desktop', 'apps/web', 'packages/client', 'packages/ui']);
-const hostPackages = new Set(['apps/host', 'packages/host-plugins']);
+const hostPackages = new Set(['apps/cli', 'packages/host-plugins', 'packages/host-server']);
+const desktopHostSource = 'apps/desktop/host/';
 const browserFeature = /^packages\/client\/src\/(?:features\/([^/]+)|(workbench))\//;
 const contractFile = /\/contract\.[cm]?[jt]sx?$/;
 const hostSource = 'packages/host-plugins/src/';
@@ -118,14 +119,20 @@ function checkImport(source, specifier) {
   }
   if (
     browserPackages.has(from) &&
+    !source.startsWith(desktopHostSource) &&
     (hostPackages.has(to) ||
-      (isSource && (isBuiltin(specifier) || specifier.startsWith('@flue/runtime'))))
+      target.startsWith(desktopHostSource) ||
+      (isSource &&
+        (isBuiltin(specifier) ||
+          specifier.startsWith('@flue/runtime') ||
+          /^@hono\/node-server(?:\/|$)/.test(specifier))))
   ) {
     return 'Browser code cannot import Host or Node implementation.';
   }
   if (
-    hostPackages.has(from) &&
-    (browserPackages.has(to) || specifier === '@workspace/runtime/react')
+    (hostPackages.has(from) || source.startsWith(desktopHostSource)) &&
+    ((browserPackages.has(to) && !target.startsWith(desktopHostSource)) ||
+      specifier === '@workspace/runtime/react')
   ) {
     return 'Host modules cannot import browser implementation.';
   }
@@ -209,6 +216,7 @@ export function findBoundaryViolations(source, contents) {
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const sourcePatterns = [
+    'host/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}',
     'src/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}',
     'test/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}',
     '*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}',

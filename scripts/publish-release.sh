@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version=$(jq -er '.version | strings | select(length > 0)' package.json)
+version=$(jq -er '.version | strings | select(length > 0)' apps/cli/package.json)
 tag="v$version"
 image="ghcr.io/${GH_REPO,,}:$version"
 assets=(
-  dist/linux/install.sh
-  dist/linux/beluga-linux-x64.tar.gz
-  dist/linux/beluga-linux-x64.tar.gz.sha256
   dist/windows/beluga-windows-x64-portable.zip
   dist/windows/beluga-windows-x64-portable.zip.sha256
   "dist/windows/Beluga_${version}_x64-setup.exe"
@@ -22,26 +19,10 @@ for asset in "${assets[@]}"; do
     test "$actual" = "$expected"
   fi
 done
-test "$(tar -xOf dist/linux/beluga-linux-x64.tar.gz beluga/VERSION)" = "$version"
-awk -v title="## $version" '$0==title {found=1; next} /^## / {found=0} found {print}' CHANGELOG.md > dist/notes.md
+awk -v title="## $version" '$0==title {found=1; next} /^## / {found=0} found {print}' apps/cli/CHANGELOG.md > dist/notes.md
 grep -q '[^[:space:]]' dist/notes.md
 printf '\nDocker: %s%s%s\n' '`' "$image" '`' >> dist/notes.md
-
-if existing=$(gh release view "$tag" --json isDraft --jq .isDraft 2>&1); then
-  [[ "$existing" == true || "$existing" == false ]]
-else
-  grep -qi 'release not found' <<< "$existing"
-fi
-remote=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")
-if [[ -n "$remote" ]]; then
-  target=$(awk 'END {print $1}' <<< "$remote")
-  [[ "$target" == "$RELEASE_SHA" ]] || { echo "Tag $tag points to a different commit." >&2; exit 1; }
-fi
-if [[ "$existing" == false ]]; then
-  [[ -n "$remote" ]] || { echo "Published release $tag has no remote tag." >&2; exit 1; }
-  printf 'Release %s is already published for %s.\n' "$tag" "$RELEASE_SHA"
-  exit 0
-fi
+printf '\nLinux npm package: %s@retn0/beluga@%s%s\n' '`' "$version" '`' >> dist/notes.md
 
 docker load --input dist/container/beluga-image.tar
 local_image=beluga:release-candidate
@@ -69,9 +50,15 @@ fi
 test "$(docker image inspect --format '{{.Id}}' "$image")" = "$image_id"
 docker image inspect --format '{{join .RepoDigests ", "}}' "$image"
 
-if [[ -z "$remote" ]]; then
-  git tag "$tag" "$RELEASE_SHA"
-  git push origin "refs/tags/$tag"
+git push origin "$RELEASE_SHA:refs/tags/$tag"
+if existing=$(gh release view "$tag" --json isDraft --jq .isDraft 2>&1); then
+  [[ "$existing" == true || "$existing" == false ]]
+else
+  grep -qi 'release not found' <<< "$existing"
+fi
+if [[ "$existing" == false ]]; then
+  printf 'Release %s is already published.\n' "$tag"
+  exit 0
 fi
 if [[ "${existing:-}" = true ]]; then
   gh release upload "$tag" "${assets[@]}" --clobber

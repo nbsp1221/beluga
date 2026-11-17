@@ -3,8 +3,8 @@
   "compilerOptions": {
     "types": ["node"],
     "resolveJsonModule": true,
-    "rootDir": "src",
-    "outDir": "dist"
+    "rootDir": ".",
+    "outDir": "../dist/host"
   },
-  "include": ["src"]
+  "include": ["*.ts"]
 }
