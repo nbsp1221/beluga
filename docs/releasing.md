@@ -52,7 +52,7 @@ Extract the portable ZIP and run the optional installer on separate clean system
 
 ## Verify the published instructions
 
-- CI installs and runs the npm CLI from its tarball, checks the Windows bundles and verifies the Docker runtime. For manual install checks, use artifacts from the same CI run and verify the Windows checksums before use.
+- CI installs and runs the npm CLI from its tarball, checks the Windows bundles and verifies the Docker runtime. The npm and Docker checks each initialize the packaged Host's Standard preset read tool. For manual install checks, use artifacts from the same CI run and verify the Windows checksums before use.
 - Check that each artifact includes the Beluga license and the applicable third-party notices and license files.
 - Keep release notes focused on supported installs, changes users will see, and any action required before updating.
 - After publishing, verify the Windows download links, install via the npm `preview` dist-tag, and confirm that the published Docker tag resolves to the tested image.

@@ -73,6 +73,7 @@ try {
   await writeManifest(join(stage, 'package.json'), {
     ...manifest,
     dependencies,
+    bundleDependencies: true,
     os: ['linux'],
     cpu: ['x64'],
   });
@@ -115,6 +116,13 @@ try {
   if (packagedVersion.trim() !== version) {
     throw new Error('Installed CLI version does not match the release.');
   }
+  const installedModules = execFileSync('npm', ['root', '--global', '--prefix', prefix], {
+    encoding: 'utf8',
+  }).trim();
+  run(process.execPath, [
+    join(root, 'scripts/check-packaged-tools.mjs'),
+    join(installedModules, manifest.name),
+  ]);
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

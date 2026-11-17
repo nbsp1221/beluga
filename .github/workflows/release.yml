@@ -28,7 +28,9 @@ jobs:
             --label "org.opencontainers.image.licenses=MIT" .
       - name: Verify Docker runtime
         run: |
-          docker run --rm --network none --entrypoint sh beluga:release-candidate -ec '
+          docker run --rm --network none \
+            --mount "type=bind,src=$PWD/scripts/check-packaged-tools.mjs,dst=/tmp/check-packaged-tools.mjs,readonly" \
+            --entrypoint sh beluga:release-candidate -ec '
             test -f LICENSE
             test -f THIRD_PARTY_NOTICES.md
             test -f FLUE-SDK-LICENSE.txt
@@ -36,6 +38,7 @@ jobs:
             test -f web/index.html
             test -z "$(command -v codex || true)"
             node cli/dist/main.js --help
+            node /tmp/check-packaged-tools.mjs cli
           '
       - run: docker image save beluga:release-candidate --output dist/beluga-image.tar
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
