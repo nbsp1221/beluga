@@ -3,14 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      build-release-candidate:
-        description: Build release candidate after CI
-        type: boolean
-        default: false
+  workflow_call:
 
 permissions:
   contents: read
@@ -54,42 +47,3 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/repo:ro" -w /repo "$ACTIONLINT_IMAGE"
           docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck "$ACTIONLINT_IMAGE" scripts/*.sh
-
-  release-plan:
-    name: Plan release candidate
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.build-release-candidate)
-    runs-on: ubuntu-24.04
-    outputs:
-      build: ${{ steps.version.outputs.changed == 'true' || inputs.build-release-candidate }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'push'
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check whether the product version changed
-        id: version
-        if: github.event_name == 'push'
-        env:
-          BEFORE: ${{ github.event.before }}
-        shell: bash
-        run: |
-          manifest=apps/cli/package.json
-          if ! git cat-file -e "$BEFORE:$manifest"; then
-            # The first preview is built manually when the CLI package is introduced.
-            exit 0
-          fi
-          previous=$(git show "$BEFORE:$manifest" | jq -er '.version | strings | select(length > 0)')
-          current=$(jq -er '.version | strings | select(length > 0)' "$manifest")
-          if [[ "$previous" != "$current" ]]; then
-            echo 'changed=true' >> "$GITHUB_OUTPUT"
-          fi
-
-  release:
-    needs: [check, release-plan]
-    if: needs.release-plan.outputs.build == 'true'
-    permissions:
-      contents: write
-      packages: write
-      id-token: write
-    uses: ./.github/workflows/release.yml

@@ -1,13 +1,47 @@
 name: Release
 
 on:
-  workflow_call:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  check:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  plan:
+    name: Plan release
+    needs: check
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ github.event_name == 'workflow_dispatch' || steps.version.outputs.changed == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check whether the product version changed
+        id: version
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          manifest=apps/cli/package.json
+          previous=$(git show "$BEFORE:$manifest" | jq -er '.version | strings | select(length > 0)')
+          current=$(jq -er '.version | strings | select(length > 0)' "$manifest")
+          if [[ "$previous" != "$current" ]]; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
   linux:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,6 +87,8 @@ jobs:
           if-no-files-found: error
 
   windows:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,7 +109,7 @@ jobs:
 
   publish-npm:
     needs: [linux, windows]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -100,7 +136,6 @@ jobs:
 
   publish:
     needs: publish-npm
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     concurrency:
       group: publish-release

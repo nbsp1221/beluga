@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-17
+last_reviewed: 2026-11-18
 ---
 
 # Release verification
@@ -12,14 +12,15 @@ The release PR is the approval to publish. If its checks await workflow approval
 
 Windows CI prepares the Desktop Host sidecar and checks the Rust shell. The release workflow builds and checks the installer and portable bundle.
 
-When the product version changes on `main`, [CI](../.github/workflows/ci.yml) runs
-its Windows and Linux checks. If they pass, [Release](../.github/workflows/release.yml)
-packages the same commit. The workflow publishes `@retn0/beluga` to npm,
-the image to GitHub Container Registry, and the Windows bundles and checksums
-to GitHub Releases.
+On a push to `main`, [Release](../.github/workflows/release.yml) calls
+[CI](../.github/workflows/ci.yml) for its Windows and Linux checks. If both
+pass and the CLI version changed, Release packages and publishes that commit.
+It publishes `@retn0/beluga` to npm, the image to GitHub Container Registry,
+and the Windows bundles and checksums to GitHub Releases.
 
-To build the current `main` version again, select **Run workflow** in **CI** and
-enable **Build release candidate after CI**. This manual build creates a fresh set of artifacts for verification.
+To build the current `main` version again, select **Run workflow** in
+**Release** and choose `main`. The manual run checks the commit and only
+uploads build artifacts.
 
 Preview builds use the npm `preview` dist-tag and GitHub's **Pre-release** flag. Keep container references versioned.
 
@@ -27,9 +28,17 @@ To prepare a stable release, confirm the Git tag is available and update the sta
 
 ## First publication
 
-Build and review the candidate from `main` using the manual CI option above. Publish the verified npm tarball with `npm publish <tarball> --tag preview` using the npm account authorized for `@retn0`. On the package's npm settings, authorize `nbsp1221/beluga`, caller workflow `ci.yml`, for direct publication through [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/). Verify that the exact package installs from npm. Push the candidate image by its version, set the GHCR package visibility to public and verify anonymous pull. Tag that same commit and create the GitHub prerelease with the verified Windows assets and checksums.
+Build and review the candidate from `main` using the manual Release run above. Publish the verified npm tarball with `npm publish <tarball> --tag preview` using the npm account authorized for `@retn0`. Verify that the exact package installs from npm. Push the candidate image by its version, set the GHCR package visibility to public and verify anonymous pull. Tag that same commit and create the GitHub prerelease with the verified Windows assets and checksums.
 
 Ship the unsigned Windows portable ZIP and optional NSIS installer with their SHA-256 checksums. Keep the download guide explicit about the signing status and Windows restrictions.
+
+## Configure npm Trusted Publishing
+
+Before merging the first automated release PR, authorize `nbsp1221/beluga`
+and workflow `release.yml` in the npm package settings. Leave the environment
+field empty and allow `npm publish`. A new configuration expires unless its
+first OIDC publication succeeds within 48 hours.
+[npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
 
 ## Verify the Host
 
@@ -52,7 +61,7 @@ Extract the portable ZIP and run the optional installer on separate clean system
 
 ## Verify the published instructions
 
-- CI installs and runs the npm CLI from its tarball, checks the Windows bundles and verifies the Docker runtime. The npm and Docker checks each initialize the packaged Host's Standard preset read tool. For manual install checks, use artifacts from the same CI run and verify the Windows checksums before use.
+- Release installs and runs the npm CLI from its tarball, checks the Windows bundles and verifies the Docker runtime. The npm and Docker checks each initialize the packaged Host's Standard preset read tool. For manual install checks, use artifacts from the same Release run and verify the Windows checksums before use.
 - Check that each artifact includes the Beluga license and the applicable third-party notices and license files.
 - Keep release notes focused on supported installs, changes users will see, and any action required before updating.
 - After publishing, verify the Windows download links, install via the npm `preview` dist-tag, and confirm that the published Docker tag resolves to the tested image.
@@ -63,4 +72,4 @@ The npm publish job runs before publishing the GitHub Release. The GitHub publis
 
 Use **Re-run failed jobs** for transient failures and external configuration changes. This reuses the original workflow revision and skips publishing the npm tarball a second time when that job already passed.
 
-If the publishing code needs a fix, merge the fix with a Changesets entry, then merge the release PR for the next version. CI builds the new version with the fixed publisher. Leave any image or tag already pushed under the failed version in place.
+If the publishing code needs a fix, merge the fix with a Changesets entry, then merge the release PR for the next version. Release builds the new version with the fixed publisher. Leave any image or tag already pushed under the failed version in place.
