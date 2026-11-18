@@ -63,9 +63,11 @@ same checks on pushes to `main`. The Linux job also checks release metadata,
 GitHub Actions workflows, and shell scripts under `scripts/`.
 See [release verification](releasing.md) for native packaging.
 
-Before running tests, CI installs fd and ripgrep with apt on Linux and Chocolatey
-on Windows, then prints their versions. Pi accepts Ubuntu's `fdfind` command
-directly. Local checks also use these tools. Install `fd-find ripgrep` with apt,
+Before running tests, CI installs fd and ripgrep with apt on Linux. On Windows,
+CI downloads versioned ZIPs from the upstream GitHub releases and checks their
+SHA-256 hashes before using the binaries. Both jobs print the tool versions.
+Pi accepts Ubuntu's `fdfind` command directly. Local checks also use these tools.
+Install `fd-find ripgrep` with apt,
 `fd ripgrep` with Chocolatey on Windows, or `fd ripgrep` with Homebrew on macOS.
 
 Desktop authentication and Connections regression tests use isolated Vitest

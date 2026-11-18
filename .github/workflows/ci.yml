@@ -34,9 +34,27 @@ jobs:
           rg --version
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $fd = 'fd-v10.5.2-x86_64-pc-windows-msvc'
+          $rg = 'ripgrep-15.2.0-x86_64-pc-windows-msvc'
+          Set-Location $env:RUNNER_TEMP
+          Invoke-WebRequest "https://github.com/sharkdp/fd/releases/download/v10.5.2/$fd.zip" -OutFile "$fd.zip"
+          Invoke-WebRequest "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/$rg.zip" -OutFile "$rg.zip"
+          if ((Get-FileHash "$fd.zip").Hash -ne '7edac75ef96b7e9a01ebb251a21ee86ea365a09adcfb865f1ec3346a906153b6') {
+            throw 'fd archive checksum mismatch.'
+          }
+          if ((Get-FileHash "$rg.zip").Hash -ne '71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5') {
+            throw 'ripgrep archive checksum mismatch.'
+          }
+          Expand-Archive "$fd.zip" -DestinationPath .
+          Expand-Archive "$rg.zip" -DestinationPath .
+          "$env:RUNNER_TEMP\$fd" >> $env:GITHUB_PATH
+          "$env:RUNNER_TEMP\$rg" >> $env:GITHUB_PATH
+      - name: Verify search tools (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
-          choco install fd ripgrep --yes --no-progress
           fd --version
           rg --version
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
