@@ -1,19 +1,29 @@
-<img src="apps/desktop/icon.svg" alt="" width="64" height="64">
+<p align="center">
+  <img src="apps/desktop/icon.svg" alt="" width="80" height="80">
+</p>
 
-# Beluga
+<h1 align="center">Beluga</h1>
 
-**A self-hosted coding agent that works where your code lives.**
+<p align="center">
+  A self-hosted coding agent inspired by <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
+</p>
 
-Open a project folder, connect a model, and ask Beluga to explore your code or make a change. See which files it read and what tools it ran.
+<p align="center">
+  <a href="https://github.com/nbsp1221/beluga/releases">Windows download</a> ·
+  <a href="#linux-server">Linux setup</a> ·
+  <a href="#docker">Docker setup</a>
+</p>
 
-[![Beluga preview version](https://img.shields.io/github/v/release/nbsp1221/beluga?include_prereleases&label=preview&style=flat-square)](https://github.com/nbsp1221/beluga/releases)
-[![MIT license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-
-[Windows download](https://github.com/nbsp1221/beluga/releases) · [Linux setup](#linux-server) · [Docker setup](#docker)
+<p align="center">
+  <a href="https://github.com/nbsp1221/beluga/releases"><img src="https://img.shields.io/github/v/release/nbsp1221/beluga?include_prereleases&amp;label=preview&amp;style=flat-square" alt="Beluga preview version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
+</p>
 
 ![Beluga answers a question about a server's port and shows the file it read](.github/assets/beluga-workspace.webp)
 
 _An example conversation in a sample workspace._
+
+Open a project folder, connect a model, and ask Beluga to explore your code or make a change. See which files it read and what tools it ran.
 
 ## What you can do
 
@@ -64,8 +74,6 @@ The Host runs the agent and stores its conversations. For example, when you conn
 - [Build from source and contribute](docs/development.md)
 - [Architecture](docs/architecture.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
-
-Beluga's interface and plugin architecture were inspired by [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 ## License
 
