@@ -19,12 +19,6 @@
 
 _In this sample workspace, Beluga reads `src/config.ts` to explain where the server gets its port._
 
-## Why Beluga
-
-- **Pick up where you left off.** Keep conversations together by project folder so you can return to earlier work.
-- **Choose what the agent can do.** Explore code in Read only, or grant write or shell access when the task calls for it.
-- **See how it got there.** Open Trajectory to inspect the tool calls and model requests behind a response.
-
 ## Install
 
 **Public preview.** Choose where you want to run the agent.
@@ -57,6 +51,12 @@ When you connect to a remote Host, Beluga opens project files, runs tools, and s
 3. Select **Add workspace**, choose a project folder on the Host, and send a text message. Try asking where the project loads its configuration.
 
 New conversations start in **Read only**. Choose **Workspace write** to let the agent edit files in the workspace, or **Full access** to let it run commands with the Host account's permissions. Read and search tools can open explicitly named paths that the Host account can read, including paths outside the workspace.
+
+## Features
+
+- **Pick up where you left off.** Keep conversations together by project folder so you can return to earlier work.
+- **Choose what the agent can do.** Explore code in Read only, or grant write or shell access when the task calls for it.
+- **See how it got there.** Open Trajectory to inspect the tool calls and model requests behind a response.
 
 ## Documentation
 
