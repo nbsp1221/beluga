@@ -5,11 +5,14 @@
 <h1 align="center">Beluga</h1>
 
 <p align="center">
-  A self-hosted coding agent inspired by DeepSeek Harness
+  A self-hosted coding agent inspired by DeepSeek Harness.<br>
+  Open a project folder, choose a model, and see what the agent read and ran.
 </p>
 
 <p align="center">
-  <a href="#install"><strong>Get started</strong></a>
+  <a href="#install"><strong>Get started</strong></a> ·
+  <a href="https://github.com/nbsp1221/beluga/releases">Releases</a> ·
+  <a href="docs/hosting.md">Host guide</a>
 </p>
 
 ![Beluga answers a question about a server's port and shows the file it read](.github/assets/beluga-workspace.webp)
