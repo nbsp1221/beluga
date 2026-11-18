@@ -1,10 +1,33 @@
+<img src="apps/desktop/icon.svg" alt="" width="64" height="64">
+
 # Beluga
 
-Run a coding agent on your computer or Linux server. Open a project, give the agent a task, and inspect its model requests and tool calls in **Trajectory**.
+**A self-hosted coding agent that works where your code lives.**
+
+Open a project folder, connect a model, and ask Beluga to explore your code or make a change. See which files it read and what tools it ran.
+
+[![Beluga preview version](https://img.shields.io/github/v/release/nbsp1221/beluga?include_prereleases&label=preview&style=flat-square)](https://github.com/nbsp1221/beluga/releases)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+
+[Windows download](https://github.com/nbsp1221/beluga/releases) · [Linux setup](#linux-server) · [Docker setup](#docker)
+
+![Beluga answers a question about a server's port and shows the file it read](.github/assets/beluga-workspace.webp)
+
+_An example conversation in a sample workspace._
+
+## What you can do
+
+- **Keep chats with your projects.** Open a folder and pick up earlier conversations from the same workspace.
+- **Choose what the agent can do.** Start in Read only and grant write or shell access when the task calls for it.
+- **Review what happened.** Open Trajectory to see the tool calls and model requests behind a response.
 
 ## Install
 
-Beluga is in public preview.
+Beluga is in public preview. Connect an existing Codex CLI login or an OpenAI-compatible provider to start a conversation.
+
+### Windows
+
+Download the Windows x64 portable ZIP from [Releases](https://github.com/nbsp1221/beluga/releases), verify its SHA-256 checksum, and extract the whole folder before opening `Beluga.exe`. It starts a Host on your computer and can also connect to a remote Host. [Windows setup](docs/hosting.md#windows-desktop)
 
 ### Linux server
 
@@ -17,10 +40,9 @@ beluga service install
 
 Open `http://127.0.0.1:8917` on the Host and sign in with the printed access code. [Linux setup and remote access](docs/hosting.md#linux-user-service)
 
-### Windows and Docker
+### Docker
 
-- **Windows desktop** · Extract the x64 portable ZIP to run Beluga on your PC or connect to a Linux Host. [Windows setup](docs/hosting.md#windows-desktop)
-- **Docker** · Run the image listed in the release notes with persistent data and your project folders. [Docker setup](docs/hosting.md#docker)
+Use the versioned image listed in the [release notes](https://github.com/nbsp1221/beluga/releases). The [Docker setup guide](docs/hosting.md#docker) shows how to keep your data and mount your project folders.
 
 ## Start a conversation
 
@@ -42,6 +64,8 @@ The Host runs the agent and stores its conversations. For example, when you conn
 - [Build from source and contribute](docs/development.md)
 - [Architecture](docs/architecture.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+Beluga's interface and plugin architecture were inspired by [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 ## License
 
