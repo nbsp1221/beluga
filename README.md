@@ -5,35 +5,26 @@
 <h1 align="center">Beluga</h1>
 
 <p align="center">
-  A self-hosted coding agent inspired by <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
+  A self-hosted coding agent inspired by DeepSeek Harness
 </p>
 
 <p align="center">
-  <a href="https://github.com/nbsp1221/beluga/releases">Windows download</a> ·
-  <a href="#linux-server">Linux setup</a> ·
-  <a href="#docker">Docker setup</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/nbsp1221/beluga/releases"><img src="https://img.shields.io/github/v/release/nbsp1221/beluga?include_prereleases&amp;label=preview&amp;style=flat-square" alt="Beluga preview version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
+  <a href="#install"><strong>Get started</strong></a>
 </p>
 
 ![Beluga answers a question about a server's port and shows the file it read](.github/assets/beluga-workspace.webp)
 
-_An example conversation in a sample workspace._
+_In this sample workspace, Beluga reads `src/config.ts` to explain where the server gets its port._
 
-Open a project folder, connect a model, and ask Beluga to explore your code or make a change. See which files it read and what tools it ran.
+## Why Beluga
 
-## What you can do
-
-- **Keep chats with your projects.** Open a folder and pick up earlier conversations from the same workspace.
-- **Choose what the agent can do.** Start in Read only and grant write or shell access when the task calls for it.
-- **Review what happened.** Open Trajectory to see the tool calls and model requests behind a response.
+- **Pick up where you left off.** Keep conversations together by project folder so you can return to earlier work.
+- **Choose what the agent can do.** Explore code in Read only, or grant write or shell access when the task calls for it.
+- **See how it got there.** Open Trajectory to inspect the tool calls and model requests behind a response.
 
 ## Install
 
-Beluga is in public preview. Connect an existing Codex CLI login or an OpenAI-compatible provider to start a conversation.
+**Public preview.** Choose where you want to run the agent.
 
 ### Windows
 
@@ -54,19 +45,15 @@ Open `http://127.0.0.1:8917` on the Host and sign in with the printed access cod
 
 Use the versioned image listed in the [release notes](https://github.com/nbsp1221/beluga/releases). The [Docker setup guide](docs/hosting.md#docker) shows how to keep your data and mount your project folders.
 
-## Start a conversation
+When you connect to a remote Host, Beluga opens project files, runs tools, and saves conversations on that machine. See the [remote access guide](docs/hosting.md#access-the-host).
+
+## First conversation
 
 1. Open your Beluga Host and sign in with its access code. A desktop app running its own Host opens directly.
-2. Open **Settings → Providers**, connect a model provider, and choose a model. The Codex connection uses the Codex CLI login on the machine and account running the Host.
-3. Select **Add workspace**, choose a project folder on the Host, and send your first message. **Standard** is ready to use.
+2. Open **Settings → Providers**. Connect Codex using the existing Codex CLI login for the Host's account, or add an OpenAI-compatible provider. Choose a model.
+3. Select **Add workspace**, choose a project folder on the Host, and send a text message. Try asking where the project loads its configuration.
 
 New conversations start in **Read only**. Choose **Workspace write** to let the agent edit files in the workspace, or **Full access** to let it run commands with the Host account's permissions. Read and search tools can open explicitly named paths that the Host account can read, including paths outside the workspace.
-
-Use chat to ask the agent to read or edit project files. Chat supports text messages.
-
-## Work with a remote Host
-
-The Host runs the agent and stores its conversations. For example, when you connect from Windows to your Linux Host, workspace paths and shell commands refer to Linux. Use the [Host guide](docs/hosting.md) to configure network access, choose the execution account, and back up Host data.
 
 ## Documentation
 
@@ -74,6 +61,8 @@ The Host runs the agent and stores its conversations. For example, when you conn
 - [Build from source and contribute](docs/development.md)
 - [Architecture](docs/architecture.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+Beluga's interface and plugin architecture were inspired by [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 ## License
 
