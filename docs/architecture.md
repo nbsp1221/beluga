@@ -29,7 +29,7 @@ Beluga는 웹 Client와 Node Host가 각각 플러그인을 조립하는 모노�
 
 ## 실행 그래프와 화면 등록
 
-[웹 조립](../apps/web/src/product.ts)은 샘플 또는 연결 초기화를 선택한다. 웹과 사이트는 [공유 진입점](../packages/client/src/bootstrap/product.ts)에서 Workbench, Conversation, Chat, Files, Trajectory를 조립한다. 연결 조립은 초기 대화 카탈로그와 프리셋을 병렬 조회해 서비스에 나눠 준다. runtime이 서비스 의존성을 정렬하고, 형제 플러그인은 앱이 선언한 순서로 뷰와 설정을 등록한다.
+[웹 조립](../apps/web/src/product.ts)은 샘플 또는 연결 초기화를 선택하고, 연결 모드에서 Providers와 Agent presets를 추가한다. 웹과 사이트는 [공유 진입점](../packages/client/src/bootstrap/product.ts)에서 Workbench, Conversation, Chat, Files, Trajectory를 조립한다. 연결 조립은 초기 대화 카탈로그와 프리셋을 병렬 조회해 서비스에 나눠 준다. runtime이 서비스 의존성을 정렬하고, 형제 플러그인은 앱이 선언한 순서로 뷰와 설정을 등록한다.
 
 웹 진입점은 연결 모드에서 로그인 문서에 필요한 코드부터 실행하고, 인증된 앱 진입에서 Workbench와 제품 플러그인을 가져온다. 제품 조립은 실행 모드에 맞는 대화 어댑터만 불러온다. Chat과 Trajectory는 탭을 먼저 등록하고 뷰를 처음 표시할 때 구현을 가져온다. 열린 뷰는 탭을 바꿔도 유지하며, 공통 Composer와 초안은 뷰 로딩 경계 바깥에 둔다. Chat은 답변을 표시할 때 Markdown을, 코드 펜스를 표시할 때 강조 엔진과 지원 언어의 문법을 가져온다.
 

@@ -1,9 +1,7 @@
 import { type Plugin, createRuntime } from '@workspace/runtime';
-import { agentPresetsClient } from '../features/agent-presets/plugin.js';
 import { chatClient } from '../features/chat/plugin.js';
 import { createConversationPlugin } from '../features/conversation/plugin.js';
 import { createFilesPlugin } from '../features/files/plugin.js';
-import { modelProvidersClient } from '../features/model-providers/plugin.js';
 import { createTrajectoryPlugin } from '../features/trajectory/plugin.js';
 import { createWorkbenchPlugin } from '../workbench/plugin.js';
 
@@ -26,6 +24,5 @@ export function createClientProduct({
     createTrajectoryPlugin(connected),
     data,
     ...plugins,
-    ...(connected ? [modelProvidersClient, agentPresetsClient] : []),
   ]);
 }
