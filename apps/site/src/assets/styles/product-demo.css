@@ -1,0 +1,3 @@
+@import '@workspace/ui/globals.css';
+
+@source '../../../node_modules/@workspace/client/src/**/*.{ts,tsx}';

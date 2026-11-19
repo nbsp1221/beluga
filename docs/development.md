@@ -26,6 +26,25 @@ changing that address.
 not report a model connection, and the frontend shell does not require this
 request to display sample data. The theme is under **Settings → General**.
 
+## Develop the product site
+
+Run the public site on its own from the repository root:
+
+```sh
+pnpm dev --filter=@workspace/site
+```
+
+Open the loopback URL printed by Astro. Use `pnpm build --filter=@workspace/site`
+to generate static files in `apps/site/dist`, and `pnpm --filter @workspace/site preview`
+to check that build locally. Edit the site content in [index.astro](../apps/site/src/pages/index.astro).
+The page uses AstroWind widgets with the existing Beluga brand assets and links to the Host setup guide.
+The landing page embeds [the example conversation](../apps/site/src/pages/demo.astro), which uses the same
+client plugins and styles as the product. [The sample conversation](../apps/site/src/components/example-conversation.ts)
+provides the completed messages and example usage values. The embed opens the desktop sidebar when the
+product layout can place it alongside the chat. Astro uses the full-height loading placeholder to start
+React when the embedded area is visible. Turbo builds the shared packages before starting or building the site.
+See the [AstroWind notice](../THIRD_PARTY_NOTICES.md#astrowind) for the source revision and license.
+
 ## Run connected mode from source
 
 ```sh

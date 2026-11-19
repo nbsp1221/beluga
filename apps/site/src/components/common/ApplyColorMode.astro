@@ -1,0 +1,19 @@
+<script is:inline>
+  // Set the theme before first paint.
+  function applyTheme(theme) {
+    document.documentElement.classList[theme === 'dark' ? 'add' : 'remove']('dark');
+  }
+
+  function resolveTheme() {
+    if (
+      localStorage.theme === 'dark' ||
+      (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    ) {
+      return 'dark';
+    }
+    return 'light';
+  }
+
+  applyTheme(resolveTheme());
+
+</script>

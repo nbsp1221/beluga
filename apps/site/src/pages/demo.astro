@@ -1,0 +1,21 @@
+---
+import { ProductDemo } from '~/components/ProductDemo';
+import ApplyColorMode from '~/components/common/ApplyColorMode.astro';
+import '~/assets/styles/product-demo.css';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Beluga example conversation</title>
+    <ApplyColorMode />
+  </head>
+  <body>
+    <div id="root">
+      <ProductDemo client:visible />
+    </div>
+  </body>
+</html>

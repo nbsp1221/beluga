@@ -1,0 +1,171 @@
+---
+import { FileReadExample } from '~/components/FileReadExample';
+import Layout from '~/layouts/Layout.astro';
+import Header from '~/components/widgets/Header.astro';
+import Hero from '~/components/widgets/Hero.astro';
+import Content from '~/components/widgets/Content.astro';
+import Features2 from '~/components/widgets/Features2.astro';
+import Footer from '~/components/widgets/Footer.astro';
+import workspace from '../../../../.github/assets/beluga-workspace.webp';
+
+const repository = 'https://github.com/nbsp1221/beluga';
+const releases = repository + '/releases';
+const hostGuide = repository + '/blob/main/docs/hosting.md';
+const firstConversation = repository + '#first-conversation';
+const title = 'Beluga | Self-hosted coding agent';
+const description =
+  'Open a project folder, connect your model, and give Beluga a task. See which files it read and which tools it ran.';
+const installCommands = 'npm install -g @retn0/beluga@preview\nbeluga service install';
+
+const links = [
+  { text: 'Features', href: '#features' },
+  { text: 'Get started', href: '#get-started' },
+  { text: 'Docs', href: hostGuide },
+];
+const features = [
+  {
+    title: 'Keep work with each project',
+    description: 'Reopen a project folder and pick up the conversations you already started there.',
+    icon: 'tabler:folder',
+  },
+  {
+    title: 'Choose what the agent can do',
+    description: 'Start in Read only. Allow workspace edits or shell commands when the task calls for it.',
+    icon: 'tabler:shield',
+  },
+  {
+    title: 'Inspect each step',
+    description: 'Open Trajectory to review the tool calls and model requests behind a response.',
+    icon: 'tabler:route',
+  },
+];
+const installLinkClass =
+  'inline-flex min-h-11 items-center underline underline-offset-4 hover:text-card-foreground hover:decoration-2';
+const installOptions = [
+  {
+    title: 'Windows',
+    description: 'Run the x64 desktop app. Get the portable ZIP and SHA-256 checksum, or use the optional installer.',
+    icon: 'tabler:device-desktop',
+    callToAction: { text: 'Windows downloads', class: installLinkClass, href: releases, variant: 'link' as const },
+  },
+  {
+    title: 'Linux server',
+    description: 'Install on Linux x64 with Node.js 24 LTS and a systemd user session.',
+    icon: 'tabler:terminal-2',
+    callToAction: { text: 'Linux setup guide', class: installLinkClass, href: hostGuide + '#linux-user-service', variant: 'link' as const },
+  },
+  {
+    title: 'Docker',
+    description: 'Run the versioned container with a persistent data volume and a mounted project folder.',
+    icon: 'tabler:brand-docker',
+    callToAction: { text: 'Docker setup guide', class: installLinkClass, href: hostGuide + '#docker', variant: 'link' as const },
+  },
+];
+---
+
+<Layout {title} {description} socialImage={workspace}>
+  <Fragment slot="header">
+    <a class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-3 focus:rounded-md focus:bg-page focus:p-3" href="#main">
+      Skip to content
+    </a>
+    <Header links={links} actions={[{ text: 'GitHub', href: repository }]} showToggleTheme position="right" />
+  </Fragment>
+
+  <Hero
+    id="hero"
+    title="A self-hosted coding agent<br class='hidden md:block' /> for your projects."
+    subtitle={description}
+    actions={[
+      { variant: 'primary', text: 'Get started', href: '#get-started' },
+      { variant: 'secondary', text: 'View on GitHub', href: repository },
+    ]}
+  >
+    <figure slot="image">
+      <iframe
+        title="Beluga example conversation"
+        src="/demo/"
+        loading="lazy"
+        class="block h-180 w-full rounded-xl border border-border bg-background shadow-xl sm:h-168"
+      ></iframe>
+      <figcaption class="mt-4 text-center text-sm text-muted">Example conversation with sample data.</figcaption>
+    </figure>
+  </Hero>
+
+  <Content
+    id="features"
+    title="Follow the work, from question to answer."
+    subtitle="Ask where a project loads its configuration. See which files the agent opened to find the answer."
+    items={features}
+    columns={1}
+  >
+    <figure slot="image" class="mx-auto">
+      <FileReadExample client:visible />
+    </figure>
+  </Content>
+
+  <div class="bg-neutral-50 dark:bg-neutral-900">
+    <Features2
+      id="get-started"
+      title="Get started"
+      subtitle="Beluga is in public preview. Choose where to run it."
+      items={installOptions}
+      classes={{ container: 'pb-6 md:pb-8 lg:pb-8' }}
+      columns={3}
+    />
+    <div class="mx-auto max-w-3xl px-4 pb-12 md:px-6 md:pb-16">
+      <div class="rounded-lg border border-border bg-card text-card-foreground">
+        <div class="flex items-center justify-between gap-4 border-b border-border px-4">
+          <h3 class="text-sm font-semibold">Linux install commands</h3>
+          <button
+            id="copy-install"
+            class="min-h-11 rounded px-2 text-sm font-medium text-muted hover:text-heading focus-visible:outline-2 focus-visible:outline-primary"
+            type="button"
+            aria-label="Copy Linux install commands"
+            hidden
+          >Copy</button>
+        </div>
+        <pre class="whitespace-pre-wrap p-4 text-sm"><code id="install-commands">{installCommands}</code></pre>
+        <span id="copy-status" class="sr-only" role="status"></span>
+      </div>
+      <p class="mt-5 text-muted">
+        Connect Codex or an OpenAI-compatible provider and open a project folder.{' '}
+        <a class="font-medium text-link underline underline-offset-4 dark:text-blue-300" href={firstConversation}>
+          Start your first conversation
+        </a>.
+      </p>
+    </div>
+  </div>
+
+  <Footer
+    slot="footer"
+    secondaryLinks={[
+      { text: 'GitHub', href: repository },
+      { text: 'Releases', href: releases },
+      { text: 'Host guide', href: hostGuide },
+      { text: 'MIT License', href: repository + '/blob/main/LICENSE' },
+    ]}
+    links={[]}
+    socialLinks={[]}
+    footNote={'Inspired by <a class="underline underline-offset-4" href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>.'}
+  />
+</Layout>
+
+<script>
+  const button = document.querySelector<HTMLButtonElement>('#copy-install');
+  const commands = document.querySelector('#install-commands')?.textContent?.trim();
+  const status = document.querySelector('#copy-status');
+
+  if (button && commands && status && navigator.clipboard) {
+    button.hidden = false;
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(commands);
+        button.textContent = 'Copied';
+        status.textContent = 'Linux install commands copied.';
+      } catch {
+        button.textContent = 'Copy failed';
+        status.textContent = 'Copy failed. You can still select and copy the commands.';
+      }
+    });
+  }
+</script>

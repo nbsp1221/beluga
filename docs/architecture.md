@@ -12,6 +12,7 @@ Beluga는 웹 Client와 Node Host가 각각 플러그인을 조립하는 모노�
 
 - [apps/desktop](../apps/desktop/src-tauri/src/lib.rs): Windows 설치와 창·트레이·로컬 Host 수명. 동봉된 Node로 기존 Host를 시작하고 WebView2에 그 Host의 웹 화면을 연다. [host/](../apps/desktop/host/main.ts)에서 데스크톱 전용 Node 시작과 원격 연결을 담당한다.
 - [apps/web](../apps/web/src/main.tsx): Vite/React 시작, ThemeProvider·TooltipProvider·Router, 클라이언트 조립과 React 루트 수명. [App](../apps/web/src/App.tsx)은 `main` 슬롯을 렌더링한다.
+- [apps/site](../apps/site/src/pages/index.astro): 설치 경로와 기능을 소개하는 정적 제품 사이트. AstroWind 레이아웃에 공유 Client가 렌더링하는 [완료된 샘플 대화](../apps/site/src/pages/demo.astro)를 삽입한다.
 - [apps/cli](../apps/cli/src/main.ts): npm과 Docker가 공유하는 공개 `beluga` 명령과 도움말. CLI 입력을 Host 실행 옵션으로 변환한다. [systemd 어댑터](../apps/cli/src/service.ts)가 사용자 서비스 등록과 리스너 준비 통지를 맡는다.
 - [packages/host-server](../packages/host-server/src/index.ts): 공통 Host 제품 조립과 라우팅, 웹 자산과 접근 코드 관리, CLI의 TCP 리스너. CLI의 기본 수신 주소는 loopback이다. Docker 이미지가 명시적으로 `--bind`를 지정하며, [Docker 배포 예시](hosting.md#docker)는 호스트의 loopback 포트만 게시한다. 각 실행 진입점은 리스너 종료 후 Host 플러그인을 해제한다.
 - [protocol](../packages/protocol/src/host.ts)은 HTTP 요청·응답과 검증 스키마를 공유한다. React, Node 구현, Cordis에 의존하지 않는다.
@@ -28,7 +29,7 @@ Beluga는 웹 Client와 Node Host가 각각 플러그인을 조립하는 모노�
 
 ## 실행 그래프와 화면 등록
 
-[웹 조립](../apps/web/src/product.ts)은 샘플 또는 연결 초기화만 가져온다. Workbench, Connection, Conversation, Chat, Files, Trajectory의 화면 등록을 공유한다. 연결 조립은 초기 대화 카탈로그와 프리셋을 병렬 조회해 서비스에 나눠 준다. runtime이 서비스 의존성을 정렬하고, 형제 플러그인은 앱이 선언한 순서로 뷰와 설정을 등록한다.
+[웹 조립](../apps/web/src/product.ts)은 샘플 또는 연결 초기화를 선택한다. 웹과 사이트는 [공유 진입점](../packages/client/src/bootstrap/product.ts)에서 Workbench, Conversation, Chat, Files, Trajectory를 조립한다. 연결 조립은 초기 대화 카탈로그와 프리셋을 병렬 조회해 서비스에 나눠 준다. runtime이 서비스 의존성을 정렬하고, 형제 플러그인은 앱이 선언한 순서로 뷰와 설정을 등록한다.
 
 웹 진입점은 연결 모드에서 로그인 문서에 필요한 코드부터 실행하고, 인증된 앱 진입에서 Workbench와 제품 플러그인을 가져온다. 제품 조립은 실행 모드에 맞는 대화 어댑터만 불러온다. Chat과 Trajectory는 탭을 먼저 등록하고 뷰를 처음 표시할 때 구현을 가져온다. 열린 뷰는 탭을 바꿔도 유지하며, 공통 Composer와 초안은 뷰 로딩 경계 바깥에 둔다. Chat은 답변을 표시할 때 Markdown을, 코드 펜스를 표시할 때 강조 엔진과 지원 언어의 문법을 가져온다.
 

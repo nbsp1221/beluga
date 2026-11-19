@@ -3,42 +3,45 @@ import type { WorkspaceClient } from '../../workspaces/contract.js';
 import type { ConversationClient, ConversationSnapshot, Session } from '../contract.js';
 import { createStore } from '../../../state/store.js';
 
-export function createDemoConversation(workspaces: WorkspaceClient): ConversationClient {
+export function createDemoConversation(
+  workspaces: WorkspaceClient,
+  initialSessions: readonly Session[] = [
+    {
+      id: 'welcome',
+      workspaceId: 'example',
+      title: null,
+      messages: [],
+      draft: '',
+    },
+    {
+      id: 'sample',
+      workspaceId: 'example',
+      title: 'Explore the project',
+      draft: '',
+      messages: [
+        {
+          id: 'sample-user',
+          role: 'user',
+          text: 'Explain how this project is organized.',
+        },
+        {
+          id: 'sample-assistant',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'text',
+              id: 'reply',
+              text: 'The web app assembles client plugins. Workbench owns the frame and navigation; Conversation owns sessions and the composer. The Host has its own plugin graph.',
+              streaming: false,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+): ConversationClient {
   const { getSnapshot, publish, subscribe } = createStore<ConversationSnapshot>({
-    sessions: [
-      {
-        id: 'welcome',
-        workspaceId: 'example',
-        title: null,
-        messages: [],
-        draft: '',
-      },
-      {
-        id: 'sample',
-        workspaceId: 'example',
-        title: 'Explore the project',
-        draft: '',
-        messages: [
-          {
-            id: 'sample-user',
-            role: 'user',
-            text: 'Explain how this project is organized.',
-          },
-          {
-            id: 'sample-assistant',
-            role: 'assistant',
-            parts: [
-              {
-                type: 'text',
-                id: 'reply',
-                text: 'The web app assembles client plugins. Workbench owns the frame and navigation; Conversation owns sessions and the composer. The Host has its own plugin graph.',
-                streaming: false,
-              },
-            ],
-          },
-        ],
-      },
-    ],
+    sessions: initialSessions,
   });
 
   const update = (id: string, change: (session: Session) => Session) => {
