@@ -1,0 +1,53 @@
+---
+import '~/assets/styles/tailwind.css';
+
+import { Font } from 'astro:assets';
+import type { ImageMetadata } from 'astro';
+import CustomStyles from '~/components/CustomStyles.astro';
+import Favicons from '~/components/Favicons.astro';
+import ApplyColorMode from '~/components/common/ApplyColorMode.astro';
+import Intersect from '~/components/common/Intersect.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  socialImage: ImageMetadata;
+}
+
+const { title, description, socialImage } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const imageUrl = new URL(socialImage.src, canonical);
+---
+
+<!doctype html>
+<html lang="en" class="2xl:text-[20px]">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical.href} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Beluga" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical.href} />
+    <meta property="og:image" content={imageUrl.href} />
+    <meta property="og:image:width" content={String(socialImage.width)} />
+    <meta property="og:image:height" content={String(socialImage.height)} />
+    <meta property="og:image:alt" content="Beluga shows a coding conversation and the source file it read." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <Favicons />
+    <Font cssVariable="--font-inter" preload />
+    <CustomStyles />
+    <ApplyColorMode />
+  </head>
+  <body class="antialiased text-default bg-page tracking-tight min-h-screen flex flex-col">
+    <slot name="header" />
+    <main id="main" tabindex="-1" class="flex-1">
+      <slot />
+    </main>
+    <slot name="footer" />
+    <Intersect />
+  </body>
+</html>

@@ -1,11 +1,5 @@
-import { agentPresetsClient } from '@workspace/client/agent-presets';
-import { chatClient } from '@workspace/client/chat';
-import { createConversationPlugin } from '@workspace/client/conversation';
-import { createFilesPlugin } from '@workspace/client/files';
-import { modelProvidersClient } from '@workspace/client/model-providers';
-import { createTrajectoryPlugin } from '@workspace/client/trajectory';
-import { workbenchClient } from '@workspace/client/workbench';
-import { type Plugin, createRuntime } from '@workspace/runtime';
+import type { Plugin } from '@workspace/runtime';
+import { createClientProduct } from '@workspace/client/bootstrap/product';
 
 export async function createProduct(
   connected = false,
@@ -16,18 +10,22 @@ export async function createProduct(
     plugins?: Plugin[];
   } = {},
 ) {
-  const dataPlugin = connected
-    ? (await import('@workspace/client/bootstrap/connected')).createConnectedData(options)
-    : (await import('@workspace/client/bootstrap/demo')).demoData;
+  if (!connected) {
+    const { demoData } = await import('@workspace/client/bootstrap/demo');
 
-  return createRuntime([
-    workbenchClient,
-    createConversationPlugin(connected),
-    chatClient,
-    createFilesPlugin(connected),
-    createTrajectoryPlugin(connected),
-    dataPlugin,
-    ...(options.plugins ?? []),
-    ...(connected ? [modelProvidersClient, agentPresetsClient] : []),
-  ]);
+    return createClientProduct({ connected, data: demoData, plugins: options.plugins });
+  }
+
+  const [{ createConnectedData }, { modelProvidersClient }, { agentPresetsClient }] =
+    await Promise.all([
+      import('@workspace/client/bootstrap/connected'),
+      import('@workspace/client/model-providers'),
+      import('@workspace/client/agent-presets'),
+    ]);
+
+  return createClientProduct({
+    connected,
+    data: createConnectedData(options),
+    plugins: [...(options.plugins ?? []), modelProvidersClient, agentPresetsClient],
+  });
 }

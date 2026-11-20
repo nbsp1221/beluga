@@ -3,6 +3,7 @@ export const artifactIgnores = [
   '**/dist-ssr/**',
   '**/coverage/**',
   '**/.turbo/**',
+  '**/.astro/**',
   '.local/**',
 ];
 

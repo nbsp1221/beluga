@@ -29,7 +29,13 @@ const sidebarPanelId = 'destination-sidebar';
 // Layout widths include the divider; the panel library sizes only the content.
 const sidebarDividerWidthPx = 1;
 
-export function Workbench({ destinations }: { destinations: Destinations }) {
+export function Workbench({
+  destinations,
+  defaultSidebarOpen,
+}: {
+  destinations: Destinations;
+  defaultSidebarOpen?: boolean;
+}) {
   const entries = useSyncExternalStore(destinations.subscribe, destinations.getSnapshot);
   const panels = useSyncExternalStore(destinations.subscribe, destinations.getPanels);
   const settings = useSyncExternalStore(destinations.subscribe, destinations.getSettings);
@@ -50,7 +56,9 @@ export function Workbench({ destinations }: { destinations: Destinations }) {
 
   const [frameWidth, setFrameWidth] = useState(1024);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
-  const [collapsedPreference, setCollapsedPreference] = useState<boolean | undefined>();
+  const [collapsedPreference, setCollapsedPreference] = useState(
+    defaultSidebarOpen === undefined ? undefined : !defaultSidebarOpen,
+  );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<string | null>(null);
 
@@ -126,7 +134,10 @@ export function Workbench({ destinations }: { destinations: Destinations }) {
   }, []);
 
   useEffect(() => {
-    mainRef.current?.focus({ preventScroll: true });
+    // An embedded Workbench must leave focus on the surrounding page until entered.
+    if (window.parent === window || document.hasFocus()) {
+      mainRef.current?.focus({ preventScroll: true });
+    }
   }, [location.pathname]);
 
   const panelBody = panel && (

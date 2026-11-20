@@ -50,3 +50,11 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## AstroWind
+
+The product site uses layout, components, and styles adapted from
+[AstroWind at `14e1a69`](https://github.com/arthelokyo/astrowind/tree/14e1a691f80548dcc36370847b1a02c0d0b12821).
+See the [AstroWind MIT license](apps/site/LICENSE-ASTROWIND.md).
+The site uses [Tabler Icons](https://github.com/tabler/tabler-icons/blob/main/LICENSE)
+and the [Inter font](https://github.com/rsms/inter/blob/master/LICENSE.txt).

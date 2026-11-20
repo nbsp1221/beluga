@@ -1,0 +1,32 @@
+{
+  "name": "@workspace/site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "typecheck": "astro check"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "@astrojs/react": "7.1.9",
+    "@iconify-json/tabler": "1.2.38",
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@workspace/client": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "@workspace/ui": "workspace:*",
+    "astro": "7.4.12",
+    "astro-icon": "1.2.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:",
+    "sharp": "0.35.4",
+    "tailwind-merge": "3.6.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "catalog:",
+    "wrangler": "4.165.0"
+  }
+}

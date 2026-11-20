@@ -27,6 +27,7 @@ allowBuilds:
   msw: false
   '@google/genai': false
   protobufjs: false
+  workerd: true
 
 overrides:
   '@flue/runtime>@earendil-works/pi-ai': '1.1.0'

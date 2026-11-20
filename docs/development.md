@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-18
+last_reviewed: 2026-11-20
 ---
 
 # Development
@@ -25,6 +25,48 @@ changing that address.
 `GET /api/status` returns `{"status":"ready"}` for Host availability. It does
 not report a model connection, and the frontend shell does not require this
 request to display sample data. The theme is under **Settings → General**.
+
+## Develop the product site
+
+Run the public site on its own from the repository root:
+
+```sh
+pnpm dev --filter=@workspace/site
+```
+
+Open the loopback URL printed by Astro. Use `pnpm build --filter=@workspace/site`
+to generate static files in `apps/site/dist`, and `pnpm --filter @workspace/site preview`
+to check that build locally. Edit the site content in [index.astro](../apps/site/src/pages/index.astro).
+The page uses AstroWind widgets with the existing Beluga brand assets and links to the Host setup guide.
+The landing page embeds [the example conversation](../apps/site/src/pages/demo.astro), which uses the same
+client plugins and styles as the product. [The sample conversation](../apps/site/src/components/example-conversation.ts)
+provides the completed messages and example usage values. The embed opens the desktop sidebar when the
+product layout can place it alongside the chat. Astro uses the full-height loading placeholder to start
+React when the embedded area is visible. Turbo builds the shared packages before starting or building the site.
+The landing page and demo honor the saved Light, Dark, or System preference before first paint.
+See the [AstroWind notice](../THIRD_PARTY_NOTICES.md#astrowind) for the source revision and license.
+
+### Deploy the product site
+
+[Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)
+serves the Astro build using [the site's Wrangler config](../apps/site/wrangler.jsonc).
+From the repository root, build the site and check the deployment package locally:
+
+```sh
+pnpm exec turbo run build --filter=@workspace/site
+pnpm --filter @workspace/site exec wrangler deploy --dry-run
+```
+
+In [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), connect this
+repository, use the repository root as the build root, and set `main` as the production
+branch. Use the same build command for production and previews. Use
+`pnpm --filter @workspace/site exec wrangler deploy` as the deploy command and
+`pnpm --filter @workspace/site exec wrangler preview` as the preview command. Enable
+preview builds to get a separate URL on pull requests. Cloudflare builds and deploys the
+site independently of the product release workflow.
+For the first release, verify the landing page and `/demo/` on a PR preview. Attach
+`beluga.retn0.dev` as a [Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)
+after the Worker has a successful production deployment.
 
 ## Run connected mode from source
 
