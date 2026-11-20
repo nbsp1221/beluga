@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-18
+last_reviewed: 2026-11-20
 ---
 
 # Development
@@ -45,6 +45,25 @@ product layout can place it alongside the chat. Astro uses the full-height loadi
 React when the embedded area is visible. Turbo builds the shared packages before starting or building the site.
 The landing page and demo honor the saved Light, Dark, or System preference before first paint.
 See the [AstroWind notice](../THIRD_PARTY_NOTICES.md#astrowind) for the source revision and license.
+
+### Deploy the product site
+
+[Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)
+serves the Astro build using [the site's Wrangler config](../apps/site/wrangler.jsonc).
+From the repository root, build the site and check the deployment package locally:
+
+```sh
+pnpm exec turbo run build --filter=@workspace/site
+pnpm --filter @workspace/site exec wrangler deploy --dry-run
+```
+
+In [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), connect this
+repository, use the repository root as the build root, and set `main` as the production
+branch. Use the same build command for production and previews. Use
+`pnpm --filter @workspace/site exec wrangler deploy` as the deploy command and
+`pnpm --filter @workspace/site exec wrangler preview` as the preview command. Enable
+preview builds to get a separate URL on pull requests. Cloudflare builds and deploys the
+site independently of the product release workflow.
 
 ## Run connected mode from source
 
