@@ -64,6 +64,9 @@ branch. Use the same build command for production and previews. Use
 `pnpm --filter @workspace/site exec wrangler preview` as the preview command. Enable
 preview builds to get a separate URL on pull requests. Cloudflare builds and deploys the
 site independently of the product release workflow.
+For the first release, verify the landing page and `/demo/` on a PR preview. Attach
+`beluga.retn0.dev` as a [Custom Domain](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)
+after the Worker has a successful production deployment.
 
 ## Run connected mode from source
 
