@@ -66,9 +66,9 @@
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "catalog:",
-    "@earendil-works/pi-coding-agent": "1.5.1",
-    "@flue/runtime": "2.3.0",
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "@flue/runtime": "2.3.1",
     "@workspace/protocol": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "hono": "catalog:",
@@ -76,7 +76,7 @@
     "valibot": "1.5.0"
   },
   "devDependencies": {
-    "@flue/sdk": "2.3.0",
+    "@flue/sdk": "2.3.1",
     "@types/node": "catalog:",
     "@workspace/tooling-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",

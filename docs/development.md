@@ -149,10 +149,11 @@ and use Testing Library in jsdom. Use Chromium for layout and browser
 behavior that jsdom cannot simulate. The TypeScript checks include the test
 sources separately from the application build.
 
-Keep registry dependencies on exact versions and use `catalog:` for versions
-shared across packages. Define those versions in
-[pnpm-workspace.yaml](../pnpm-workspace.yaml) and use `workspace:*` for internal
-dependencies. CI or clean checkouts should use `pnpm install --frozen-lockfile`.
+Declare feature-specific dependencies with exact versions in the owning package.
+Use `catalog:` for shared dependencies whose versions should move together and
+define them in [pnpm-workspace.yaml](../pnpm-workspace.yaml). Use `workspace:*`
+for internal dependencies. CI or clean checkouts should use
+`pnpm install --frozen-lockfile`.
 
 Git checks out text files with LF on every platform. Editors that support
 [EditorConfig](../.editorconfig) use LF, UTF-8, and two-space indentation.
