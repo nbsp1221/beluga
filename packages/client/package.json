@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@flue/sdk": "2.3.0",
+    "@flue/sdk": "2.3.1",
     "@workspace/protocol": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "@workspace/ui": "workspace:*",
