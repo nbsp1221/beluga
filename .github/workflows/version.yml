@@ -30,5 +30,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          pr-title: Prepare the next Beluga release
-          commit-message: Prepare the next Beluga release
+          pr-title: '🔖 Version packages'
+          commit-message: '🔖 Version packages'
