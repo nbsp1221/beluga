@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const HOST_STATUS_PATH = '/api/status';
 export const CONVERSATION_PATH = '/api/conversations';
+export const CONVERSATION_ACTIVITY_PATH = `${CONVERSATION_PATH}/activity`;
 export const AGENT_PRESETS_PATH = '/api/agent-presets';
 export const PROVIDERS_PATH = '/api/providers';
 export const AUTH_PATH = '/api/auth';
@@ -12,6 +13,8 @@ export const WORKSPACE_FOLDERS_PATH = `${WORKSPACES_PATH}/folders`;
 // The explicitly supported product routes are shared by Host registration and Desktop forwarding.
 export const productRoutes = {
   listConversations: { method: 'GET', path: CONVERSATION_PATH },
+  conversationActivity: { method: 'GET', path: CONVERSATION_ACTIVITY_PATH },
+  acknowledgeConversation: { method: 'PUT', path: `${CONVERSATION_PATH}/:id/read` },
   createConversation: { method: 'POST', path: CONVERSATION_PATH },
   readConversation: { method: 'GET', path: `${CONVERSATION_PATH}/:id` },
   sendMessage: { method: 'POST', path: `${CONVERSATION_PATH}/:id` },
@@ -33,6 +36,21 @@ export const productRoutes = {
   browseFolders: { method: 'GET', path: WORKSPACE_FOLDERS_PATH },
   addWorkspace: { method: 'POST', path: WORKSPACES_PATH },
 } as const;
+
+export const conversationActivitySchema = z.record(
+  z.string(),
+  z.object({
+    running: z.boolean(),
+    lastActivityAt: z.iso.datetime(),
+    unreadCompletion: z.string().optional(),
+  }),
+);
+
+export type ConversationActivity = Partial<z.infer<typeof conversationActivitySchema>>;
+
+export const acknowledgeConversationSchema = z.strictObject({
+  submissionId: z.string().min(1).max(128),
+});
 export const trajectorySearchLimit = 512;
 export const trajectorySearchSchema = z.string().trim().toLowerCase().max(trajectorySearchLimit);
 

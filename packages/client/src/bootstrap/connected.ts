@@ -1,13 +1,11 @@
 import type { Plugin } from '@workspace/runtime';
-import {
-  AGENT_PRESETS_PATH,
-  CONVERSATION_PATH,
-  agentPresetsSchema,
-  conversationCatalogSchema,
-} from '@workspace/protocol/host';
+import { AGENT_PRESETS_PATH, agentPresetsSchema } from '@workspace/protocol/host';
 import { protectedFetch } from '../auth/session.js';
 import { createConnectedAgentPresets } from '../features/agent-presets/data/connected.js';
-import { createConnectedConversation } from '../features/conversation/data/connected.js';
+import {
+  createConnectedConversation,
+  loadConversationCatalog,
+} from '../features/conversation/data/connected.js';
 import { createConnectedModelProviders } from '../features/model-providers/data/connected.js';
 import { createConnectedTrajectory } from '../features/trajectory/data/connected.js';
 import { createConnectedWorkspaces } from '../features/workspaces/data/connected.js';
@@ -31,7 +29,7 @@ export function createConnectedData({
       const request = createHostRequest(lifetime.signal, fetchHost);
 
       const [catalog, presets] = await Promise.all([
-        request(CONVERSATION_PATH).then((value) => conversationCatalogSchema.parse(value)),
+        loadConversationCatalog(request),
         request(AGENT_PRESETS_PATH).then((value) => agentPresetsSchema.parse(value)),
       ]);
 

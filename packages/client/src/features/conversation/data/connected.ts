@@ -4,6 +4,7 @@ import {
   type SessionSummary,
   accessModeInputSchema,
   availableAccessModes,
+  conversationCatalogSchema,
   conversationUsageSchema,
   runSettingsSchema,
   sessionSummarySchema,
@@ -12,11 +13,16 @@ import { readPreference, writePreference } from '@workspace/ui/lib/browser-stora
 import { v4 as uuid } from 'uuid';
 import type { AgentPresetsClient } from '../../agent-presets/contract.js';
 import type { ModelProvidersClient } from '../../model-providers/contract.js';
-import type { WorkspaceClient } from '../../workspaces/contract.js';
+import type { ConnectedWorkspaceClient } from '../../workspaces/contract.js';
 import type { ConversationClient, ConversationSnapshot, Session } from '../contract.js';
 import { createStore } from '../../../state/store.js';
 import { type HostRequest, HostRequestError } from '../../../transport/host-http.js';
+import { createConversationActivity } from './activity.js';
 import { activeSubmissionId, connectConversation, conversationMessages } from './flue-client.js';
+
+export async function loadConversationCatalog(request: HostRequest) {
+  return conversationCatalogSchema.parse(await request(CONVERSATION_PATH));
+}
 
 export function createConnectedConversation({
   signal,
@@ -35,7 +41,7 @@ export function createConnectedConversation({
   prefix?: string;
   workspaceStorageKey?: string;
   sessions: readonly SessionSummary[];
-  workspaces: WorkspaceClient;
+  workspaces: ConnectedWorkspaceClient;
   agentPresets: AgentPresetsClient;
   modelProviders: ModelProvidersClient;
 }): ConversationClient {
@@ -82,6 +88,51 @@ export function createConnectedConversation({
   const { getSnapshot, publish, subscribe } = createStore<ConversationSnapshot>({
     sessions: [initial, ...savedSessions],
   });
+  const activity = createConversationActivity(signal, fetchHost, request);
+  let refreshingCatalog = false;
+
+  async function refreshMissingSessions() {
+    if (refreshingCatalog || signal.aborted) {
+      return;
+    }
+
+    const observed = activity.getSnapshot();
+    const known = new Set(getSnapshot().sessions.map(({ id }) => id));
+    if (Object.keys(observed).every((id) => known.has(id))) {
+      return;
+    }
+
+    refreshingCatalog = true;
+    try {
+      const catalog = await loadConversationCatalog(request);
+      signal.throwIfAborted();
+
+      workspaces.merge(catalog.workspaces);
+      const current = getSnapshot();
+      const local = new Map(current.sessions.map((session) => [session.id, session]));
+      if (catalog.sessions.some(({ id }) => !local.has(id))) {
+        const saved = new Set(catalog.sessions.map(({ id }) => id));
+        publish({
+          ...current,
+          sessions: [
+            ...current.sessions.filter(({ id }) => !saved.has(id)),
+            ...catalog.sessions.map(
+              (session) => local.get(session.id) ?? emptySavedSession(session),
+            ),
+          ],
+        });
+      }
+    } catch {
+      // The next activity update or reconnect can retry a failed catalog read.
+    } finally {
+      refreshingCatalog = false;
+      if (observed !== activity.getSnapshot()) {
+        void refreshMissingSessions();
+      }
+    }
+  }
+
+  activity.subscribe(() => void refreshMissingSessions());
 
   const update = (id: string, change: (session: Session) => Session) => {
     const snapshot = getSnapshot();
@@ -103,6 +154,7 @@ export function createConnectedConversation({
   return {
     mode: 'connected',
     initialSessionId: initial.id,
+    activity,
     getSnapshot,
     subscribe,
     createSession(workspaceId) {
@@ -192,6 +244,9 @@ export function createConnectedConversation({
           return;
         }
         const submissionId = activeSubmissionId(history);
+        const completedSubmissionId = history.settlements.findLast(
+          ({ outcome }) => outcome === 'completed',
+        )?.submissionId;
         const messages = conversationMessages(history, submissionId);
         const first = messages.find((message) => message.role === 'user')?.text;
         update(id, (session) => ({
@@ -199,6 +254,7 @@ export function createConnectedConversation({
           title: session.title ?? first?.trim().slice(0, 60) ?? null,
           messages,
           activeSubmissionId: submissionId,
+          completedSubmissionId,
         }));
       });
 

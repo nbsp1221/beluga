@@ -41,6 +41,43 @@ test('keeps an unsent draft when switching between Chat and Trajectory', async (
   expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Check the project layout');
 });
 
+test('starts a session in the selected folder and gives the same row its first title', async ({
+  onTestFinished,
+}) => {
+  const user = userEvent.setup();
+  const product = await createProduct();
+  onTestFinished(() => product.dispose());
+  await product.get('workspaces').addWorkspace('Second project');
+
+  render(
+    <ThemeProvider>
+      <TooltipProvider>
+        <MemoryRouter initialEntries={['/chat/sample']}>
+          <App views={product.get('views')} />
+        </MemoryRouter>
+      </TooltipProvider>
+    </ThemeProvider>,
+  );
+
+  const folder = screen.getByRole('button', { name: 'Second project' });
+  await user.click(folder);
+  expect(folder).toHaveAttribute('aria-expanded', 'false');
+  await user.click(screen.getByRole('button', { name: 'New session in Second project' }));
+  expect(folder).toHaveAttribute('aria-expanded', 'true');
+
+  const draft = await screen.findByRole('link', { name: 'New session', current: 'page' });
+  expect(document.getElementById(folder.getAttribute('aria-controls') ?? '')).toContainElement(
+    draft,
+  );
+  const composer = screen.getByRole('textbox', { name: 'Message' });
+  fireEvent.change(composer, { target: { value: 'Review the second project' } });
+  fireEvent.keyDown(composer, { key: 'Enter' });
+  expect(
+    await screen.findByRole('link', { name: 'Review the second project', current: 'page' }),
+  ).toHaveAttribute('href', draft.getAttribute('href'));
+  expect(screen.queryByRole('link', { name: 'New session' })).not.toBeInTheDocument();
+});
+
 test('updates highlighted code when a streamed fence grows or is replaced', async () => {
   const fence = (code: string) => ['```js', code, '```'].join('\n');
 

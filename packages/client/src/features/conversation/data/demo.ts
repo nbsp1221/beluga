@@ -10,6 +10,7 @@ export function createDemoConversation(
       id: 'welcome',
       workspaceId: 'example',
       title: null,
+      isDraft: true,
       messages: [],
       draft: '',
     },
@@ -67,7 +68,10 @@ export function createDemoConversation(
       const snapshot = getSnapshot();
       publish({
         ...snapshot,
-        sessions: [{ id, workspaceId, title: null, messages: [], draft: '' }, ...snapshot.sessions],
+        sessions: [
+          { id, workspaceId, title: null, isDraft: true, messages: [], draft: '' },
+          ...snapshot.sessions,
+        ],
       });
       return id;
     },
@@ -84,6 +88,7 @@ export function createDemoConversation(
         return {
           ...session,
           title: session.messages.length ? session.title : text.slice(0, 60),
+          isDraft: false,
           draft: '',
           messages: [
             ...session.messages,

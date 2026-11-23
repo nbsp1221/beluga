@@ -1,3 +1,5 @@
+import type { ConversationActivity } from '@workspace/protocol/host';
+import { BelugaMark } from '@workspace/ui/components/beluga-mark';
 import { Button } from '@workspace/ui/components/button';
 import {
   Collapsible,
@@ -14,7 +16,6 @@ import {
 } from '@workspace/ui/components/dropdown-menu';
 import { Input } from '@workspace/ui/components/input';
 import { ShellButton } from '@workspace/ui/components/shell-button';
-import { sidebarLinkClassName } from '@workspace/ui/lib/sidebar-link';
 import {
   ChevronDown,
   Folder,
@@ -27,12 +28,17 @@ import {
   X,
 } from 'lucide-react';
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import type { WorkspaceClient } from '../../workspaces/contract.js';
+import { getEmptySnapshot, subscribeToEmptyStore } from '../../../state/store.js';
 import { useLayout } from '../../../workbench/contract.js';
 import { type ConversationClient, type Session, sessionTitle } from '../contract.js';
+import { SessionActivity } from './session-activity.js';
+import { SessionRow } from './session-row.js';
 import { WorkspaceDialogContent, WorkspaceStart } from './workspace-form.js';
 import { workspaceLabel } from './workspace-label.js';
+
+const listRowSpacing = 'gap-2 px-2';
 
 export function ConversationSidebar({
   client,
@@ -42,10 +48,18 @@ export function ConversationSidebar({
   workspaceClient: WorkspaceClient;
 }) {
   const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
+  const activity = useSyncExternalStore(
+    client.activity?.subscribe ?? subscribeToEmptyStore,
+    client.activity?.getSnapshot ?? getEmptySnapshot,
+  );
   const workspaces = useSyncExternalStore(workspaceClient.subscribe, workspaceClient.getSnapshot);
   const { mobile, drawer, toggleSidebar, closeDrawer } = useLayout();
   const navigate = useNavigate();
-  const sessionId = useLocation().pathname.split('/')[2] || client.initialSessionId || 'welcome';
+  const routeSessionId = useLocation().pathname.split('/')[2];
+  const sessionId = routeSessionId || client.initialSessionId || 'welcome';
+  const currentSession = snapshot.sessions.find((session) => session.id === sessionId);
+
+  const sessionActivity = (session: Session) => getSessionActivity(session, activity, sessionId);
 
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -73,7 +87,7 @@ export function ConversationSidebar({
   const [sessionError, setSessionError] = useState('');
 
   const create = async (
-    workspaceId = snapshot.sessions.find((session) => session.id === sessionId)?.workspaceId ??
+    workspaceId = currentSession?.workspaceId ??
       (client.mode === 'demo' ? (workspaces[0]?.id ?? null) : null),
   ) => {
     setSessionError('');
@@ -82,17 +96,35 @@ export function ConversationSidebar({
   };
 
   const searchTerm = query.toLowerCase();
+  const currentDraft =
+    !searchTerm && (!mobile || routeSessionId) && currentSession?.isDraft
+      ? currentSession
+      : undefined;
 
-  const toggleGroup = (id: string) =>
+  const setGroupExpanded = (id: string, expanded: boolean) =>
     (searchTerm ? setSearchFolded : setFolded)((current) => {
+      if (current.has(id) === !expanded) {
+        return current;
+      }
       const next = new Set(current);
-      if (next.has(id)) {
+      if (expanded) {
         next.delete(id);
       } else {
         next.add(id);
       }
       return next;
     });
+
+  const startSession = async (workspaceId?: string) => {
+    try {
+      await create(workspaceId);
+      if (workspaceId) {
+        setGroupExpanded(workspaceId, true);
+      }
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : 'Could not start a session.');
+    }
+  };
 
   const sessionsByWorkspace = useMemo(() => {
     const matches = snapshot.sessions.filter(
@@ -116,11 +148,16 @@ export function ConversationSidebar({
   return (
     <Dialog open={adding} onOpenChange={setAdding}>
       <div className="flex h-full min-h-0 flex-col gap-2 p-2">
-        <div className="flex min-h-14 shrink-0 items-center justify-between gap-2">
+        <div className="flex min-h-9 shrink-0 items-center justify-between gap-2 ps-2">
           {mobile ? (
-            <h1 className="truncate text-xl font-semibold">Chats</h1>
+            <h1 className="truncate text-base font-semibold">Chats</h1>
           ) : (
-            <span className="truncate text-xl font-semibold">Beluga</span>
+            <div className="flex min-w-0 items-center gap-2 text-base font-semibold">
+              <span className="grid size-5 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
+                <BelugaMark className="size-4 text-current" />
+              </span>
+              <span className="truncate">Beluga</span>
+            </div>
           )}
           {drawer && !mobile && (
             <ShellButton data-sidebar-toggle label="Close sidebar" onClick={toggleSidebar}>
@@ -134,13 +171,7 @@ export function ConversationSidebar({
               variant="secondary"
               size="lg"
               className="touch-target"
-              onClick={() =>
-                void create().catch((error: unknown) =>
-                  setSessionError(
-                    error instanceof Error ? error.message : 'Could not start a session.',
-                  ),
-                )
-              }
+              onClick={() => void startSession()}
             >
               <MessageCirclePlus />
               New session
@@ -150,9 +181,11 @@ export function ConversationSidebar({
                 {sessionError}
               </p>
             )}
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-              <section aria-label="Workspaces" className="flex flex-col gap-1">
-                <div className="flex min-h-9 items-center gap-1">
+            <div className="flex min-h-0 flex-1 flex-col">
+              <section aria-label="Workspaces" className="flex min-h-0 flex-1 flex-col gap-1">
+                <div
+                  className={`flex min-h-9 shrink-0 items-center gap-1${searching ? '' : ' ps-2'}`}
+                >
                   {searching ? (
                     <>
                       <Input
@@ -208,43 +241,67 @@ export function ConversationSidebar({
                     </>
                   )}
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
                   {workspaces.map((workspace) => {
-                    const sessions = sessionsByWorkspace.get(workspace.id) ?? [];
+                    const savedSessions = sessionsByWorkspace.get(workspace.id) ?? [];
+                    const sessions =
+                      currentDraft?.workspaceId === workspace.id
+                        ? [currentDraft, ...savedSessions]
+                        : savedSessions;
                     if (searchTerm && !sessions.length) {
                       return null;
                     }
 
                     const expanded = !(searchTerm ? searchFolded : folded).has(workspace.id);
+                    const label = workspaceLabel(workspace, workspaces);
                     return (
                       <Collapsible
                         key={workspace.id}
                         open={expanded}
-                        onOpenChange={() => toggleGroup(workspace.id)}
+                        onOpenChange={(open) => setGroupExpanded(workspace.id, open)}
                         render={<section />}
                       >
-                        <CollapsibleTrigger render={<DisclosureButton />}>
-                          {expanded ? <FolderOpen /> : <Folder />}
-                          <span className="min-w-0 flex-1 truncate text-left">
-                            {workspaceLabel(workspace, workspaces)}
-                          </span>
-                          <ChevronDown className={expanded ? '' : '-rotate-90'} />
-                        </CollapsibleTrigger>
+                        <div className="group/workspace flex items-center rounded-lg hover:bg-sidebar-accent has-focus-visible:bg-sidebar-accent">
+                          <CollapsibleTrigger
+                            render={
+                              <DisclosureButton
+                                className={`min-w-0 flex-1 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent ${listRowSpacing}`}
+                              />
+                            }
+                          >
+                            <span aria-hidden="true" className="group-hover/workspace:hidden">
+                              {expanded ? <FolderOpen /> : <Folder />}
+                            </span>
+                            <ChevronDown
+                              aria-hidden="true"
+                              className={
+                                expanded
+                                  ? 'hidden group-hover/workspace:block'
+                                  : 'hidden -rotate-90 group-hover/workspace:block'
+                              }
+                            />
+                            <span className="truncate text-left">{label}</span>
+                          </CollapsibleTrigger>
+                          {!searchTerm && (
+                            <ShellButton
+                              label={`New session in ${label}`}
+                              data-collapsed={!expanded || undefined}
+                              className="text-muted-foreground [@media(hover:hover)]:not-group-hover/workspace:not-group-focus-within/workspace:hidden [@media(hover:none)]:data-collapsed:hidden"
+                              onClick={() => void startSession(workspace.id)}
+                            >
+                              <MessageCirclePlus />
+                            </ShellButton>
+                          )}
+                        </div>
                         <CollapsibleContent className="flex flex-col gap-0.5 not-empty:pt-0.5">
                           {sessions.map((session) => (
-                            <Link
+                            <SessionRow
                               key={session.id}
-                              to={`/chat/${session.id}`}
-                              aria-current={
-                                !mobile && session.id === sessionId ? 'page' : undefined
-                              }
+                              session={session}
+                              current={!mobile && session.id === sessionId}
+                              {...sessionActivity(session)}
                               onClick={closeDrawer}
-                              className={sidebarLinkClassName(
-                                'flex min-h-12 items-center rounded-lg py-1 pr-2 pl-8 text-sm aria-[current=page]:font-medium md:min-h-8',
-                              )}
-                            >
-                              <span className="truncate">{sessionTitle(session)}</span>
-                            </Link>
+                            />
                           ))}
                         </CollapsibleContent>
                       </Collapsible>
@@ -255,7 +312,7 @@ export function ConversationSidebar({
                       <p className="break-words">No sessions match “{query}”.</p>
                       <Button
                         variant="link"
-                        className="touch-target"
+                        className="touch-target px-0"
                         onClick={() => {
                           setQuery('');
                           searchInputRef.current?.focus();
@@ -267,6 +324,15 @@ export function ConversationSidebar({
                   )}
                 </div>
               </section>
+              {client.activity && (
+                <SessionActivity
+                  sessions={snapshot.sessions}
+                  workspaces={workspaces}
+                  currentId={mobile ? undefined : sessionId}
+                  activity={activity}
+                  onOpen={closeDrawer}
+                />
+              )}
             </div>
           </>
         ) : (
@@ -284,4 +350,16 @@ export function ConversationSidebar({
       </div>
     </Dialog>
   );
+}
+
+function getSessionActivity(
+  session: Session,
+  activity: ConversationActivity | undefined,
+  currentId: string,
+) {
+  const status = activity?.[session.id];
+  return {
+    running: Boolean(status?.running || (session.id === currentId && session.activeSubmissionId)),
+    unread: Boolean(status?.unreadCompletion),
+  };
 }

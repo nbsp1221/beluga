@@ -17,6 +17,10 @@ export interface WorkspaceClient extends ReadStore<readonly Workspace[]> {
   ): Promise<WorkspaceFolders>;
 }
 
+export interface ConnectedWorkspaceClient extends WorkspaceClient {
+  merge(this: void, workspaces: readonly Workspace[]): void;
+}
+
 declare module '@workspace/runtime' {
   interface Services {
     workspaces: WorkspaceClient;
