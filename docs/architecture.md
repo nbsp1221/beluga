@@ -79,6 +79,8 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 
 [ConversationClient](../packages/client/src/features/conversation/contract.ts)는 snapshot/subscribe를 갖는 클라이언트 투영 계약이다. 세션·초안·전송을 소유한다. Workspace, Agent presets, Model providers는 각자 목록과 명령을 제공한다. 공급자 설정과 Chat 모델 선택기는 같은 스냅샷을 읽고, 공급자 변경이 끝나면 변경 전에 시작한 조회는 그 스냅샷을 덮지 못한다. Conversation은 새 세션을 처음 저장할 때 이 서비스에서 선택한 프리셋 버전과 기본 모델을 읽는다. [연결 어댑터](../packages/client/src/bootstrap/connected.ts)는 활성 세션의 Flue 관찰을 화면 메시지로 변환하고, 세션 전환 시 구독을 닫는다. 전송 응답을 받기 전에 연결이 끊긴 경우 같은 입력의 재시도에는 같은 제출 키를 사용한다.
 
+[Host의 대화 상태](../packages/host-plugins/src/harness/activity.ts)는 Flue 실행·종료 이벤트를 받아 실행 중인 제출을 메모리에 두고 마지막 활동 시각과 읽지 않은 최신 성공 제출을 카탈로그에 저장한다. Chats는 인증된 SSE 연결 하나에서 활성 작업·미확인 완료·최근 `Idle`의 최초 상태와 갱신을 받는다. 활성 Chat에 표시된 제출 ID를 확인하면 Host는 같은 ID의 미확인 표시만 지운다. 작업 시각은 Flue 실행·종료 이벤트에서만 갱신하고 새로고침이나 Host 재시작에도 보존한다. [DSH의 상태 스트림](https://github.com/deepseek-ai/deepseek-harness/blob/d98f5d68519215da48f3002da2cb9c9d2068d81d/packages/client/ui-session-status/src/index.ts#L84-L104) · [Herdr의 스냅샷과 이벤트 구독](https://github.com/herdrdev/herdr-app/blob/317e673f1f1568b876cbaa0b41dabeb9153ecbea/src/hc.rs#L484-L495)
+
 새 대화의 워크스페이스는 현재 화면에서 지정한 폴더를 우선한다. 지정이 없으면 브라우저에 기억한 마지막 선택, 가장 최근에 생성된 저장 세션의 폴더, 가장 최근에 등록된 폴더 순으로 고른다. 기억한 폴더가 현재 Host 목록에 있을 때만 사용하며, 저장 위치는 브라우저별 로컬 환경설정이다.
 
 [Workspace Host](../packages/host-plugins/src/workspace/host.ts)는 로그인한 사용자에게 Host 홈에서 시작하는 폴더 탐색과 절대 경로 입력을 제공한다. 별도 허용 목록은 두지 않는다. 목록은 하위 폴더만 반환하며 링크는 입력 경로로 검증할 수 있다. Host에서 확인 가능한 기존 디렉터리를 정규 경로로 등록한다. 동일 경로는 같은 ID를 반환하고 이름이 같아도 경로가 다르면 별개다. 카탈로그는 실제 폴더 경로를 필수로 저장한다. 새 대화에서 폴더를 고르기 전 상태는 웹 초안에만 존재한다. 연결된 폴더가 사라지거나 다른 경로로 바뀌면 새 세션 생성을 거절하고 이력은 보존한다.

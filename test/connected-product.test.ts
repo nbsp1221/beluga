@@ -58,6 +58,10 @@ test.for([
 
     const web = await createWeb(website);
     const databasePath = join(directory, 'chat.sqlite');
+    let finishTool!: () => void;
+    const toolGate = new Promise<void>((resolve) => {
+      finishTool = resolve;
+    });
 
     const boot = () =>
       createHost({
@@ -70,7 +74,7 @@ test.for([
           origin,
           databasePath,
           openProviders(register) {
-            register(fixtureProvider([]));
+            register(fixtureProvider([], () => toolGate));
             return {
               list() {
                 return Promise.resolve([
@@ -120,6 +124,7 @@ test.for([
     trajectoryDb.exec("DELETE FROM trajectory_turn WHERE session_id = 'active-session'");
 
     let cookie: string | undefined;
+    let activityUnavailable = false;
     const requests: string[] = [];
     const admissions: { receipt: unknown; location: string | null }[] = [];
 
@@ -129,6 +134,10 @@ test.for([
       const url = new URL(request.url);
       assert.equal(url.origin, origin);
       requests.push(url.pathname);
+      if (activityUnavailable && url.pathname === '/api/conversations/activity') {
+        activityUnavailable = false;
+        return new Response(null, { status: 502 });
+      }
       request.headers.set('origin', origin);
       if (cookie) {
         request.headers.set('cookie', cookie);
@@ -175,6 +184,7 @@ test.for([
       'name="beluga-mode" content="connected"',
     );
     expect((await fetchHost('/api/conversations')).status).toBe(401);
+    expect((await fetchHost('/api/conversations/activity')).status).toBe(401);
     const unsavedConversation = `/api/conversations/${sessionId}`;
     for (const suffix of ['/trajectory', '/trajectory/submission/model', '/usage']) {
       const response = await fetchHost(unsavedConversation + suffix);
@@ -223,6 +233,10 @@ test.for([
     const workspaceId = await product.get('workspaces').addWorkspace(workspace);
     const conversation = product.get('conversation');
     expect(conversation.mode).toBe('connected');
+    const activity = conversation.activity;
+    assert(activity);
+    const stopActivity = activity.observe();
+    onTestFinished(stopActivity);
     const presets = product.get('agentPresets');
     const { presets: initialPresets, defaultPresetId } = presets.getSnapshot();
     expect(initialPresets).toHaveLength(1);
@@ -233,7 +247,15 @@ test.for([
       conversation.getSnapshot().sessions.find(({ id }) => id === draftId)?.agentPresetId,
     ).toBe(standard.id);
     conversation.setDraft(draftId, message);
-    await conversation.send(draftId, { mode: 'standard', attachments: [] });
+    const send = conversation.send(draftId, { mode: 'standard', attachments: [] });
+    try {
+      await vi.waitFor(() => {
+        expect(activity.getSnapshot()[draftId]?.running).toBe(true);
+      });
+    } finally {
+      finishTool();
+      await send;
+    }
     const streamUrl = `${origin}/api/conversations/${draftId}`;
     expect(admissions).toHaveLength(1);
     expect(admissions[0]?.receipt).toMatchObject({ streamUrl });
@@ -265,6 +287,17 @@ test.for([
     );
     expect(input.tools.some(({ name }) => name === 'read')).toBe(true);
     const conversationPath = `/api/conversations/${draftId}`;
+    assert(recorded.settledAt);
+    const idleActivity = { [draftId]: { running: false, lastActivityAt: recorded.settledAt } };
+    const completedActivity = {
+      [draftId]: { ...idleActivity[draftId], unreadCompletion: recorded.id },
+    };
+    await vi.waitFor(() => expect(activity.getSnapshot()).toEqual(completedActivity));
+
+    const activityRequests = () =>
+      requests.filter((path) => path === '/api/conversations/activity');
+
+    expect(activityRequests()).toHaveLength(1);
     const missingInput = await fetchHost(`${conversationPath}/trajectory/${recorded.id}/missing`);
     expect(missingInput.status).toBe(404);
     expect(await missingInput.json()).toEqual({ error: 'Model input unavailable' });
@@ -293,10 +326,25 @@ test.for([
       (await sendJson('/api/agent-presets/default', { presetId: custom.id }, 'PUT')).status,
     ).toBe(200);
 
+    activityUnavailable = true;
+    await host.dispose();
+    await vi.waitFor(() => expect(activity.getSnapshot()).toEqual({}));
+    host = await boot();
+    await vi.waitFor(() => expect(activity.getSnapshot()).toEqual(completedActivity), {
+      timeout: 8_000,
+    });
+    expect(activityRequests()).toHaveLength(3);
+
+    expect(
+      (await sendJson(`${conversationPath}/read`, { submissionId: 'older-turn' }, 'PUT')).status,
+    ).toBe(204);
+    expect(activity.getSnapshot()).toEqual(completedActivity);
+    await activity.acknowledge(draftId, recorded.id);
+    await vi.waitFor(() => expect(activity.getSnapshot()).toEqual(idleActivity));
+    expect(activityRequests()).toHaveLength(3);
+    stopActivity();
     await product.dispose();
     product = undefined;
-    await host.dispose();
-    host = await boot();
 
     expect((await fetchHost('/chat/' + draftId + search)).status).toBe(200);
     expect(await visitSite()).toBe(true);

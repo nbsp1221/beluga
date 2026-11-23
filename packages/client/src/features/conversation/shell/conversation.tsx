@@ -112,6 +112,7 @@ export function Conversation({
 
   const session = snapshot.sessions.find((item) => item.id === id);
   const observableId = session?.isDraft ? undefined : session?.id;
+  useEffect(() => client.activity?.observe(), [client]);
   useEffect(() => {
     if (observableId) {
       return client.observeSession?.(observableId);

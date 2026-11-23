@@ -24,6 +24,7 @@ import { mountProviders } from '../model-providers/http.js';
 import '../auth/services.js';
 import { primaryAgentName } from '../trajectory/contract.js';
 import { allowsTools, workspaceToolAccess } from '../workspace/tool-access.js';
+import { observeConversationActivity } from './activity.js';
 
 const initialData = v.object({ sessionId: v.string() });
 
@@ -70,6 +71,8 @@ export function createHarnessHost(
 
       const auth = context.get('auth');
       const catalog = context.get('workspaceCatalog');
+      const activity = observeConversationActivity(catalog);
+      context.onDispose(activity.dispose);
 
       const trajectory = context.get('trajectory');
 
@@ -130,6 +133,8 @@ export function createHarnessHost(
 
       mountAgentPresets(app, catalog.presets, capabilityMetadata);
       mountProviders(app, providers, catalog);
+
+      activity.mountRoutes(app);
 
       app.on(
         productRoutes.listConversations.method,

@@ -36,6 +36,11 @@ test('binds sessions and product requests to their configured HTTP or HTTPS Host
         headers: { 'Content-Type': 'text/html', 'Clear-Site-Data': '"cookies"' },
       });
     }
+    if (url.pathname === '/api/conversations/activity') {
+      return new Response('data: {"session":{"running":true}}\n\n', {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }
     if (init.method === 'POST') {
       return Response.json(
         { streamUrl: 'https://wrong.example/api/conversations/other', submissionId: 'submission' },
@@ -108,6 +113,9 @@ test('binds sessions and product requests to their configured HTTP or HTTPS Host
   const conversation = '/api/conversations/shared-id';
   expect(await (await request('/' + first + conversation)).json()).toEqual({ origin: http });
   expect(await (await request('/' + second + conversation)).json()).toEqual({ origin: https });
+  const statusStream = await request('/' + second + '/api/conversations/activity');
+  expect(statusStream.headers.get('content-type')).toBe('text/event-stream');
+  expect(await statusStream.text()).toBe('data: {"session":{"running":true}}\n\n');
 
   const receipt = await request('/' + first + conversation, 'POST', { body: 'Hello' });
   expect(receipt.headers.get('set-cookie')).toBeNull();

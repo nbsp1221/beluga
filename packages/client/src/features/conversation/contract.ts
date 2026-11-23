@@ -2,6 +2,7 @@ import '@workspace/runtime';
 import type {
   AccessMode,
   AgentPresetId,
+  ConversationActivity,
   ConversationUsage,
   RunSettings,
 } from '@workspace/protocol/host';
@@ -48,6 +49,7 @@ export interface Session {
   runSettings?: RunSettings;
   accessMode?: AccessMode;
   activeSubmissionId?: string;
+  completedSubmissionId?: string;
   usage?: ConversationUsage;
   messages: readonly Message[];
   draft: string;
@@ -68,6 +70,10 @@ export interface SendOptions {
 export interface ConversationClient {
   readonly mode: 'demo' | 'connected';
   readonly initialSessionId?: string;
+  readonly activity?: ReadStore<ConversationActivity> & {
+    observe(this: void): () => void;
+    acknowledge(this: void, sessionId: string, submissionId: string): Promise<void>;
+  };
   getSnapshot(this: void): ConversationSnapshot;
   subscribe(this: void, listener: () => void): () => void;
   createSession(this: void, workspaceId: string | null): string | Promise<string>;

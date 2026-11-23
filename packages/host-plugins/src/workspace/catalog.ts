@@ -27,6 +27,13 @@ const tables = `
   CREATE TABLE IF NOT EXISTS model_preferences (
     id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS session_activity (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+    last_activity_at TEXT NOT NULL,
+    unread_completion TEXT
+  );
+  CREATE INDEX IF NOT EXISTS session_activity_recent
+    ON session_activity(last_activity_at DESC, session_id DESC) WHERE unread_completion IS NULL;
 `;
 
 type RegisteredWorkspace = { id: string; name: string; path: string };
@@ -77,6 +84,23 @@ export function createWorkspaceCatalog(db: DatabaseSync) {
   const updateFirstTitle = db.prepare(
     'UPDATE sessions SET title = ? WHERE id = ? AND title IS NULL',
   );
+  const selectActivity = db.prepare(`
+    WITH recent AS (
+      SELECT * FROM session_activity
+      WHERE unread_completion IS NULL
+        AND session_id NOT IN (SELECT value FROM json_each(?))
+      ORDER BY last_activity_at DESC, session_id DESC LIMIT ?
+    )
+    SELECT * FROM session_activity WHERE unread_completion IS NOT NULL
+    UNION ALL SELECT * FROM recent
+  `);
+  const recordActivity = db.prepare(`INSERT INTO session_activity VALUES (?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      last_activity_at = excluded.last_activity_at,
+      unread_completion = coalesce(excluded.unread_completion, session_activity.unread_completion)`);
+  const acknowledgeCompletion = db.prepare(
+    'UPDATE session_activity SET unread_completion = NULL WHERE session_id = ? AND unread_completion = ?',
+  );
 
   const getPreset = (row: Record<string, unknown>) =>
     presets.get(String(row.preset_id), Number(row.preset_version));
@@ -102,6 +126,20 @@ export function createWorkspaceCatalog(db: DatabaseSync) {
 
   return {
     presets,
+    listActivity(runningIds: readonly string[], recentLimit: number) {
+      return selectActivity.all(JSON.stringify(runningIds), recentLimit).map((row) => ({
+        sessionId: String(row.session_id),
+        lastActivityAt: String(row.last_activity_at),
+        unreadCompletion:
+          typeof row.unread_completion === 'string' ? row.unread_completion : undefined,
+      }));
+    },
+    recordActivity(sessionId: string, timestamp: string, completion: string | null = null) {
+      recordActivity.run(sessionId, timestamp, completion);
+    },
+    acknowledgeCompletion(sessionId: string, submissionId: string) {
+      acknowledgeCompletion.run(sessionId, submissionId);
+    },
     defaultModel(): string | null {
       const row = readPreferences.get();
       if (!row) {

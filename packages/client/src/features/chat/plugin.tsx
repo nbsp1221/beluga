@@ -1,6 +1,6 @@
 import type { Plugin } from '@workspace/runtime';
 import { createElement, useEffect } from 'react';
-import type { Session } from '../conversation/contract.js';
+import type { ConversationClient, Session } from '../conversation/contract.js';
 import { chatMarkdown } from './chat-markdown.js';
 import { createClientModule } from './module-client.js';
 
@@ -28,7 +28,15 @@ function prepareChat(session: Session) {
   }
 }
 
-function ChatPane({ session, active }: { session: Session; active?: boolean }) {
+function ChatPane({
+  session,
+  active,
+  activity,
+}: {
+  session: Session;
+  active?: boolean;
+  activity?: ConversationClient['activity'];
+}) {
   const { module: view, failed } = chatView.useModule();
   const hasAnswer = active && hasAnswerText(session);
 
@@ -45,18 +53,19 @@ function ChatPane({ session, active }: { session: Session; active?: boolean }) {
       </p>
     );
   }
-  return view ? createElement(view.ChatView, { session, active }) : null;
+  return view ? createElement(view.ChatView, { session, active, activity }) : null;
 }
 
 export const chatClient: Plugin = {
   id: 'chat',
-  requires: ['conversationViews'],
+  requires: ['conversationViews', 'conversation'],
   setup(context) {
+    const activity = context.get('conversation').activity;
     context.onDispose(
       context.get('conversationViews').register({
         id: 'chat',
         label: 'Chat',
-        component: ChatPane,
+        component: (props) => createElement(ChatPane, { ...props, activity }),
         prepare: prepareChat,
         composer: true,
       }),

@@ -65,6 +65,41 @@ test('keeps saved conversation settings when the default model changes', async (
   }
 });
 
+test('limits idle activity independently of unread and running work and preserves recency on read', () => {
+  using db = new DatabaseSync(':memory:');
+  const catalog = createWorkspaceCatalog(db);
+  const workspace = catalog.add(process.cwd()).workspace;
+  const preset = catalog.presets.create(definition);
+  const settings = { model: 'provider/model', effort: 'default' } as const;
+
+  for (const id of ['unread', 'older', 'recent', 'running', 'untouched']) {
+    catalog.createSession(workspace.id, preset, id, settings);
+  }
+
+  const stamp = (hour: number) => new Date(Date.UTC(2026, 0, 1, hour)).toISOString();
+
+  catalog.recordActivity('unread', stamp(0), 'answer');
+  catalog.recordActivity('older', stamp(1));
+  catalog.recordActivity('recent', stamp(2));
+  catalog.recordActivity('running', stamp(3));
+
+  const activity = () => createWorkspaceCatalog(db).listActivity(['running'], 1);
+
+  expect(activity()).toEqual([
+    { sessionId: 'unread', lastActivityAt: stamp(0), unreadCompletion: 'answer' },
+    { sessionId: 'recent', lastActivityAt: stamp(2), unreadCompletion: undefined },
+  ]);
+
+  catalog.acknowledgeCompletion('unread', 'stale-answer');
+  expect(activity()).toHaveLength(2);
+  catalog.acknowledgeCompletion('unread', 'answer');
+  catalog.findSession('older');
+  expect(activity().map(({ sessionId }) => sessionId)).toEqual(['recent']);
+
+  catalog.recordActivity('older', stamp(4));
+  expect(activity().map(({ sessionId }) => sessionId)).toEqual(['older']);
+});
+
 test('registers canonical folders and rejects new sessions when a folder disappears', async ({
   onTestFinished,
 }) => {

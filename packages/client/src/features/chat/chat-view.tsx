@@ -8,14 +8,66 @@ import {
   MessageScrollerViewport,
 } from '@workspace/ui/components/message-scroller';
 import { Toaster } from '@workspace/ui/components/toast';
-import { useEffect, useState } from 'react';
-import type { Session } from '../conversation/contract.js';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import type { ConversationClient, Session } from '../conversation/contract.js';
+import { getEmptySnapshot, subscribeToEmptyStore } from '../../state/store.js';
 import { AssistantResponse } from './assistant-response.js';
 import { MessageActions } from './message-actions.js';
 
-export function ChatView({ session, active = true }: { session: Session; active?: boolean }) {
+export function ChatView({
+  session,
+  active = true,
+  activity,
+}: {
+  session: Session;
+  active?: boolean;
+  activity?: ConversationClient['activity'];
+}) {
   const latestMessage = session.messages.at(-1);
   const [today, setToday] = useState(() => new Date());
+  const { id, completedSubmissionId } = session;
+  const snapshot = useSyncExternalStore(
+    activity?.subscribe ?? subscribeToEmptyStore,
+    activity?.getSnapshot ?? getEmptySnapshot,
+  );
+  const unreadCompletion = snapshot?.[id]?.unreadCompletion;
+
+  useEffect(() => {
+    if (!active || !unreadCompletion || unreadCompletion !== completedSubmissionId || !activity) {
+      return;
+    }
+
+    let frame: number | undefined;
+    let requested = false;
+
+    const visible = () => document.visibilityState === 'visible' && document.hasFocus();
+
+    const schedule = () => {
+      if (requested || frame !== undefined || !visible()) {
+        return;
+      }
+      frame = window.requestAnimationFrame(() => {
+        frame = undefined;
+        if (visible()) {
+          requested = true;
+          void activity.acknowledge(id, unreadCompletion).catch(() => {
+            requested = false;
+          });
+        }
+      });
+    };
+
+    schedule();
+    window.addEventListener('focus', schedule);
+    document.addEventListener('visibilitychange', schedule);
+    return () => {
+      if (frame !== undefined) {
+        window.cancelAnimationFrame(frame);
+      }
+      window.removeEventListener('focus', schedule);
+      document.removeEventListener('visibilitychange', schedule);
+    };
+  }, [active, id, completedSubmissionId, unreadCompletion, activity]);
 
   useEffect(() => {
     let timer: number | undefined;

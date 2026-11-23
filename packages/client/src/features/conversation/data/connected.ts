@@ -16,6 +16,7 @@ import type { WorkspaceClient } from '../../workspaces/contract.js';
 import type { ConversationClient, ConversationSnapshot, Session } from '../contract.js';
 import { createStore } from '../../../state/store.js';
 import { type HostRequest, HostRequestError } from '../../../transport/host-http.js';
+import { createConversationActivity } from './activity.js';
 import { activeSubmissionId, connectConversation, conversationMessages } from './flue-client.js';
 
 export function createConnectedConversation({
@@ -103,6 +104,7 @@ export function createConnectedConversation({
   return {
     mode: 'connected',
     initialSessionId: initial.id,
+    activity: createConversationActivity(signal, fetchHost, request),
     getSnapshot,
     subscribe,
     createSession(workspaceId) {
@@ -192,6 +194,9 @@ export function createConnectedConversation({
           return;
         }
         const submissionId = activeSubmissionId(history);
+        const completedSubmissionId = history.settlements.findLast(
+          ({ outcome }) => outcome === 'completed',
+        )?.submissionId;
         const messages = conversationMessages(history, submissionId);
         const first = messages.find((message) => message.role === 'user')?.text;
         update(id, (session) => ({
@@ -199,6 +204,7 @@ export function createConnectedConversation({
           title: session.title ?? first?.trim().slice(0, 60) ?? null,
           messages,
           activeSubmissionId: submissionId,
+          completedSubmissionId,
         }));
       });
 
