@@ -5,22 +5,31 @@ import {
   workspaceSchema,
 } from '@workspace/protocol/host';
 import type { HostRequest } from '../../../transport/host-http.js';
-import type { Workspace, WorkspaceClient } from '../contract.js';
+import type { ConnectedWorkspaceClient, Workspace } from '../contract.js';
 import { createStore } from '../../../state/store.js';
 
 export function createConnectedWorkspaces(
   request: HostRequest,
   initial: readonly Workspace[],
-): WorkspaceClient {
+): ConnectedWorkspaceClient {
   const store = createStore(initial);
+
+  function merge(workspaces: readonly Workspace[]) {
+    const current = store.getSnapshot();
+    const known = new Set(current.map(({ id }) => id));
+    const added = workspaces.filter(({ id }) => !known.has(id));
+    if (added.length) {
+      store.publish([...current, ...added]);
+    }
+  }
+
   return {
     getSnapshot: store.getSnapshot,
     subscribe: store.subscribe,
+    merge,
     async addWorkspace(path) {
       const workspace = workspaceSchema.parse(await request(WORKSPACES_PATH, { path }));
-      if (!store.getSnapshot().some(({ id }) => id === workspace.id)) {
-        store.publish([...store.getSnapshot(), workspace]);
-      }
+      merge([workspace]);
       return workspace.id;
     },
     async browseWorkspaceFolders(path, signal) {

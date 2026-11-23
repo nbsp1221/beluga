@@ -230,6 +230,16 @@ test.for([
         .map(({ id }) => id),
     ).toEqual(['providers', 'built-in-tools', 'agent-presets', 'workspaces']);
 
+    const peer = await createProduct(true);
+    onTestFinished(() => peer.dispose());
+    const peerConversation = peer.get('conversation');
+    const peerActivity = peerConversation.activity;
+    const peerDraft = peerConversation.initialSessionId;
+    assert(peerActivity && peerDraft);
+    peerConversation.setDraft(peerDraft, 'Keep this unsent draft');
+    const stopPeerActivity = peerActivity.observe();
+    onTestFinished(stopPeerActivity);
+
     const workspaceId = await product.get('workspaces').addWorkspace(workspace);
     const conversation = product.get('conversation');
     expect(conversation.mode).toBe('connected');
@@ -249,9 +259,19 @@ test.for([
     conversation.setDraft(draftId, message);
     const send = conversation.send(draftId, { mode: 'standard', attachments: [] });
     try {
-      await vi.waitFor(() => {
-        expect(activity.getSnapshot()[draftId]?.running).toBe(true);
-      });
+      await vi.waitFor(
+        () => {
+          expect(activity.getSnapshot()[draftId]?.running).toBe(true);
+          expect(peerActivity.getSnapshot()[draftId]?.running).toBe(true);
+          const remote = peerConversation.getSnapshot().sessions.find(({ id }) => id === draftId);
+          expect(remote).toMatchObject({ id: draftId, workspaceId });
+          expect(remote?.isDraft).toBeFalsy();
+          expect(peer.get('workspaces').getSnapshot()).toContainEqual(
+            expect.objectContaining({ id: workspaceId }),
+          );
+        },
+        { timeout: 5_000 },
+      );
     } finally {
       finishTool();
       await send;
@@ -293,11 +313,30 @@ test.for([
       [draftId]: { ...idleActivity[draftId], unreadCompletion: recorded.id },
     };
     await vi.waitFor(() => expect(activity.getSnapshot()).toEqual(completedActivity));
+    await vi.waitFor(() => expect(peerActivity.getSnapshot()).toEqual(completedActivity));
+    const stopPeerChat = peerConversation.observeSession?.(draftId);
+    try {
+      await vi.waitFor(() => {
+        const peerSessions = peerConversation.getSnapshot().sessions;
+        expect(peerSessions.find(({ id }) => id === peerDraft)?.draft).toBe(
+          'Keep this unsent draft',
+        );
+        const remote = peerSessions.find(({ id }) => id === draftId);
+        expect(remote).toMatchObject({
+          title: message,
+          completedSubmissionId: recorded.id,
+        });
+        expect(remote?.messages.some(({ role }) => role === 'assistant')).toBe(true);
+      });
+    } finally {
+      stopPeerChat?.();
+      stopPeerActivity();
+    }
 
     const activityRequests = () =>
       requests.filter((path) => path === '/api/conversations/activity');
 
-    expect(activityRequests()).toHaveLength(1);
+    expect(activityRequests()).toHaveLength(2);
     const missingInput = await fetchHost(`${conversationPath}/trajectory/${recorded.id}/missing`);
     expect(missingInput.status).toBe(404);
     expect(await missingInput.json()).toEqual({ error: 'Model input unavailable' });
@@ -333,7 +372,7 @@ test.for([
     await vi.waitFor(() => expect(activity.getSnapshot()).toEqual(completedActivity), {
       timeout: 8_000,
     });
-    expect(activityRequests()).toHaveLength(3);
+    expect(activityRequests()).toHaveLength(4);
 
     expect(
       (await sendJson(`${conversationPath}/read`, { submissionId: 'older-turn' }, 'PUT')).status,
@@ -341,7 +380,7 @@ test.for([
     expect(activity.getSnapshot()).toEqual(completedActivity);
     await activity.acknowledge(draftId, recorded.id);
     await vi.waitFor(() => expect(activity.getSnapshot()).toEqual(idleActivity));
-    expect(activityRequests()).toHaveLength(3);
+    expect(activityRequests()).toHaveLength(4);
     stopActivity();
     await product.dispose();
     product = undefined;
