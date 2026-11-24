@@ -19,6 +19,7 @@ import { fileReadCapability } from '../../src/agent-capabilities/file/read/host.
 import { fileSearchCapability } from '../../src/agent-capabilities/file/search/host.js';
 import { fileWriteCapability } from '../../src/agent-capabilities/file/write/host.js';
 import { shellExecCapability } from '../../src/agent-capabilities/shell/host.js';
+import { agentInstructionsCapability } from '../../src/agent-instructions/host.js';
 import { createAccessCodeVerifier } from '../../src/auth/access-code.js';
 import { createAccessCodeAuth } from '../../src/auth/host.js';
 import { createHarnessHost } from '../../src/harness/host.js';
@@ -73,8 +74,9 @@ export async function setupHarness(
     { id: 'test-read/alternate', name: 'Alternate', providerName: 'Fixture', efforts: ['low'] },
   ];
 
-  const boot = (capabilities: AgentCapabilityPlugin[] = [fileReadCapability]) =>
-    createRuntime([
+  const boot = (capabilities: AgentCapabilityPlugin[] = [fileReadCapability]) => {
+    const registered = [...capabilities, agentInstructionsCapability(root)];
+    return createRuntime([
       createTrajectoryHost(`${databasePath}.trajectory`),
       createHarnessHost(
         {
@@ -104,10 +106,11 @@ export async function setupHarness(
             };
           },
           databasePath,
+          instructionsDirectory: root,
         },
-        capabilities.map(({ service }) => service),
+        registered.map(({ service }) => service),
       ),
-      ...capabilities.map(({ plugin }) => plugin),
+      ...registered.map(({ plugin }) => plugin),
       workspaceFileAccessPolicy,
       createWorkspaceHost(`${databasePath}.catalog`),
       createAccessCodeAuth({
@@ -116,6 +119,7 @@ export async function setupHarness(
         loadVerifier: () => Promise.resolve(verifier),
       }),
     ]);
+  };
 
   let cookie = '';
 

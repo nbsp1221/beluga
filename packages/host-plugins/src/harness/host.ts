@@ -38,6 +38,7 @@ export interface HarnessOptions {
   origin: string;
   openProviders: OpenModelProviders;
   databasePath: string;
+  instructionsDirectory: string;
   initialAgentPreset?: unknown;
 }
 
@@ -406,18 +407,32 @@ function createPresetAgent(
       }
       return capability;
     });
+    const cwd = sessions.workspaceRootForSession(sessionId);
+    const contexts = capabilities
+      .filter((capability) => 'useContext' in capability)
+      .map((capability) => capability.useContext(cwd));
+    const onFiles =
+      contexts.length > 0
+        ? async (paths: readonly string[], toolCallId: string, signal?: AbortSignal) => {
+            for (const context of contexts) {
+              await context.onFiles(paths, toolCallId, signal);
+            }
+          }
+        : undefined;
     const mode = catalog.sessionAccessMode(sessionId);
-    const tools = capabilities.flatMap(({ metadata, createTools }) => {
-      if (!allowsTools(metadata.access, mode)) {
-        return [];
-      }
-      const { cwd, checkPermission, authorize } = workspaceToolAccess(
-        sessions,
-        sessionId,
-        metadata,
-      );
-      return createTools({ cwd, checkPermission }).map((tool) => tool.bind(authorize));
-    });
+    const tools = capabilities
+      .filter((capability) => 'createTools' in capability)
+      .flatMap(({ metadata, createTools }) => {
+        if (!allowsTools(metadata.access, mode)) {
+          return [];
+        }
+        const { cwd, checkPermission, authorize } = workspaceToolAccess(
+          sessions,
+          sessionId,
+          metadata,
+        );
+        return createTools({ cwd, checkPermission }).map((tool) => tool.bind(authorize, onFiles));
+      });
     tools.forEach(useTool);
     return preset.instructions;
   }

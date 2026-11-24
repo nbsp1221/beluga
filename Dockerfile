@@ -1,6 +1,7 @@
 FROM node:24.22.2-trixie-slim AS build
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json .npmrc ./
+COPY patches patches
 COPY apps/cli apps/cli
 COPY apps/web apps/web
 COPY packages packages

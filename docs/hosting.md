@@ -133,6 +133,12 @@ The Linux service and foreground Host default to `$XDG_DATA_HOME/beluga` or `~/.
 
 Stop the Host before copying the complete data directory. To restore, stop the Host, restore the copy and start with the same data directory and site address. Store the copy privately because it can contain conversation contents, tool results and provider credentials. Back up project folders and credentials managed by external tools separately.
 
+## Project instructions
+
+Put shared instructions in the project's `AGENTS.md` and select **Workspace instructions** in the agent preset. New installations include it in Standard. Beluga loads rules from the project root to the workspace before the first model request. Outside a Git checkout it starts at the workspace folder. A successful file read, write, or edit can add applicable subfolder rules before the next model request. A closer rule takes precedence for files in its scope. Use `AGENTS.override.md` in the same folder to replace that folder's `AGENTS.md`.
+
+For instructions across projects, place `AGENTS.md` in the Host's data directory. For the standard Docker setup this is `/data` inside the container. A browser uses the rules on its connected Host. Files are reconciled on file activity, session resume and when compaction removes earlier instruction context. The default budgets are 64 KiB for each of the Host-wide and project chains, with a 1 MiB limit per source file. Instructions guide the model within the session's access mode. Chat shows the contributing files in a collapsible row. In Trajectory, search for the filename or open a Context row to inspect the changes and their model request.
+
 ## Diagnose connection problems
 
 - **The site opens but messages do not finish.** Check that the proxy's browser address exactly matches `--origin` and that it forwards streaming API responses.

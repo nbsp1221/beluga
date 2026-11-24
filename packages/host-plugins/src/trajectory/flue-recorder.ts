@@ -1,4 +1,10 @@
 import { type FlueObservation, observe } from '@flue/runtime';
+import {
+  type TrajectoryRecord,
+  workspaceInstructionChanges,
+  workspaceInstructionsRootError,
+} from '@workspace/protocol/host';
+import * as v from 'valibot';
 import type { TrajectoryStore } from './store.js';
 import { primaryAgentName } from './contract.js';
 
@@ -47,6 +53,43 @@ function errorText(value: unknown) {
       : undefined;
 }
 
+const contextMessage = v.object({
+  contextSignal: v.object({
+    type: v.literal('agent-instructions'),
+    content: v.string(),
+    attributes: v.object({ id: v.string(), changes: v.string() }),
+  }),
+});
+
+function appliedInstructions(
+  messages: readonly unknown[],
+  modelRequestId: string,
+  timestamp: string,
+): Extract<TrajectoryRecord, { kind: 'context' }>[] {
+  return messages.flatMap((message) => {
+    const parsed = v.safeParse(contextMessage, message);
+    if (!parsed.success) {
+      return [];
+    }
+    const { content, attributes } = parsed.output.contextSignal;
+    const changes = workspaceInstructionChanges(attributes.changes);
+    if (!changes?.length) {
+      return [];
+    }
+    return [
+      {
+        kind: 'context',
+        id: `context:${attributes.id}`,
+        modelRequestId,
+        timestamp,
+        text: changes.map(({ path }) => path).join(', '),
+        body: content,
+        changes,
+      },
+    ];
+  });
+}
+
 export function observeFlueTrajectory(store: TrajectoryStore, options: ObservationOptions) {
   const toolsBySubmission = new Map<string, SubmissionTools>();
   const outputTurnsBySubmission = new Map<string, Set<string>>();
@@ -55,6 +98,8 @@ export function observeFlueTrajectory(store: TrajectoryStore, options: Observati
   return observe((event, context) => {
     if (
       !recordedEvents.has(event.type) ||
+      ((event.type === 'submission_running' || event.type === 'submission_settled') &&
+        event.kind === 'dispatch') ||
       event.agentName !== primaryAgentName ||
       !event.submissionId ||
       event.taskId ||
@@ -138,7 +183,11 @@ function capture(
       submission,
       event.outcome === 'aborted' ? 'interrupted' : event.outcome,
       event.timestamp,
-      event.outcome === 'failed' ? 'The run failed.' : undefined,
+      event.outcome === 'failed'
+        ? event.error?.type === workspaceInstructionsRootError.type
+          ? workspaceInstructionsRootError.message
+          : 'The run failed.'
+        : undefined,
     );
   } else if (event.type === 'compaction_start' && context) {
     const id = `compaction:${crypto.randomUUID()}`;
@@ -191,10 +240,17 @@ function capture(
       event.timestamp,
       {
         systemPrompt: event.request.input.systemPrompt,
-        messages: event.request.input.messages,
+        messages: event.request.input.messages.map((message) => {
+          if (!('contextSignal' in message)) {
+            return message;
+          }
+          const { contextSignal: _source, ...modelMessage } = message;
+          return modelMessage;
+        }),
         tools: event.request.input.tools ?? [],
       },
       ordinary,
+      ordinary ? appliedInstructions(event.request.input.messages, modelId, event.timestamp) : [],
     );
     store.put(session, submission, {
       kind: 'assistant',

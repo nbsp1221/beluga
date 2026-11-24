@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
 export const HOST_STATUS_PATH = '/api/status';
+export const workspaceInstructionsRootError = {
+  type: 'workspace_instructions_root_unavailable',
+  message: 'Beluga could not determine the project root for workspace instructions.',
+};
+
 export const CONVERSATION_PATH = '/api/conversations';
 export const CONVERSATION_ACTIVITY_PATH = `${CONVERSATION_PATH}/activity`;
 export const AGENT_PRESETS_PATH = '/api/agent-presets';
@@ -61,12 +66,40 @@ export const trajectoryStatusSchema = z.enum([
   'interrupted',
   'unavailable',
 ]);
+export const workspaceInstructionChangesSchema = z.array(
+  z.object({ action: z.enum(['add', 'replace', 'remove']), path: z.string() }),
+);
+
+export type WorkspaceInstructionChanges = z.infer<typeof workspaceInstructionChangesSchema>;
+
+export function workspaceInstructionChanges(
+  value?: string,
+): WorkspaceInstructionChanges | undefined {
+  if (!value) {
+    return;
+  }
+  try {
+    return workspaceInstructionChangesSchema.safeParse(JSON.parse(value)).data;
+  } catch {
+    return undefined;
+  }
+}
+
 export const trajectoryRecordSchema = z.discriminatedUnion('kind', [
   z.object({
     id: z.string(),
     kind: z.literal('system'),
     text: z.string(),
     initial: z.boolean(),
+    modelRequestId: z.string(),
+    timestamp: z.string().optional(),
+  }),
+  z.object({
+    id: z.string(),
+    kind: z.literal('context'),
+    text: z.string(),
+    body: z.string(),
+    changes: workspaceInstructionChangesSchema,
     modelRequestId: z.string(),
     timestamp: z.string().optional(),
   }),

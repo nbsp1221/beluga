@@ -50,6 +50,6 @@ export function matchesRecord(record: TrajectoryRecord, query: string) {
           resultText(record.output),
           payloadText(record.schema),
         ]
-      : [recordTitle(record), record.text]
+      : [recordTitle(record), record.text, record.kind === 'context' ? record.body : undefined]
   ).some((value) => value?.toLowerCase().includes(query));
 }

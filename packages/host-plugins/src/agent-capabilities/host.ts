@@ -1,14 +1,23 @@
 import type { AgentCapabilityMetadata } from '@workspace/protocol/host';
 import type { Plugin, Services } from '@workspace/runtime';
 import type { workspaceToolAccess } from '../workspace/tool-access.js';
-import type { AgentToolRegistration } from './tool.js';
+import type { AgentToolRegistration, OnFiles } from './tool.js';
 
-export interface AgentCapability {
+export type AgentCapability = AgentToolCapability | AgentContextCapability;
+
+interface AgentToolCapability {
   metadata: AgentCapabilityMetadata;
   createTools(
     this: void,
     access: Pick<ReturnType<typeof workspaceToolAccess>, 'cwd' | 'checkPermission'>,
   ): readonly AgentToolRegistration[];
+}
+
+interface AgentContextCapability {
+  metadata: AgentCapabilityMetadata;
+  useContext(cwd: string | undefined): {
+    onFiles: OnFiles;
+  };
 }
 
 type ServiceName = Extract<keyof Services, string>;

@@ -8,10 +8,12 @@ import {
   MessageScrollerViewport,
 } from '@workspace/ui/components/message-scroller';
 import { Toaster } from '@workspace/ui/components/toast';
+import { Trace } from '@workspace/ui/components/trace';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { ConversationClient, Session } from '../conversation/contract.js';
 import { getEmptySnapshot, subscribeToEmptyStore } from '../../state/store.js';
 import { AssistantResponse } from './assistant-response.js';
+import { ContextLine } from './context-line.js';
 import { MessageActions } from './message-actions.js';
 
 export function ChatView({
@@ -23,7 +25,7 @@ export function ChatView({
   active?: boolean;
   activity?: ConversationClient['activity'];
 }) {
-  const latestMessage = session.messages.at(-1);
+  const latestMessage = session.messages.findLast(({ role }) => role !== 'context');
   const [today, setToday] = useState(() => new Date());
   const { id, completedSubmissionId } = session;
   const snapshot = useSyncExternalStore(
@@ -108,7 +110,11 @@ export function ChatView({
                   <MessageScrollerItem key={message.id} messageId={message.id}>
                     <Message align={message.role === 'user' ? 'end' : 'start'}>
                       <MessageContent className="gap-0 md:gap-1.5">
-                        {message.role === 'user' ? (
+                        {message.role === 'context' ? (
+                          <Trace>
+                            <ContextLine changes={message.changes} text={message.text} />
+                          </Trace>
+                        ) : message.role === 'user' ? (
                           <>
                             <Bubble variant="muted" align="end">
                               <BubbleContent>

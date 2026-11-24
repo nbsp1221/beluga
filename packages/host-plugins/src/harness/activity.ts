@@ -45,6 +45,7 @@ export function observeConversationActivity(catalog: WorkspaceCatalog) {
   const stopObserving = observe((event, { id }) => {
     if (
       (event.type !== 'submission_running' && event.type !== 'submission_settled') ||
+      event.kind === 'dispatch' ||
       event.agentName !== primaryAgentName ||
       !event.submissionId ||
       event.taskId ||

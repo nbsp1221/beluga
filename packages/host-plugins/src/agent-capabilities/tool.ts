@@ -5,18 +5,32 @@ interface AgentTool<Input> {
   description: string;
   schema: Record<string, unknown>;
   parse(input: unknown): Input | undefined;
-  execute(input: Input, signal: AbortSignal | undefined, toolCallId: string): Promise<string>;
+  execute(
+    input: Input,
+    signal: AbortSignal | undefined,
+    toolCallId: string,
+    onFile?: (path: string) => void,
+  ): Promise<string>;
 }
 
+export type OnFiles = (
+  paths: readonly string[],
+  toolCallId: string,
+  signal?: AbortSignal,
+) => Promise<void>;
+
 export class AgentToolRegistration {
-  private readonly connect: (authorize: () => Promise<void>) => ReturnType<typeof defineTool>;
+  private readonly connect: (
+    authorize: () => Promise<void>,
+    onFiles?: OnFiles,
+  ) => ReturnType<typeof defineTool>;
 
   private constructor(connect: AgentToolRegistration['connect']) {
     this.connect = connect;
   }
 
   static create<Input>(name: string, tool: AgentTool<Input>) {
-    return new AgentToolRegistration((authorize) =>
+    return new AgentToolRegistration((authorize, onFiles) =>
       defineTool({
         name,
         description: tool.description,
@@ -29,13 +43,21 @@ export class AgentToolRegistration {
           }
           signal?.throwIfAborted();
           await authorize();
-          return tool.execute(input, signal, toolCallId);
+          if (!onFiles) {
+            return tool.execute(input, signal, toolCallId);
+          }
+          const paths = new Set<string>();
+          const output = await tool.execute(input, signal, toolCallId, (path) => paths.add(path));
+          if (paths.size > 0 && !signal?.aborted) {
+            await onFiles([...paths], toolCallId, signal);
+          }
+          return output;
         },
       }),
     );
   }
 
-  bind(authorize: () => Promise<void>) {
-    return this.connect(authorize);
+  bind(authorize: () => Promise<void>, onFiles?: OnFiles) {
+    return this.connect(authorize, onFiles);
   }
 }

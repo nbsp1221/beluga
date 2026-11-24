@@ -87,7 +87,7 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 
 [Workspace Host](../packages/host-plugins/src/workspace/host.ts)는 로그인한 사용자에게 Host 홈에서 시작하는 폴더 탐색과 절대 경로 입력을 제공한다. 별도 허용 목록은 두지 않는다. 목록은 하위 폴더만 반환하며 링크는 입력 경로로 검증할 수 있다. Host에서 확인 가능한 기존 디렉터리를 정규 경로로 등록한다. 동일 경로는 같은 ID를 반환하고 이름이 같아도 경로가 다르면 별개다. 카탈로그는 실제 폴더 경로를 필수로 저장한다. 새 대화에서 폴더를 고르기 전 상태는 웹 초안에만 존재한다. 연결된 폴더가 사라지거나 다른 경로로 바뀌면 새 세션 생성을 거절하고 이력은 보존한다.
 
-[하네스 Host](../packages/host-plugins/src/harness/host.ts)는 카탈로그로 세션을 확인하고, Flue SQLite에 대화와 제출 기록을 저장한다. 세션 제목은 첫 입력이 수락될 때까지 NULL이며 화면에서 기본 문구를 표시한다. 연결 Host는 플러그인을 시작하기 전에 프로세스 소유권을 획득한다. 이 경계는 Trajectory의 시작 복구와 Flue의 프로세스 전역 공급자 등록을 함께 보호한다. 종료 시 런타임과 공급자를 정리한 뒤 소유권을 반환한다. 워크스페이스 등록은 세션의 소속을 정하며, 경로·파일 내용·프로젝트 지침은 모델 입력에 주입하지 않는다. 샘플 모드 선택은 실행 설정과 별개이며 첨부를 포함한 전송은 거부한다.
+[하네스 Host](../packages/host-plugins/src/harness/host.ts)는 카탈로그로 세션을 확인하고, Flue SQLite에 대화와 제출 기록을 저장한다. 세션 제목은 첫 입력이 수락될 때까지 NULL이며 화면에서 기본 문구를 표시한다. 연결 Host는 플러그인을 시작하기 전에 프로세스 소유권을 획득한다. 이 경계는 Trajectory의 시작 복구와 Flue의 프로세스 전역 공급자 등록을 함께 보호한다. 종료 시 런타임과 공급자를 정리한 뒤 소유권을 반환한다. 워크스페이스 등록은 세션의 소속을 정한다. 샘플 모드 선택은 실행 설정과 별개이며 첨부를 포함한 전송은 거부한다.
 
 ### 에이전트 프리셋과 실행
 
@@ -97,9 +97,11 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 
 [Host 제공자 어댑터](../packages/host-plugins/src/model-providers/adapter.ts)는 인증된 `/api/providers`에서 연결을 관리한다. 연결 설정과 새 대화의 기본 모델은 SQLite에 저장하며, 호환 API 키는 Host 데이터 디렉터리의 별도 파일에 저장한다. 세션은 연결 ID가 포함된 모델 ID를 보존한다. Pi와 Flue는 같은 제공자 객체를 사용한다. 연결 해제 후에는 모델이 선택기에서 빠지고 새 요청이 거부된다. 이미 시작된 요청은 완료될 수 있다. Codex 연결을 다시 켜면 같은 ID를 사용한다. 삭제한 호환 연결을 새로 추가하면 새 ID를 사용하므로 해당 모델을 쓰던 대화에서 다시 선택해야 한다.
 
-**제품 플러그인**은 Host나 웹의 시작 시점에 서비스와 자원 수명을 연결한다. 프리셋에서 고르는 **에이전트 기능**은 제품 플러그인이 제공하는 [서비스 계약](../packages/host-plugins/src/agent-capabilities/host.ts)이다. 각 기능은 안정적인 ID, 편집기용 메타데이터, 세션에 등록할 도구 정의를 제공한다. 구현은 `agent-capabilities/<영역>/<기능>/`에 두고 Host 조립이 플러그인과 서비스 이름을 한 목록에서 선택한다.
+**제품 플러그인**은 Host나 웹의 시작 시점에 서비스와 자원 수명을 연결한다. 프리셋에서 고르는 **에이전트 기능**은 제품 플러그인이 제공하는 [서비스 계약](../packages/host-plugins/src/agent-capabilities/host.ts)이다. 기능은 안정적인 ID와 편집기용 메타데이터를 제공하고, 선택한 에이전트에 도구 또는 컨텍스트를 등록한다. Host 조립이 플러그인과 서비스 이름을 한 목록에서 선택한다.
 
-[하네스 Host](../packages/host-plugins/src/harness/host.ts)는 세션에 고정된 프리셋과 접근 모드에 따라 도구를 골라 Flue `useTool`로 등록한다. 기능 플러그인의 `host.ts`가 모델 이름을 정하고 [공통 등록 함수](../packages/host-plugins/src/agent-capabilities/tool.ts)에서 [Pi 어댑터](../packages/host-plugins/src/pi/tool.ts)와 [세션 권한](../packages/host-plugins/src/workspace/tool-access.ts)을 연결한다. 어댑터는 Pi의 스키마·인자 준비·실행 결과를 변환하고, 등록 함수는 호출 ID와 중단 신호를 넘긴다. 현재 연결은 텍스트 결과를 지원하며 작업 경로나 프로젝트 지침을 자동 주입하지 않는다. 중복 기능 ID는 Host 시작 시 거절하고, 필요한 기능이 빠진 세션의 새 생성·전송도 거절한다. [Flue 도구 등록](https://flueframework.com/docs/guide/tools/)
+[하네스 Host](../packages/host-plugins/src/harness/host.ts)는 세션에 고정된 프리셋과 접근 모드에 따라 도구를 골라 Flue `useTool`로 등록한다. 기능 플러그인의 `host.ts`가 모델 이름을 정하고 [공통 등록 함수](../packages/host-plugins/src/agent-capabilities/tool.ts)에서 [Pi 어댑터](../packages/host-plugins/src/pi/tool.ts)와 [세션 권한](../packages/host-plugins/src/workspace/tool-access.ts)을 연결한다. 어댑터는 Pi의 스키마·인자 준비·실행 결과를 변환하고, 등록 함수는 호출 ID와 중단 신호를 넘긴다. 현재 연결은 텍스트 결과를 지원한다. 중복 기능 ID는 Host 시작 시 거절하고, 필요한 기능이 빠진 세션의 새 생성·전송도 거절한다. [Flue 도구 등록](https://flueframework.com/docs/guide/tools/)
+
+[프로젝트 지침 플러그인](../packages/host-plugins/src/agent-instructions/host.ts)은 프리셋에 포함된 세션에서만 전역·프로젝트 지침을 읽는다. 첫 요청에서 초기 지침을, 성공한 파일 작업 뒤에는 변경된 지침을 출처가 붙은 Flue 신호로 추가한다. 모델은 신호를 사용자 역할의 컨텍스트로 받는다. Flue의 세션 상태가 범위와 본문을 비교하고, SDK 이력의 신호는 Chat에 표시한다. [Flue 2.3.1 패치](../patches/@flue__runtime@2.3.1.patch)는 시작 훅의 상태 반영과 실제 요청에 포함된 신호의 출처 관찰, 압축 후 기준 지침 재구성을 위한 신호 존재 확인을 지원한다. Trajectory는 해당 요청의 출처를 기록하고 파일명과 본문을 기존 서버 검색에 포함한다. 파일 위치와 사용 규칙은 [Host 운영](hosting.md#project-instructions)에 둔다.
 
 모든 세션은 같은 Flue 라우터를 사용한다. 웹의 새 대화 목록은 카탈로그의 최신 프리셋을 표시한다. 새 세션의 기본 권한은 Read only다. [세션 카탈로그](../packages/host-plugins/src/workspace/catalog.ts)는 고정된 프리셋 버전과 선택한 실행 권한을 세션별로 SQLite에 저장한다. 웹에서 Full access를 선택할 때는 명시적 확인이 필요하다. 저장된 권한은 브라우저를 닫거나 같은 데이터 디렉터리로 Host를 재시작해도 유지되며, 낮은 권한으로 변경하면 그 값이 저장된다. Host는 프리셋과 실행 모드의 교집합을 모델에 노출하고, 변경·셸 호출 직전에도 권한을 확인한다.
 

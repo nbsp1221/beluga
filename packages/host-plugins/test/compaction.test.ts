@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   type AssistantMessage,
   type Provider,
@@ -168,8 +170,9 @@ test(
         await releaseSummary.promise;
       }),
     );
+    await writeFile(join(harness.project, 'AGENTS.md'), 'FIXTURE_RULE_SURVIVES_COMPACTION');
     const workspace = await harness.prepareWorkspace();
-    const preset = await harness.createPreset();
+    const preset = await harness.createPreset(['agent-instructions']);
     const { id } = await harness.create(workspace.id, preset.id);
     const url = `${origin}/api/conversations/${id}`;
     const client = harness.sdk(id);
@@ -239,6 +242,9 @@ test(
       await (await harness.fetch(`${url}/trajectory/${last.id}/${model.id}`)).json(),
     );
     expect(JSON.stringify(input.messages)).toContain(checkpoint);
+    expect(JSON.stringify(input.messages).match(/FIXTURE_RULE_SURVIVES_COMPACTION/g)).toHaveLength(
+      1,
+    );
     expect(last.records.some((record) => record.kind === 'system')).toBe(false);
     expect((await usage()).context).toMatchObject({ status: 'available', inputTokens: 1500 });
 

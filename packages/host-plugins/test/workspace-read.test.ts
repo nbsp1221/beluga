@@ -78,7 +78,10 @@ test(
         id,
         access,
       })),
-    ).toEqual([{ id: 'file.read', access: 'files' }]);
+    ).toEqual([
+      { id: 'file.read', access: 'files' },
+      { id: 'agent-instructions', access: undefined },
+    ]);
     const emptyModels = providerSettingsSchema.parse(
       await (await fetch(origin + '/api/providers')).json(),
     );
@@ -224,7 +227,8 @@ test(
     expect(call.input).toEqual({ path: 'README.md', limit: 2 });
     expect(JSON.stringify(call.output)).toContain('project README');
     expect(call.status).toBe('completed');
-    expect(input.systemPrompt).not.toMatch(/Working directory:|workspace instruction marker/);
+    expect(input.systemPrompt).not.toContain('Working directory:');
+    expect(JSON.stringify(input)).not.toContain('workspace instruction marker');
 
     const missing = readToolResult(await turn(reading.id, '../other/missing.txt'));
     expect(missing.isError).toBe(true);
@@ -412,8 +416,10 @@ test(
 
     await restart([]);
     expect(
-      agentPresetsSchema.parse(await (await fetch(origin + presetsPath)).json()).capabilities,
-    ).toEqual([]);
+      agentPresetsSchema
+        .parse(await (await fetch(origin + presetsPath)).json())
+        .capabilities.map(({ id }) => id),
+    ).toEqual(['agent-instructions']);
     expect((await turn(plain.id, 'README.md'))[0].toolNames).toEqual(['task']);
     expect((await fetch(`${origin}/api/conversations/${reading.id}?view=history`)).status).toBe(
       200,

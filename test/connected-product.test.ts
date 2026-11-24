@@ -73,6 +73,7 @@ test.for([
         harness: {
           origin,
           databasePath,
+          instructionsDirectory: directory,
           openProviders(register) {
             register(fixtureProvider([], () => toolGate));
             return {

@@ -5,11 +5,19 @@ import type {
   ConversationActivity,
   ConversationUsage,
   RunSettings,
+  WorkspaceInstructionChanges,
 } from '@workspace/protocol/host';
 import type { ComponentType } from 'react';
 import type { ReadStore } from '../../state/store.js';
 
+type ContextMessage = {
+  id: string;
+  text: string;
+  changes: WorkspaceInstructionChanges;
+};
+
 export type AssistantMessagePart =
+  | (ContextMessage & { type: 'context' })
   | { type: 'text'; id: string; text: string; streaming: boolean }
   | { type: 'reasoning'; id: string; text: string; streaming: boolean }
   | {
@@ -24,10 +32,11 @@ export type AssistantMessagePart =
 
 export type TurnActivity =
   | { state: 'running'; startedAt?: number }
-  | { state: 'completed' | 'failed' | 'aborted'; durationMs?: number };
+  | { state: 'completed' | 'failed' | 'aborted'; durationMs?: number; error?: string };
 
 export type Message =
   | { id: string; role: 'user'; text: string; sentAt?: number }
+  | (ContextMessage & { role: 'context' })
   | {
       id: string;
       role: 'assistant';

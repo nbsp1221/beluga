@@ -25,6 +25,7 @@ export interface ModelRequest {
   toolSchemas: ReadonlyMap<string, unknown>;
   result: ToolResultMessage | undefined;
   instructions: string;
+  workspaceInstructions: string;
 }
 
 export function fixtureProvider(
@@ -86,6 +87,11 @@ export function fixtureProvider(
       toolSchemas: tools,
       result: prior?.role === 'toolResult' ? prior : undefined,
       instructions: instructions.join('\n'),
+      workspaceInstructions: context.messages
+        .filter((message) => message.role === 'user')
+        .map((message) => text(message.content))
+        .filter((content) => content.startsWith('<system-reminder type="agent-instructions"'))
+        .join('\n'),
     });
 
     const input: unknown = latest?.role === 'user' ? JSON.parse(text(latest.content)) : {};
