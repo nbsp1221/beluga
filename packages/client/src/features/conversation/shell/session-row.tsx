@@ -17,6 +17,7 @@ import {
 import { ShellButton } from '@workspace/ui/components/shell-button';
 import { Spinner } from '@workspace/ui/components/spinner';
 import { sidebarLinkClassName } from '@workspace/ui/lib/sidebar-link';
+import { cn } from '@workspace/ui/lib/utils';
 import {
   Archive,
   ChevronRight,
@@ -43,6 +44,7 @@ export function SessionRow({
   running,
   unread,
   workspace,
+  nested,
   onClick,
 }: {
   session: Session;
@@ -50,13 +52,16 @@ export function SessionRow({
   running: boolean;
   unread: boolean;
   workspace?: string;
+  nested?: boolean;
   onClick: () => void;
 }) {
   const linkRef = useRef<HTMLAnchorElement>(null);
   const title = sessionTitle(session);
   const status = running ? 'Running' : unread ? 'Unread response' : undefined;
-  const linkClassName =
-    'flex min-h-12 items-center gap-2 rounded-lg border border-transparent px-2 py-1 text-sm focus-visible:outline-sidebar-ring aria-[current=page]:font-medium md:min-h-8';
+  const linkClassName = cn(
+    'flex min-h-12 items-center gap-2 rounded-lg border border-transparent px-2 py-1 text-sm focus-visible:outline-sidebar-ring aria-[current=page]:font-medium md:min-h-8',
+    nested && 'ps-8',
+  );
   const link = (
     <Link
       ref={linkRef}
@@ -67,13 +72,6 @@ export function SessionRow({
         session.isDraft ? sidebarLinkClassName(linkClassName) : `min-w-0 flex-1 ${linkClassName}`
       }
     >
-      <span aria-hidden="true" className="grid size-4 shrink-0 place-items-center">
-        {running ? (
-          <Spinner className="size-3 motion-reduce:animate-none" />
-        ) : (
-          unread && <span className="size-1.5 rounded-full bg-primary" />
-        )}
-      </span>
       <span className="min-w-0 flex-1 truncate">{title}</span>
       {workspace && (
         <span className="max-w-1/3 shrink-0 truncate text-xs text-muted-foreground">
@@ -92,21 +90,33 @@ export function SessionRow({
     <ContextMenu>
       <ContextMenuTrigger className="group/session flex items-center rounded-lg text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-focus-visible:bg-sidebar-accent has-aria-[current=page]:bg-sidebar-accent has-aria-[current=page]:text-sidebar-accent-foreground has-data-popup-open:bg-sidebar-accent data-popup-open:bg-sidebar-accent">
         {link}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <ShellButton
-                label={`Actions for ${title}`}
-                className="text-muted-foreground group-hover/session:opacity-100 group-has-focus-visible/session:opacity-100 group-data-popup-open/session:opacity-100 data-popup-open:opacity-100 [@media(hover:hover)]:opacity-0"
-              />
-            }
+        <div className="grid shrink-0 grid-flow-col items-center">
+          <span
+            aria-hidden="true"
+            className="row-start-1 grid size-4 place-items-center justify-self-center group-hover/session:invisible [@media(hover:hover)]:col-start-1 [@media(hover:hover)]:group-has-focus-visible/session:invisible [@media(hover:hover)]:group-has-data-popup-open/session:invisible [@media(hover:hover)]:group-data-popup-open/session:invisible"
           >
-            <Ellipsis />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" aria-label="Session actions" className="w-52">
-            <SessionMenuItems unread={unread} />
-          </DropdownMenuContent>
-        </DropdownMenu>
+            {running ? (
+              <Spinner className="size-3 motion-reduce:animate-none" />
+            ) : (
+              unread && <span className="size-1.5 rounded-full bg-primary" />
+            )}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <ShellButton
+                  label={`Actions for ${title}`}
+                  className="row-start-1 text-muted-foreground transition-colors group-hover/session:opacity-100 group-has-focus-visible/session:opacity-100 group-data-popup-open/session:opacity-100 data-popup-open:opacity-100 [@media(hover:hover)]:col-start-1 [@media(hover:hover)]:opacity-0"
+                />
+              }
+            >
+              <Ellipsis />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" aria-label="Session actions" className="w-52">
+              <SessionMenuItems unread={unread} />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent aria-label="Session actions" className="w-52" finalFocus={linkRef}>
         <SessionMenuItems unread={unread} />
