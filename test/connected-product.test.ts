@@ -335,6 +335,11 @@ test.for(origins)(
     const conversation = product.get('conversation');
     expect(conversation.mode).toBe('connected');
     const draftId = await conversation.createSession(workspaceId);
+    const { defaultPresetId } = product.get('agentPresets').getSnapshot();
+    expect(defaultPresetId).toBeTruthy();
+    expect(
+      conversation.getSnapshot().sessions.find(({ id }) => id === draftId)?.agentPresetId,
+    ).toBe(defaultPresetId);
     conversation.setDraft(draftId, message);
     await conversation.send(draftId, { mode: 'standard', attachments: [] });
     const streamUrl = `${origin}/api/conversations/${draftId}`;
@@ -494,27 +499,23 @@ test.for(origins)(
 );
 
 test.for(origins)(
-  'restores pinned conversations and the default preset at $origin',
+  'restores a conversation pinned to an earlier preset revision at $origin',
   async (connection, context) => {
     const fixture = await setupConnectedProduct(context, connection);
     const { workspace, sendJson } = fixture;
     await fixture.login();
     await fixture.selectModel();
-    let product = await fixture.openProduct();
+    const product = await fixture.openProduct();
     const workspaceId = await product.get('workspaces').addWorkspace(workspace);
-    const conversation = product.get('conversation');
     const presets = product.get('agentPresets');
     const { presets: initialPresets, defaultPresetId } = presets.getSnapshot();
     expect(initialPresets).toHaveLength(1);
     const [standard] = initialPresets;
     expect(standard).toMatchObject({ name: 'Standard', id: defaultPresetId, version: 1 });
-    const draftId = await conversation.createSession(workspaceId);
-    expect(
-      conversation.getSnapshot().sessions.find(({ id }) => id === draftId)?.agentPresetId,
-    ).toBe(standard.id);
-
-    conversation.setDraft(draftId, message);
-    await conversation.send(draftId, { mode: 'standard', attachments: [] });
+    const sessionId = crypto.randomUUID();
+    const saved = await sendJson('/api/conversations', { id: sessionId, workspaceId });
+    expect(saved.status).toBe(201);
+    expect(await saved.json()).toMatchObject({ agentPresetId: standard.id, agentPresetVersion: 1 });
     const revised = await presets.save(
       {
         name: 'Edited standard',
@@ -525,6 +526,33 @@ test.for(origins)(
       standard,
     );
     expect(revised).toMatchObject({ id: standard.id, version: 2 });
+    await fixture.closeProduct(product);
+    await fixture.restartHost();
+    const reopened = await fixture.openProduct();
+    expect(reopened.get('conversation').getSnapshot().sessions).toContainEqual(
+      expect.objectContaining({
+        id: sessionId,
+        workspaceId,
+        agentPresetId: standard.id,
+        agentPresetVersion: 1,
+        agentPresetName: 'Standard',
+      }),
+    );
+    expect(reopened.get('agentPresets').getSnapshot().presets).toEqual([revised]);
+  },
+);
+
+test.for(origins)(
+  'uses the saved default preset for new conversations after restart at $origin',
+  async (connection, context) => {
+    const fixture = await setupConnectedProduct(context, connection);
+    const { workspace, sendJson } = fixture;
+    await fixture.login();
+    await fixture.selectModel();
+    const product = await fixture.openProduct();
+    const workspaceId = await product.get('workspaces').addWorkspace(workspace);
+    const presets = product.get('agentPresets');
+    const [standard] = presets.getSnapshot().presets;
     const custom = await presets.save({
       name: 'Custom assistant',
       description: '',
@@ -538,19 +566,10 @@ test.for(origins)(
 
     await fixture.closeProduct(product);
     await fixture.restartHost();
-    product = await fixture.openProduct();
-    expect(product.get('conversation').getSnapshot().sessions).toContainEqual(
-      expect.objectContaining({
-        id: draftId,
-        workspaceId,
-        agentPresetId: standard.id,
-        agentPresetVersion: 1,
-        agentPresetName: 'Standard',
-      }),
-    );
-    const reopenedCatalog = product.get('agentPresets').getSnapshot();
+    const reopened = await fixture.openProduct();
+    const reopenedCatalog = reopened.get('agentPresets').getSnapshot();
     expect(reopenedCatalog.presets).toHaveLength(2);
-    expect(reopenedCatalog.presets).toEqual(expect.arrayContaining([revised, custom]));
+    expect(reopenedCatalog.presets).toEqual(expect.arrayContaining([standard, custom]));
     expect(reopenedCatalog.defaultPresetId).toBe(custom.id);
     const defaultConversation = await sendJson('/api/conversations', { workspaceId });
     expect(defaultConversation.status).toBe(201);
