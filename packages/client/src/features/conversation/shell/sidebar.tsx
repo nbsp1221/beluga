@@ -300,6 +300,7 @@ export function ConversationSidebar({
                               session={session}
                               current={!mobile && session.id === sessionId}
                               {...sessionActivity(session)}
+                              nested
                               onClick={closeDrawer}
                             />
                           ))}

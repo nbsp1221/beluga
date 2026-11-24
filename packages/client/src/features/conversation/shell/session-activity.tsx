@@ -51,11 +51,14 @@ export function SessionActivity({
   return (
     <>
       <Separator className="my-2" />
-      <section aria-label="Activity" className="flex max-h-1/2 min-h-0 shrink-0 flex-col gap-1">
+      <section
+        aria-label="Activity"
+        className="flex max-h-1/2 min-h-0 shrink-0 flex-col gap-1 md:h-1/2"
+      >
         <h2 className="flex min-h-9 shrink-0 items-center px-2 text-xs font-medium text-muted-foreground">
           Activity
         </h2>
-        <div className="min-h-0 overflow-y-auto overscroll-contain">
+        <div className="min-h-0 overflow-y-auto overscroll-contain pb-1">
           {visibleGroups.length === 0 && (
             <p className="px-2 py-1 text-xs text-muted-foreground">No recent activity.</p>
           )}
