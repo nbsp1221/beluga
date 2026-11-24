@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { readFile, writeFile } from 'node:fs/promises';
+import { link, readFile, writeFile } from 'node:fs/promises';
 import { type Socket, createServer } from 'node:net';
 import { join } from 'node:path';
 import {
@@ -12,6 +12,7 @@ import { type TestContext, expect, test, vi } from 'vitest';
 import type { fixtureProvider } from './fixtures/model-provider.js';
 import {
   allCapabilities,
+  linkDirectory,
   origin,
   readTrajectory,
   resultText,
@@ -28,6 +29,29 @@ function latch() {
     release = resolve;
   });
   return { release, wait };
+}
+
+async function waitForStart<T>(
+  started: Promise<T>,
+  waitForCompletion: (signal: AbortSignal) => Promise<unknown>,
+  phase: string,
+) {
+  const controller = new AbortController();
+
+  async function failIfSettled(): Promise<never> {
+    try {
+      await waitForCompletion(controller.signal);
+    } catch (cause) {
+      throw new Error(`Submission failed before ${phase}.`, { cause });
+    }
+    throw new Error(`Submission completed before ${phase}.`);
+  }
+
+  try {
+    return await Promise.race([started, failIfSettled()]);
+  } finally {
+    controller.abort();
+  }
 }
 
 async function setupTools(
@@ -199,7 +223,12 @@ test('creates, overwrites, and edits a workspace file while preserving its line 
 test.for(['../other/README.md', 'alias/README.md', 'hardlink.txt'])(
   'blocks file mutations through %s',
   async (path, context) => {
-    const { execute, outside } = await setupTools(context, 'workspace-write');
+    const { execute, outside, project, other } = await setupTools(context, 'workspace-write');
+    if (path === 'alias/README.md') {
+      await linkDirectory(other, join(project, 'alias'));
+    } else if (path === 'hardlink.txt') {
+      await link(outside, join(project, path));
+    }
     const edits = [{ oldText: 'outside marker', newText: 'changed' }];
     expect((await execute('write', { path, content: 'denied' })).result?.isError).toBe(true);
     expect((await execute('edit', { path, edits })).result?.isError).toBe(true);
@@ -296,9 +325,16 @@ test(
       return release.wait;
     });
     const receipt = await send(shell, { command });
-    await modelSawShell.wait;
-    await setMode('workspace-write');
-    release.release();
+    try {
+      await waitForStart(
+        modelSawShell.wait,
+        (signal) => client.wait(receipt, { signal }),
+        'the model requested the shell',
+      );
+      await setMode('workspace-write');
+    } finally {
+      release.release();
+    }
     await client.wait(receipt, { signal: AbortSignal.timeout(5_000) });
     const recorded = (await history())
       .at(-1)
@@ -315,11 +351,17 @@ test(
   async (context) => {
     const { client, send, project, history } = await setupTools(context, 'full-access');
     const server = createServer();
+    let childSocket: Socket | undefined;
     const connected = new Promise<Socket>((resolve) => {
-      server.once('connection', resolve);
+      server.once('connection', (socket) => {
+        childSocket = socket;
+        socket.on('error', () => {});
+        resolve(socket);
+      });
     });
     context.onTestFinished(() => {
       server.close();
+      childSocket?.destroy();
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -335,11 +377,11 @@ test(
       ? `& '${process.execPath.replaceAll("'", "''")}' descendant.cjs`
       : `'${process.execPath.replaceAll("'", `'"'"'`)}' descendant.cjs & wait`;
     const receipt = await send(shell, { command, timeout: 12 });
-    const socket = await connected;
-    context.onTestFinished(() => {
-      socket.destroy();
-    });
-    socket.on('error', () => {});
+    const socket = await waitForStart(
+      connected,
+      (signal) => client.wait(receipt, { signal }),
+      'the shell child connected',
+    );
     const closed = once(socket, 'close').catch(() => {});
     expect((await client.abort()).aborted).toBe(true);
     await expect(

@@ -308,16 +308,14 @@ test.for(origins)(
 );
 
 test.for(origins)(
-  'submits and restores a recorded model request at $origin',
-  { timeout: 20_000 },
+  'loads the connected catalog and registers the product views at $origin',
   async (connection, context) => {
     const fixture = await setupConnectedProduct(context, connection);
-    const { origin, requests, admissions, workspace, fetchHost, search } = fixture;
     await fixture.login();
     await fixture.selectModel();
-    requests.length = 0;
+    fixture.requests.length = 0;
     const product = await fixture.openProduct();
-    expect(requests.toSorted()).toEqual(['/api/agent-presets', '/api/conversations']);
+    expect(fixture.requests.toSorted()).toEqual(['/api/agent-presets', '/api/conversations']);
     expect(
       product
         .get('conversationViews')
@@ -330,7 +328,18 @@ test.for(origins)(
         .getSettings()
         .map(({ id }) => id),
     ).toEqual(['providers', 'built-in-tools', 'agent-presets', 'workspaces']);
+  },
+);
 
+test.for(origins)(
+  'submits and restores a recorded model request at $origin',
+  { timeout: 20_000 },
+  async (connection, context) => {
+    const fixture = await setupConnectedProduct(context, connection);
+    const { origin, admissions, workspace, fetchHost, search } = fixture;
+    await fixture.login();
+    await fixture.selectModel();
+    const product = await fixture.openProduct();
     const workspaceId = await product.get('workspaces').addWorkspace(workspace);
     const conversation = product.get('conversation');
     expect(conversation.mode).toBe('connected');

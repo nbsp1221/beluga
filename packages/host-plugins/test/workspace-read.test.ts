@@ -1,91 +1,16 @@
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
+import { link, symlink, writeFile } from 'node:fs/promises';
 import { join, parse, relative, sep } from 'node:path';
-import {
-  type RunSettings,
-  agentPresetSchema,
-  agentPresetsSchema,
-  conversationCatalogSchema,
-  providerSettingsSchema,
-  sessionSummarySchema,
-  trajectoryModelInputResponseSchema,
-} from '@workspace/protocol/host';
+import { trajectoryModelInputResponseSchema } from '@workspace/protocol/host';
 import { expect, test } from 'vitest';
-import type { AgentCapability, AgentCapabilityPlugin } from '../src/agent-capabilities/host.js';
-import { fileReadCapability } from '../src/agent-capabilities/file/read/host.js';
-import type { ModelRequest } from './fixtures/model-provider.js';
-import { origin, readTrajectory, resultText, setupHarness } from './fixtures/harness.js';
-
-declare module '@workspace/runtime' {
-  interface Services {
-    duplicateRead: AgentCapability;
-  }
-}
-
-function readToolResult(calls: ModelRequest[]) {
-  expect([...calls[0].toolNames].sort()).toEqual(['read', 'task']);
-  const result = calls.at(-1)?.result;
-  assert(result);
-  return result;
-}
-
-test(
-  'rejects duplicate capability registrations before serving requests',
-  { timeout: 30_000 },
-  async (context) => {
-    const { boot } = await setupHarness(context);
-    const readService = fileReadCapability.service;
-    const duplicate: AgentCapabilityPlugin = {
-      service: 'duplicateRead',
-      plugin: {
-        id: 'test-duplicate-read',
-        requires: [readService],
-        provides: ['duplicateRead'],
-        setup(context) {
-          context.provide('duplicateRead', context.get(readService));
-        },
-      },
-    };
-    await expect(boot([fileReadCapability, duplicate])).rejects.toThrow(
-      /Duplicate agent capability: file\.read/,
-    );
-  },
-);
-
-test('requires authentication before accessing conversations or agent presets', async (context) => {
-  const { fetch, post } = await setupHarness(context);
-  expect((await post('/api/conversations', {})).status).toBe(401);
-  expect((await fetch(origin + '/api/agent-presets')).status).toBe(401);
-  expect((await post('/api/agent-presets', {})).status).toBe(401);
-});
-
-test('lists supported capabilities and an empty default model after login', async (context) => {
-  const { fetch, login, createPreset } = await setupHarness(context);
-  await login();
-  const preset = await createPreset();
-  const setDefaultPreset = await fetch(origin + '/api/agent-presets/default', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ presetId: preset.id }),
-  });
-  expect(setDefaultPreset.status).toBe(200);
-  const capabilityCatalog = agentPresetsSchema.parse(
-    await (await fetch(origin + '/api/agent-presets')).json(),
-  );
-  expect(
-    capabilityCatalog.capabilities.map(({ id, access }) => ({
-      id,
-      access,
-    })),
-  ).toEqual([
-    { id: 'file.read', access: 'files' },
-    { id: 'agent-instructions', access: undefined },
-  ]);
-  const emptyModels = providerSettingsSchema.parse(
-    await (await fetch(origin + '/api/providers')).json(),
-  );
-  expect(emptyModels.defaultModel).toBe(null);
-});
+import {
+  linkDirectory,
+  origin,
+  readToolResult,
+  readTrajectory,
+  resultText,
+  setupHarness,
+} from './fixtures/harness.js';
 
 test('distinguishes a missing workspace identifier from an unknown workspace', async (context) => {
   const { prepareWorkspace, post, createPreset } = await setupHarness(context);
@@ -107,47 +32,6 @@ test('distinguishes a missing workspace identifier from an unknown workspace', a
       })
     ).status,
   ).toBe(404);
-});
-
-test('persists the selected model and effort for a conversation', async (context) => {
-  const { prepareWorkspace, createPreset, fetch, post, turn, restart } =
-    await setupHarness(context);
-  const workspace = await prepareWorkspace();
-  const preset = await createPreset();
-  const initialRunSettings = { model: 'test-read/fixture', effort: 'high' };
-  const response = await post('/api/conversations', {
-    workspaceId: workspace.id,
-    agentPresetId: preset.id,
-    runSettings: initialRunSettings,
-  });
-  expect(response.status).toBe(201);
-  const plain = sessionSummarySchema.parse(await response.json());
-  expect(plain.runSettings).toEqual(initialRunSettings);
-  const initialRun = (await turn(plain.id, 'hello'))[0];
-  expect(initialRun.model).toBe('fixture');
-  expect(initialRun.effort).toBe('high');
-
-  const runSettingsPath = `${origin}/api/conversations/${plain.id}/run-settings`;
-
-  const changeSettings = (settings: RunSettings) =>
-    fetch(runSettingsPath, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-
-  expect((await changeSettings({ model: 'test-read/alternate', effort: 'high' })).status).toBe(400);
-
-  const nextRunSettings: RunSettings = { model: 'test-read/alternate', effort: 'low' };
-  expect((await changeSettings(nextRunSettings)).status).toBe(200);
-  const changedRun = (await turn(plain.id, 'hello again'))[0];
-  expect(changedRun.model).toBe('alternate');
-  expect(changedRun.effort).toBe('low');
-  await restart();
-  const reopened = conversationCatalogSchema.parse(
-    await (await fetch(origin + '/api/conversations')).json(),
-  );
-  expect(reopened.sessions.find(({ id }) => id === plain.id)?.runSettings).toEqual(nextRunSettings);
 });
 
 test(
@@ -301,7 +185,15 @@ test.for([
   'absolute external path',
   ...(process.platform === 'win32' ? [] : ['symlink.txt']),
 ])('reads fixture content through %s', async (path, context) => {
-  const { outside, prepareWorkspace, create, createPreset, turn } = await setupHarness(context);
+  const { outside, other, project, prepareWorkspace, create, createPreset, turn } =
+    await setupHarness(context);
+  if (path === 'alias/README.md') {
+    await linkDirectory(other, join(project, 'alias'));
+  } else if (path === 'hardlink.txt') {
+    await link(outside, join(project, path));
+  } else if (path === 'symlink.txt') {
+    await symlink(outside, join(project, path));
+  }
   const workspace = await prepareWorkspace();
   const preset = await createPreset(['file.read']);
   const reading = await create(workspace.id, preset.id);
@@ -324,129 +216,4 @@ test('opens a file relative to a registered filesystem root', async (context) =>
   );
   expect(result.isError).toBe(false);
   expect(resultText(result)).toMatch(/project README/);
-});
-
-test('returns a service error for a pinned capability while its plugin is unavailable', async (context) => {
-  const { prepareWorkspace, fetch, post, create, createPreset, turn, restart, sdk } =
-    await setupHarness(context);
-  const workspace = await prepareWorkspace();
-  const plainPreset = await createPreset();
-  const readPreset = await createPreset(['file.read']);
-  const plain = await create(workspace.id, plainPreset.id);
-  const reading = await create(workspace.id, readPreset.id);
-  readToolResult(await turn(reading.id, 'README.md'));
-  const presetsPath = '/api/agent-presets';
-  await restart([]);
-  expect(
-    agentPresetsSchema
-      .parse(await (await fetch(origin + presetsPath)).json())
-      .capabilities.map(({ id }) => id),
-  ).toEqual(['agent-instructions']);
-  expect((await turn(plain.id, 'README.md'))[0].toolNames).toEqual(['task']);
-  expect((await fetch(`${origin}/api/conversations/${reading.id}?view=history`)).status).toBe(200);
-  expect(
-    (
-      await post(`/api/conversations/${reading.id}`, {
-        kind: 'user',
-        body: 'README.md',
-      })
-    ).status,
-  ).toBe(503);
-
-  await restart();
-  expect(resultText(readToolResult(await turn(reading.id, 'README.md')))).toMatch(/project README/);
-  assert((await sdk(reading.id).history()).messages.length > 0);
-});
-
-test('keeps sessions pinned to their preset revision after edits and restart', async (context) => {
-  const { prepareWorkspace, fetch, post, create, turn, restart, sdk } = await setupHarness(context);
-  const workspace = await prepareWorkspace();
-  const definition = {
-    name: 'Third preset',
-    description: 'Reads the project',
-    instructions: 'PRESET_V1 Read project files.',
-    capabilities: ['file.read'],
-  };
-  const presetsPath = '/api/agent-presets';
-  expect((await post(presetsPath, { ...definition, capabilities: ['shell.exec'] })).status).toBe(
-    400,
-  );
-  expect(
-    (
-      await post(presetsPath, {
-        ...definition,
-        capabilities: ['workspace.read'],
-      })
-    ).status,
-  ).toBe(400);
-  const created = await post(presetsPath, definition);
-  expect(created.status).toBe(201);
-  const preset = agentPresetSchema.parse(await created.json());
-  expect(preset.capabilities).toEqual(['file.read']);
-  const older = await create(workspace.id, preset.id);
-  expect(older.agentPresetVersion).toBe(1);
-  expect(older.agentPresetCapabilities).toEqual(['file.read']);
-  const first = await turn(older.id, 'README.md');
-  expect(first[0].instructions).toMatch(/PRESET_V1/);
-  expect(resultText(readToolResult(first))).toMatch(/project README/);
-
-  const update = (capabilities: string[] = []) =>
-    fetch(origin + presetsPath + '/' + preset.id, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ...definition,
-        name: 'Third preset updated',
-        version: 1,
-        instructions: 'PRESET_V2 Chat without project files.',
-        capabilities,
-      }),
-    });
-
-  expect((await update(['workspace.read'])).status).toBe(400);
-  expect((await update()).status).toBe(200);
-  expect((await update()).status).toBe(409);
-  const draft = {
-    id: crypto.randomUUID(),
-    workspaceId: workspace.id,
-    agentPresetId: preset.id,
-  };
-  expect((await post('/api/conversations', { ...draft, agentPresetVersion: 1 })).status).toBe(409);
-  const current = sessionSummarySchema.parse(
-    await (await post('/api/conversations', { ...draft, agentPresetVersion: 2 })).json(),
-  );
-  expect(current.id).toBe(draft.id);
-  expect(current.agentPresetVersion).toBe(2);
-  expect(current.agentPresetCapabilities).toEqual([]);
-  expect(
-    sessionSummarySchema.parse(
-      await (await post('/api/conversations', { ...draft, agentPresetVersion: 2 })).json(),
-    ),
-  ).toEqual(current);
-  const second = await turn(current.id, 'README.md');
-  expect(second[0].instructions).toMatch(/PRESET_V2/);
-  expect(second[0].toolNames).toEqual(['task']);
-
-  await restart();
-  expect((await sdk(older.id).history()).messages.length).toBeGreaterThan(0);
-  const restored = await turn(older.id, 'README.md');
-  expect(restored[0].instructions).toMatch(/PRESET_V1/);
-  expect(resultText(readToolResult(restored))).toMatch(/project README/);
-  expect(resultText(readToolResult(await turn(older.id, '../other/README.md')))).toContain(
-    'outside marker',
-  );
-  const restoredCurrent = await turn(current.id, 'README.md');
-  expect(restoredCurrent[0].instructions).toMatch(/PRESET_V2/);
-  expect(restoredCurrent[0].toolNames).toEqual(['task']);
-  const reopened = conversationCatalogSchema.parse(
-    await (await fetch(origin + '/api/conversations')).json(),
-  );
-  expect(reopened.sessions.find(({ id }) => id === older.id)?.agentPresetCapabilities).toEqual([
-    'file.read',
-  ]);
-  expect(
-    agentPresetsSchema
-      .parse(await (await fetch(origin + presetsPath)).json())
-      .presets.find(({ id }) => id === preset.id)?.version,
-  ).toBe(2);
 });

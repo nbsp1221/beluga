@@ -60,6 +60,14 @@ test('discovers models and streams with an API key at the configured HTTP endpoi
   assert(address && typeof address !== 'string');
 
   const dataDir = await mkdtemp(join(tmpdir(), 'beluga-provider-'));
+  let closeProviders: (() => void) | undefined;
+  onTestFinished(async () => {
+    try {
+      closeProviders?.();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
   const models = createModels();
   const providers = openModelProviders(
     join(dataDir, 'providers.sqlite'),
@@ -67,10 +75,7 @@ test('discovers models and streams with an API key at the configured HTTP endpoi
   )((provider) => {
     models.setProvider(provider);
   });
-  onTestFinished(async () => {
-    providers.close();
-    await rm(dataDir, { recursive: true, force: true });
-  });
+  closeProviders = () => providers.close();
 
   await providers.connect({
     name: 'HTTP fixture',

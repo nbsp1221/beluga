@@ -1,5 +1,5 @@
 import type { TrajectoryPage } from '@workspace/protocol/host';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@workspace/ui/components/theme-provider';
 import { TooltipProvider } from '@workspace/ui/components/tooltip';
@@ -68,9 +68,14 @@ async function renderTrajectory({ onTestFinished }: TestContext) {
       return Response.json({ presets: [], capabilities: [], defaultPresetId: null });
     }
     if (url.pathname === '/api/conversations/history/trajectory') {
-      return url.searchParams.get('q')
-        ? Response.json({ requests: turns.slice(0, 1), before: null })
-        : Response.json({ requests: turns.slice(-50), before: 11 });
+      const query = url.searchParams.get('q');
+      if (query === 'original question') {
+        return Response.json({ requests: turns.slice(0, 1), before: null });
+      }
+      if (!query) {
+        return Response.json({ requests: turns.slice(-50), before: 11 });
+      }
+      return Response.json({ requests: [], before: null });
     }
     return new Response(null, { status: 404 });
   }
@@ -124,7 +129,8 @@ test('expands and collapses trajectory rows from the keyboard without losing foc
 test('reveals the related response in an older turn without clearing the search', async (context) => {
   const user = await renderTrajectory(context);
   const search = screen.getByRole('searchbox', { name: 'Search trajectory' });
-  fireEvent.change(search, { target: { value: 'original question' } });
+  search.focus();
+  await user.paste('original question');
   await user.click(await screen.findByRole('button', { name: 'Turn 1' }));
   const responseRow = { name: 'Assistant: Answer 1' };
   expect(screen.queryByRole('row', responseRow)).not.toBeInTheDocument();

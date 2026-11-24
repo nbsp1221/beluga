@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MessageMarkdown } from '@workspace/ui/components/message-markdown';
 import { ThemeProvider } from '@workspace/ui/components/theme-provider';
@@ -30,7 +30,8 @@ test('keeps an unsent draft when switching between Chat and Trajectory', async (
   expect(chat).toHaveAttribute('aria-selected', 'true');
 
   const composer = screen.getByRole('textbox', { name: 'Message' });
-  fireEvent.change(composer, { target: { value: 'Check the project layout' } });
+  composer.focus();
+  await user.keyboard('Check the project layout');
   expect(composer).toHaveValue('Check the project layout');
 
   await user.click(screen.getByRole('tab', { name: 'Trajectory' }));
@@ -70,8 +71,8 @@ test('starts a session in the selected folder and gives the same row its first t
     draft,
   );
   const composer = screen.getByRole('textbox', { name: 'Message' });
-  fireEvent.change(composer, { target: { value: 'Review the second project' } });
-  fireEvent.keyDown(composer, { key: 'Enter' });
+  composer.focus();
+  await user.keyboard('Review the second project{Enter}');
   expect(
     await screen.findByRole('link', { name: 'Review the second project', current: 'page' }),
   ).toHaveAttribute('href', draft.getAttribute('href'));

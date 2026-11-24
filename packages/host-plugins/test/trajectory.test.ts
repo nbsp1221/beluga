@@ -123,12 +123,7 @@ test('restores model inputs and only records initial or changed system prompts',
       estimatedTokens: {
         systemPrompt: 2,
         tools: 0,
-        messages: Math.ceil(
-          second.messages.reduce(
-            (bytes, message) => bytes + Buffer.byteLength(JSON.stringify(message)),
-            0,
-          ) / 4,
-        ),
+        messages: 28, // The three fixture messages contain 112 UTF-8 bytes.
       },
     });
     expect(reopened.modelInput('another-session', 'turn', 'model:2')).toBe(undefined);

@@ -3,7 +3,13 @@ import { mkdir, rename, symlink, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { workspaceInstructionsRootError } from '@workspace/protocol/host';
 import { type TestContext, expect, test } from 'vitest';
-import { allCapabilities, origin, readTrajectory, setupHarness } from './fixtures/harness.js';
+import {
+  allCapabilities,
+  linkDirectory,
+  origin,
+  readTrajectory,
+  setupHarness,
+} from './fixtures/harness.js';
 
 async function startSession(
   harness: Awaited<ReturnType<typeof setupHarness>>,
@@ -100,6 +106,9 @@ test.for([
   async ({ path }, context) => {
     const harness = await setupHarness(context);
     await writeFile(join(harness.other, 'AGENTS.md'), 'FIXTURE_OTHER_RULE');
+    if (path === 'alias/README.md') {
+      await linkDirectory(harness.other, join(harness.project, 'alias'));
+    }
     const session = await startSession(harness);
     const [, afterTool] = await harness.turn(session.id, path ?? harness.outside);
     expect(afterTool.result?.isError).toBe(false);
@@ -136,7 +145,7 @@ test('removes nested instructions when their folder becomes a link outside the w
   await writeFile(join(harness.other, 'AGENTS.md'), 'FIXTURE_OTHER_RULE');
   await harness.turn(session.id, 'docs/notes.txt');
   await rename(join(harness.project, 'docs'), join(harness.project, 'original-docs'));
-  await symlink(harness.other, join(harness.project, 'docs'), 'junction');
+  await linkDirectory(harness.other, join(harness.project, 'docs'));
   const [, afterFolderReplacement] = await harness.turn(session.id, 'README.md');
   expect(afterFolderReplacement.workspaceInstructions).not.toContain('FIXTURE_OTHER_RULE');
   const allRecords = await trajectoryRecords(harness, session.id);

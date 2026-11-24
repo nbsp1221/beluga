@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ToolResultMessage } from '@earendil-works/pi-ai';
@@ -58,11 +58,6 @@ export async function setupHarness(
 
   const outside = join(other, 'README.md');
   await writeFile(outside, 'outside marker');
-  await symlink(other, join(project, 'alias'), process.platform === 'win32' ? 'junction' : 'dir');
-  if (process.platform !== 'win32') {
-    await symlink(outside, join(project, 'symlink.txt'));
-  }
-  await link(outside, join(project, 'hardlink.txt'));
 
   const databasePath = join(root, 'chat.sqlite');
   const verifier = await createAccessCodeVerifier(accessCode);
@@ -248,6 +243,17 @@ export async function setupHarness(
 
 export const resultText = (result: ToolResultMessage) =>
   result.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('');
+
+export function linkDirectory(target: string, path: string) {
+  return symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
+export function readToolResult(calls: ModelRequest[]) {
+  expect(calls[0].toolNames.toSorted()).toEqual(['read', 'task']);
+  const result = calls.at(-1)?.result;
+  assert(result);
+  return result;
+}
 
 export const allCapabilities = [
   fileReadCapability,
