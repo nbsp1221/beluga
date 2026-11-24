@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-17
+last_reviewed: 2026-11-25
 ---
 
 # 현재 아키텍처
@@ -101,7 +101,7 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 
 [하네스 Host](../packages/host-plugins/src/harness/host.ts)는 세션에 고정된 프리셋과 접근 모드에 따라 도구를 골라 Flue `useTool`로 등록한다. 기능 플러그인의 `host.ts`가 모델 이름을 정하고 [공통 등록 함수](../packages/host-plugins/src/agent-capabilities/tool.ts)에서 [Pi 어댑터](../packages/host-plugins/src/pi/tool.ts)와 [세션 권한](../packages/host-plugins/src/workspace/tool-access.ts)을 연결한다. 어댑터는 Pi의 스키마·인자 준비·실행 결과를 변환하고, 등록 함수는 호출 ID와 중단 신호를 넘긴다. 현재 연결은 텍스트 결과를 지원한다. 중복 기능 ID는 Host 시작 시 거절하고, 필요한 기능이 빠진 세션의 새 생성·전송도 거절한다. [Flue 도구 등록](https://flueframework.com/docs/guide/tools/)
 
-[프로젝트 지침 플러그인](../packages/host-plugins/src/agent-instructions/host.ts)은 프리셋에 포함된 세션에서만 전역·프로젝트 지침을 읽는다. 첫 요청에서 초기 지침을, 성공한 파일 작업 뒤에는 변경된 지침을 출처가 붙은 Flue 신호로 추가한다. 모델은 신호를 사용자 역할의 컨텍스트로 받는다. Flue의 세션 상태가 범위와 본문을 비교하고, SDK 이력의 신호는 Chat에 표시한다. [Flue 2.3.1 패치](../patches/@flue__runtime@2.3.1.patch)는 시작 훅의 상태 반영과 실제 요청에 포함된 신호의 출처 관찰, 압축 후 기준 지침 재구성을 위한 신호 존재 확인을 지원한다. Trajectory는 해당 요청의 출처를 기록하고 파일명과 본문을 기존 서버 검색에 포함한다. 파일 위치와 사용 규칙은 [Host 운영](hosting.md#project-instructions)에 둔다.
+[프로젝트 지침 플러그인](../packages/host-plugins/src/agent-instructions/host.ts)은 프리셋에 포함된 세션에서만 전역·프로젝트 지침을 읽는다. 첫 요청에서 초기 지침을, 성공한 파일 작업 뒤에는 변경된 지침을 출처가 붙은 Flue 신호로 추가한다. 모델은 신호를 사용자 역할의 컨텍스트로 받는다. Flue의 세션 상태가 범위와 본문을 비교하고, SDK 이력의 신호는 Chat에 표시한다. [Flue 2.3.1 패치](../patches/@flue__runtime@2.3.1.patch)는 시작 훅의 상태 반영과 실제 요청에 포함된 신호의 출처 관찰을 지원한다. 압축으로 지침 신호가 사라졌으면 기존 지침 재구성 로직을 실행한다. 같은 응답의 컨텍스트 초과 재시도에서도 다음 모델 요청 전에 복원하고, 이미 전송을 기다리는 신호는 중복으로 넣지 않는다. Trajectory는 해당 요청의 출처를 기록하고 파일명과 본문을 기존 서버 검색에 포함한다. 파일 위치와 사용 규칙은 [Host 운영](hosting.md#project-instructions)에 둔다.
 
 모든 세션은 같은 Flue 라우터를 사용한다. 웹의 새 대화 목록은 카탈로그의 최신 프리셋을 표시한다. 새 세션의 기본 권한은 Read only다. [세션 카탈로그](../packages/host-plugins/src/workspace/catalog.ts)는 고정된 프리셋 버전과 선택한 실행 권한을 세션별로 SQLite에 저장한다. 웹에서 Full access를 선택할 때는 명시적 확인이 필요하다. 저장된 권한은 브라우저를 닫거나 같은 데이터 디렉터리로 Host를 재시작해도 유지되며, 낮은 권한으로 변경하면 그 값이 저장된다. Host는 프리셋과 실행 모드의 교집합을 모델에 노출하고, 변경·셸 호출 직전에도 권한을 확인한다.
 

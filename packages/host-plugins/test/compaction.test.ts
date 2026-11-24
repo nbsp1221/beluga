@@ -291,6 +291,43 @@ test('reports context usage for the selected model after it responds', async (co
   );
 });
 
+test('restores workspace instructions in the model request that retries an overflow', async (context) => {
+  const rule = 'FIXTURE_RULE_SURVIVES_OVERFLOW';
+  const harness = await setupHarness(context, [], undefined, () => compactionProvider());
+  await writeFile(join(harness.project, 'AGENTS.md'), rule);
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset(['agent-instructions']);
+  const { id } = await harness.create(workspace.id, preset.id);
+  for (let index = 0; index < 4; index++) {
+    await harness.turn(id, `Seed ${index}: ${'work '.repeat(4_000)}`);
+  }
+  await harness.turn(id, 'Trigger overflow');
+
+  const url = `${origin}/api/conversations/${id}/trajectory`;
+  const overflowTurn = (await readTrajectory(harness.fetch(url))).at(-1);
+  assert(overflowTurn);
+  expect(overflowTurn.records).toContainEqual(
+    expect.objectContaining({ kind: 'compaction', reason: 'overflow', status: 'completed' }),
+  );
+  const attempts = overflowTurn.records.filter(
+    (record) => record.kind === 'assistant' && record.purpose === 'agent',
+  );
+  expect(attempts).toMatchObject([
+    { status: 'failed' },
+    { status: 'completed', contextCompacted: true },
+  ]);
+  const inputs = await Promise.all(
+    attempts.map(async ({ id }) => {
+      const response = await harness.fetch(`${url}/${overflowTurn.id}/${id}`);
+      return trajectoryModelInputResponseSchema.parse(await response.json());
+    }),
+  );
+  expect(JSON.stringify(inputs[0].messages)).toContain(rule);
+  const retry = JSON.stringify(inputs[1].messages);
+  expect(retry).toContain(checkpoint);
+  expect(retry.match(new RegExp(rule, 'g')) ?? []).toHaveLength(1);
+});
+
 test.for(['failed', 'interrupted', 'overflow'] as const)(
   'records a %s compaction outcome from Flue',
   { timeout: 30_000 },

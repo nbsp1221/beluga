@@ -1,4 +1,10 @@
-import { useAgentStart, useDelivery, useDispatchMessage, usePersistentState } from '@flue/runtime';
+import {
+  type AgentStartContext,
+  useAgentStart,
+  useDelivery,
+  useDispatchMessage,
+  usePersistentState,
+} from '@flue/runtime';
 import type { AgentCapability, AgentCapabilityPlugin } from '../agent-capabilities/host.js';
 import {
   type InstructionOptions,
@@ -47,15 +53,18 @@ export function agentInstructionsCapability(
               initialInstructions,
             );
 
-            useAgentStart(async ({ append, hasContextSignal, signal }) => {
-              if (delivery.kind === 'signal' && delivery.type === unavailableRoot) {
-                throw new WorkspaceInstructionsRootError(undefined);
-              }
-              if (!cwd || delivery.kind !== 'user') {
+            async function reconcile(
+              { append, hasContextSignal, signal }: AgentStartContext,
+              restoring = false,
+            ) {
+              if (!cwd) {
                 return;
               }
               const currentIds = state.signalIds ?? [];
               const missingContext = currentIds.some((signalId) => !hasContextSignal(id, signalId));
+              if (restoring && !missingContext) {
+                return;
+              }
               const root = await resolveInstructionRoot(files, cwd, signal, options);
               if (state.instance === instance && state.root === root && !missingContext) {
                 return;
@@ -80,7 +89,19 @@ export function agentInstructionsCapability(
                 instance,
                 signalIds: changes ? [...signalIds, changes.attributes.id] : signalIds,
               });
-            });
+            }
+
+            useAgentStart(
+              async (context) => {
+                if (delivery.kind === 'signal' && delivery.type === unavailableRoot) {
+                  throw new WorkspaceInstructionsRootError(undefined);
+                }
+                if (delivery.kind === 'user') {
+                  await reconcile(context);
+                }
+              },
+              { restoreContext: (context) => reconcile(context, true) },
+            );
 
             return {
               async onFiles(paths, toolCallId, signal) {

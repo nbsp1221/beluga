@@ -1,5 +1,5 @@
 diff --git a/dist/agent-execution-store-HWARCScI.d.mts b/dist/agent-execution-store-HWARCScI.d.mts
-index c9814eee223d3e933e0f2affa778160245f86184..cc45c40c4e322a867fe80ae5fd93cc7c1a07f785 100644
+index c9814eee223d3e933e0f2affa778160245f86184..c533eef8ee45b92e1048a9e23efdcf97cff8282c 100644
 --- a/dist/agent-execution-store-HWARCScI.d.mts
 +++ b/dist/agent-execution-store-HWARCScI.d.mts
 @@ -644,6 +644,7 @@ interface AgentAppendMessage extends AgentSignalAppend {
@@ -10,8 +10,16 @@ index c9814eee223d3e933e0f2affa778160245f86184..cc45c40c4e322a867fe80ae5fd93cc7c
    readonly append: (message: AgentAppendMessage) => void;
    readonly harness: FlueHarness;
    readonly log: FlueLogger;
+@@ -685,6 +686,7 @@ interface AgentFinishContext {
+ /** One `useAgentStart` declaration; identity is the declaration index. */
+ interface AgentStartDeclaration {
+   run: (ctx: AgentStartContext) => void | Promise<void>;
++  restoreContext?: (ctx: AgentStartContext) => void | Promise<void>;
+ }
+ /** One `useAgentFinish` declaration; identity is the declaration index. */
+ interface AgentFinishDeclaration {
 diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
-index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..d138df7708765e4d92e98e07204ae1a771985f3e 100644
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..2046238b7281d62ff0b76bcc9e468f11fe78ecc3 100644
 --- a/dist/conversation-stream-store-BJbg7IHa.mjs
 +++ b/dist/conversation-stream-store-BJbg7IHa.mjs
 @@ -964,6 +964,7 @@ function toTurnMessage(message) {
@@ -40,37 +48,70 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..d138df7708765e4d92e98e07204ae1a7
  		if (options?.advance === false) return;
  		this.advanceDelivery?.({
  			kind: "signal",
-@@ -1633,15 +1635,17 @@ var Session = class {
+@@ -1622,26 +1624,37 @@ var Session = class {
+ 		if (!options?.joined && this.responseHasCompletedStep) return;
+ 		if (await this.hasAgentStartRun(submissionId)) return;
+ 		if (options?.joined) await this.prepareRerenderTurn();
+-		const declarations = this.outputChannel.agentStarts;
++		const { records, hasStateWrites } = await this.collectAgentStartEffects(this.outputChannel.agentStarts, signal);
++		await this.appendCanonical([
++			...records,
++			{
++				...this.canonicalEnvelope("agent_start_run"),
++				submissionId,
++				type: "agent_start_run"
++			}
++		]);
++		if (hasStateWrites) await this.prepareRerenderTurn();
++	}
++	async restoreAgentContext(signal) {
++		const declarations = this.outputChannel?.agentStarts.flatMap(({ restoreContext }) => restoreContext ? [{ run: restoreContext }] : []) ?? [];
++		if (declarations.length === 0) return;
++		const { records, hasStateWrites } = await this.collectAgentStartEffects(declarations, signal, { advance: false });
++		if (records.length > 0) await this.appendCanonical(records);
++		if (hasStateWrites) await this.prepareRerenderTurn();
++	}
++	async collectAgentStartEffects(declarations, signal, appendOptions) {
+ 		const outcomes = await Promise.allSettled(declarations.map((hook, index) => this.executeAgentStartHook(index, hook, signal)));
+ 		const failures = outcomes.flatMap((outcome) => outcome.status === "rejected" ? [outcome.reason] : []);
+ 		if (failures.length === 1) throw failures[0];
+ 		if (failures.length > 1) throw new AggregateError(failures, "[flue] Multiple useAgentStart callbacks threw.");
+ 		for (const outcome of outcomes) {
+ 			if (outcome.status !== "fulfilled") continue;
+-			for (const message of outcome.value) this.enqueueSignalAppend(message);
++			for (const message of outcome.value) this.enqueueSignalAppend(message, appendOptions);
  		}
  		const parentId = this.pendingSignalAppends.length > 0 ? await this.conversationWriter.getConversationLeaf(this.conversationId) : null;
  		const { records: signalRecords } = this.drainSignalAppendRecords(parentId);
-+		const stateRecords = this.drainHookStateRecords();
- 		await this.appendCanonical([
- 			...signalRecords,
+-		await this.appendCanonical([
+-			...signalRecords,
 -			...this.drainHookStateRecords(),
-+			...stateRecords,
- 			{
- 				...this.canonicalEnvelope("agent_start_run"),
- 				submissionId,
- 				type: "agent_start_run"
- 			}
- 		]);
-+		if (stateRecords.length > 0) await this.prepareRerenderTurn();
+-			{
+-				...this.canonicalEnvelope("agent_start_run"),
+-				submissionId,
+-				type: "agent_start_run"
+-			}
+-		]);
++		const stateRecords = this.drainHookStateRecords();
++		return { records: [...signalRecords, ...stateRecords], hasStateWrites: stateRecords.length > 0 };
  	}
  	/**
  	* All durable records of one type for this conversation and submission, in
-@@ -1686,6 +1690,10 @@ var Session = class {
+@@ -1686,6 +1699,13 @@ var Session = class {
  				appends.push(assertAppendMessage(message));
  			},
  			log: this.createHookLogger("useAgentStart", index),
-+			hasContextSignal: (type, id) => this.agentLoop.state.messages.some((message) => {
-+				const source = message[Symbol.for("flue.contextSignal")];
-+				return source?.type === type && source.attributes?.id === id;
-+			}),
++			hasContextSignal: (type, id) => {
++				const matches = (message) => {
++					const source = message[Symbol.for("flue.contextSignal")];
++					return source?.type === type && source.attributes?.id === id;
++				};
++				return this.agentLoop.state.messages.some(matches) || this.agentLoop.peekQueuedMessages().some(matches);
++			},
  			signal,
  			get harness() {
  				harness ??= session.createInvocationHarness(generateInvocationId(), signal);
-@@ -1695,6 +1703,7 @@ var Session = class {
+@@ -1695,6 +1715,7 @@ var Session = class {
  		try {
  			await hook.run(ctx);
  		} catch (error) {
@@ -78,7 +119,15 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..d138df7708765e4d92e98e07204ae1a7
  			throw new Error(`[flue] A useAgentStart callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
  		} finally {
  			appendWindowOpen = false;
-@@ -5118,6 +5127,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
+@@ -4133,6 +4154,7 @@ var Session = class {
+ 			}
+ 			if (overflow || retryable) throwIfHalted();
+ 			try {
++				if (this.contextCompacted && (overflow || options.resume)) await this.restoreAgentContext(options.signal);
+ 				await start();
+ 				await this.agentLoop.waitForIdle();
+ 			} catch (error) {
+@@ -5118,6 +5140,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
  	emitCoordinatorEvent({
  		type: "submission_settled",
  		submissionId: submission.submissionId,
@@ -86,7 +135,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..d138df7708765e4d92e98e07204ae1a7
  		outcome,
  		error: serializeSubmissionError(error)
  	}, errorInfo);
-@@ -5310,6 +5320,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
+@@ -5310,6 +5333,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
  	const event = ctx.createEvent({
  		type: "submission_settled",
  		submissionId: attempt.submissionId,
@@ -94,7 +143,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..d138df7708765e4d92e98e07204ae1a7
  		outcome,
  		...outcome === "completed" ? {} : { error: serializeSubmissionError(error) }
  	});
-@@ -5419,6 +5430,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
+@@ -5419,6 +5443,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
  	emitCoordinatorEvent?.({
  		type: "submission_settled",
  		submissionId: pending.submissionId,
@@ -127,8 +176,42 @@ index 4af08391f41d94893ede44aede6614283528b44a..b27bc97da1d6947d26425a6be4e51469
  				sourceEntry: entry
  			});
  			index += 1;
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..3bfe58b2dd3112bb0a24952bd6d012a21fafda5f 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -333,7 +333,9 @@ declare function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise
+  *   eat it — durable state and disk. A signal is the announcement, not the
+  *   storage.
+  */
+-declare function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>): void;
++declare function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>, options?: {
++  restoreContext?: (ctx: AgentStartContext) => void | Promise<void>;
++}): void;
+ //#endregion
+ //#region src/hooks/use-data-writer.d.ts
+ /**
+diff --git a/dist/index.mjs b/dist/index.mjs
+index ce5ad79e75c6e9820e7e213bb79c981445580fe2..a3017563f5dcc85fab64bf3ab306cc613fb2b34e 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -386,11 +386,11 @@ function useAgentFinish(run) {
+ *   eat it — durable state and disk. A signal is the announcement, not the
+ *   storage.
+ */
+-function useAgentStart(run) {
++function useAgentStart(run, { restoreContext } = {}) {
+ 	const frame = requireRenderFrame("useAgentStart");
+ 	if (frame.kind === "subagent") throw new Error("[flue] useAgentStart() is not available in a subagent render. Lifecycle hooks run against the root agent's durable record log; a delegate runs a detached task — do its up-front work in the task itself.");
+-	if (typeof run !== "function") throw new Error("[flue] useAgentStart(run) takes a callback as its only argument.");
+-	frame.agentStarts.push({ run });
++	if (typeof run !== "function") throw new Error("[flue] useAgentStart(run) requires a callback.");
++	frame.agentStarts.push({ run, restoreContext });
+ }
+ //#endregion
+ //#region src/hooks/use-data-writer.ts
 diff --git a/dist/types-BBdvLv_l.d.mts b/dist/types-BBdvLv_l.d.mts
-index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..2016e7c66a458c9c421bd9d8bdfb593d8f3b313b 100644
+index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..4fea4bddfabeca5a072731824e7a82cb4d8cc519 100644
 --- a/dist/types-BBdvLv_l.d.mts
 +++ b/dist/types-BBdvLv_l.d.mts
 @@ -1437,6 +1437,7 @@ type FlueEventVariant = {
