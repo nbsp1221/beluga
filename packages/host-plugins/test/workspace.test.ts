@@ -14,7 +14,7 @@ const definition = {
   capabilities: [],
 };
 
-test('stores only pinned preset revisions and assigns the first title once', () => {
+test('creates sessions only from a saved preset revision', () => {
   using db = new DatabaseSync(':memory:');
   const catalog = createWorkspaceCatalog(db);
   const workspace = catalog.add(process.cwd()).workspace;
@@ -31,13 +31,22 @@ test('stores only pinned preset revisions and assigns the first title once', () 
   expect(catalog.list().sessions).toEqual([]);
 
   const session = catalog.createSession(workspace.id, preset, 'session', settings);
+  expect(createWorkspaceCatalog(db).findSession(session.id)?.agentPresetVersion).toBe(1);
+});
+
+test('assigns a session title only once, even when it matches the UI placeholder', () => {
+  using db = new DatabaseSync(':memory:');
+  const catalog = createWorkspaceCatalog(db);
+  const workspace = catalog.add(process.cwd()).workspace;
+  const preset = catalog.presets.create(definition);
+  const session = catalog.createSession(workspace.id, preset, 'session', {
+    model: 'provider/model',
+    effort: 'default',
+  });
   expect(session.title).toBeNull();
   catalog.setFirstTitle(session.id, 'New session');
   catalog.setFirstTitle(session.id, 'Second message');
-  expect(createWorkspaceCatalog(db).findSession(session.id)).toMatchObject({
-    agentPresetVersion: 1,
-    title: 'New session',
-  });
+  expect(createWorkspaceCatalog(db).findSession(session.id)?.title).toBe('New session');
 });
 
 test('keeps saved conversation settings when the default model changes', async ({

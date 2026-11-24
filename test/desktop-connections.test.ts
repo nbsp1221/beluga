@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vitest';
+import { type TestContext, expect, test, vi } from 'vitest';
 import { createDesktopConnections } from '../apps/desktop/host/desktop-connections.js';
 
 const desktop = 'http://127.0.0.1:32100';
@@ -6,9 +6,11 @@ const base = '/api/desktop/connections';
 const sessionA = '00112233-4455-6677-8899-aabbccddeeff';
 const sessionB = '11223344-5566-7788-99aa-bbccddeeff00';
 
-test('binds sessions and product requests to their configured HTTP or HTTPS Host', async ({
-  onTestFinished,
-}) => {
+const http = 'http://a.example:8917';
+const https = 'https://a.example:8917';
+const conversation = '/api/conversations/shared-id';
+
+function desktopFixture({ onTestFinished }: TestContext) {
   const service = createDesktopConnections(desktop, () => true);
   onTestFinished(() => {
     service.stop();
@@ -77,12 +79,14 @@ test('binds sessions and product requests to their configured HTTP or HTTPS Host
     return response;
   };
 
-  const http = 'http://a.example:8917';
-  const https = 'https://a.example:8917';
+  return request;
+}
+
+test('reuses a saved desktop session only for the same Host origin', async (context) => {
+  const request = desktopFixture(context);
   const login = await request('', 'POST', { address: http, code: 'fixture' });
   expect(login.status).toBe(201);
 
-  const first = await readConnectionId(login);
   const cookies = login.headers.getSetCookie();
   expect(cookies[0]).toContain('HttpOnly');
   expect(cookies[0]).toContain('Secure');
@@ -108,15 +112,38 @@ test('binds sessions and product requests to their configured HTTP or HTTPS Host
     cookies[0].split(';')[0],
   );
   expect(crossOrigin.status).toBe(401);
-  const next = await request('', 'POST', { address: https, code: 'fixture' });
-  const second = await readConnectionId(next);
-  const conversation = '/api/conversations/shared-id';
+});
+
+test('binds each desktop connection to its Host and disconnects it independently', async (context) => {
+  const request = desktopFixture(context);
+  const first = await readConnectionId(
+    await request('', 'POST', { address: http, code: 'fixture' }),
+  );
+  const second = await readConnectionId(
+    await request('', 'POST', { address: https, code: 'fixture' }),
+  );
   expect(await (await request('/' + first + conversation)).json()).toEqual({ origin: http });
   expect(await (await request('/' + second + conversation)).json()).toEqual({ origin: https });
+  expect((await request('/' + first, 'DELETE')).status).toBe(204);
+  expect((await request('/' + first + conversation)).status).toBe(404);
+  expect(await (await request('/' + second + conversation)).json()).toEqual({ origin: https });
+});
+
+test('forwards the activity stream from the connected Host', async (context) => {
+  const request = desktopFixture(context);
+  const second = await readConnectionId(
+    await request('', 'POST', { address: https, code: 'fixture' }),
+  );
   const statusStream = await request('/' + second + '/api/conversations/activity');
   expect(statusStream.headers.get('content-type')).toBe('text/event-stream');
   expect(await statusStream.text()).toBe('data: {"session":{"running":true}}\n\n');
+});
 
+test('rewrites a Host submission receipt to the desktop connection', async (context) => {
+  const request = desktopFixture(context);
+  const first = await readConnectionId(
+    await request('', 'POST', { address: http, code: 'fixture' }),
+  );
   const receipt = await request('/' + first + conversation, 'POST', { body: 'Hello' });
   expect(receipt.headers.get('set-cookie')).toBeNull();
   expect(receipt.headers.get('location')).toBeNull();
@@ -124,15 +151,18 @@ test('binds sessions and product requests to their configured HTTP or HTTPS Host
   expect(await receipt.json()).toMatchObject({
     streamUrl: desktop + base + '/' + first + conversation,
   });
+});
 
+test('rejects unsupported Host responses and routes at the desktop boundary', async (context) => {
+  const request = desktopFixture(context);
+  const first = await readConnectionId(
+    await request('', 'POST', { address: http, code: 'fixture' }),
+  );
   const unsupported = await request('/' + first + conversation + '/usage');
   expect(unsupported.status).toBe(502);
   expect(unsupported.headers.get('clear-site-data')).toBeNull();
   expect(unsupported.headers.get('x-content-type-options')).toBe('nosniff');
   expect((await request('/' + first + '/api/auth/session')).status).toBe(404);
-  expect((await request('/' + first, 'DELETE')).status).toBe(204);
-  expect((await request('/' + first + conversation)).status).toBe(404);
-  expect(await (await request('/' + second + conversation)).json()).toEqual({ origin: https });
 });
 
 test('requires local desktop authentication and a same-origin mutation', async () => {

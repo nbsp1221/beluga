@@ -10,6 +10,7 @@ Beluga is an independent, plugin-composed agent harness inspired by DSH. Keep ch
 - Changing an architectural choice: the relevant [decision record](docs/decisions/).
 - Writing or deleting documentation: [documentation policy](docs/README.md).
 - Product setup: [README](README.md). Source builds and checks: [development](docs/development.md). Scripts and manifests are authoritative for executable commands and versions.
+- Writing or reviewing tests: [test guidance and examples](docs/development.md#write-and-review-tests). Start with a focused test at the same boundary and give each independent behavior its own case.
 
 ## Engineering boundaries
 

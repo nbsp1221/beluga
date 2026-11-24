@@ -55,9 +55,6 @@ export async function setupHarness(
   await mkdir(other);
   await writeFile(join(project, 'README.md'), 'project README\nsecond line\nthird line\n');
   await writeFile(join(project, 'docs', 'notes.txt'), 'other in-project file');
-  await writeFile(join(project, 'unicode.txt'), ('\uD55C'.repeat(100) + '\n').repeat(200));
-  await writeFile(join(project, 'long.txt'), 'line\n'.repeat(2_001));
-  await writeFile(join(project, 'large.txt'), 'a'.repeat(1_048_577));
 
   const outside = join(other, 'README.md');
   await writeFile(outside, 'outside marker');

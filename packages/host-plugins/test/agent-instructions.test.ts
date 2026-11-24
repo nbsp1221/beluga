@@ -1,84 +1,145 @@
+import assert from 'node:assert/strict';
 import { mkdir, rename, symlink, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { workspaceInstructionsRootError } from '@workspace/protocol/host';
-import { expect, test } from 'vitest';
+import { type TestContext, expect, test } from 'vitest';
 import { allCapabilities, origin, readTrajectory, setupHarness } from './fixtures/harness.js';
 
-test('only selected presets discover instructions and record when they enter model requests', async (context) => {
+async function startSession(
+  harness: Awaited<ReturnType<typeof setupHarness>>,
+  capabilities = ['agent-instructions', 'file.read'],
+) {
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset(capabilities);
+  return harness.create(workspace.id, preset.id);
+}
+
+async function trajectoryRecords(
+  harness: Awaited<ReturnType<typeof setupHarness>>,
+  sessionId: string,
+) {
+  const url = `${origin}/api/conversations/${sessionId}/trajectory`;
+  return (await readTrajectory(harness.fetch(url))).flatMap(({ records }) => records);
+}
+
+async function setupNestedInstructions(context: TestContext) {
   const harness = await setupHarness(context);
-  const { create, createPreset, databasePath, other, project, prepareWorkspace, restart, turn } =
-    harness;
-  const globalFile = join(dirname(databasePath), 'AGENTS.md');
-  const nestedFile = join(project, 'docs', 'AGENTS.md');
+  const nestedFile = join(harness.project, 'docs', 'AGENTS.md');
+  await writeFile(nestedFile, 'FIXTURE_NESTED_RULE');
+  return { harness, nestedFile, session: await startSession(harness) };
+}
+
+test('omits workspace instructions when the preset does not select the capability', async (context) => {
+  const harness = await setupHarness(context);
+  await writeFile(join(harness.project, 'AGENTS.md'), 'FIXTURE_ROOT_RULE');
+  const session = await startSession(harness, []);
+  const [request] = await harness.turn(session.id, 'README.md');
+  expect(request.workspaceInstructions).toBe('');
+  expect(request.instructions).not.toContain('FIXTURE_ROOT_RULE');
+});
+
+test('applies Host instructions before the workspace override in the initial model context', async (context) => {
+  const harness = await setupHarness(context);
+  const { project, databasePath } = harness;
   await mkdir(join(project, 'unvisited'));
   await Promise.all([
     writeFile(join(project, '.git'), 'gitdir: /fixture/worktree'),
-    writeFile(globalFile, 'FIXTURE_GLOBAL_RULE'),
+    writeFile(join(dirname(databasePath), 'AGENTS.md'), 'FIXTURE_GLOBAL_RULE'),
     writeFile(join(project, 'AGENTS.md'), 'FIXTURE_ROOT_RULE'),
     writeFile(join(project, 'AGENTS.override.md'), 'FIXTURE_ROOT_OVERRIDE'),
-    writeFile(nestedFile, 'FIXTURE_NESTED_RULE'),
+    writeFile(join(project, 'docs', 'AGENTS.md'), 'FIXTURE_NESTED_RULE'),
     writeFile(join(project, 'CLAUDE.md'), 'FIXTURE_CLAUDE_RULE'),
     writeFile(join(project, 'unvisited', 'AGENTS.md'), 'FIXTURE_UNVISITED_RULE'),
-    writeFile(join(other, 'AGENTS.md'), 'FIXTURE_OTHER_RULE'),
   ]);
-  const workspace = await prepareWorkspace();
-  const chatPreset = await createPreset();
-  const chat = await create(workspace.id, chatPreset.id);
-  const [plain] = await turn(chat.id, 'README.md');
-  expect(plain.workspaceInstructions).toBe('');
-  const preset = await createPreset(['agent-instructions', 'file.read']);
-  const session = await create(workspace.id, preset.id);
-
-  const [first, afterTool] = await turn(session.id, 'docs/notes.txt');
+  const session = await startSession(harness);
+  const [first, afterTool] = await harness.turn(session.id, 'docs/notes.txt');
   expect(first.instructions).not.toContain('FIXTURE_GLOBAL_RULE');
   expect(first.workspaceInstructions).toMatch(/FIXTURE_GLOBAL_RULE[\s\S]*FIXTURE_ROOT_OVERRIDE/);
-  expect(first.workspaceInstructions).not.toMatch(
-    /FIXTURE_(ROOT_RULE|NESTED|UNVISITED|CLAUDE|OTHER)/,
-  );
+  expect(first.workspaceInstructions).not.toMatch(/FIXTURE_(ROOT_RULE|NESTED|UNVISITED|CLAUDE)/);
+  const records = await trajectoryRecords(harness, session.id);
   expect(afterTool.workspaceInstructions.match(/FIXTURE_NESTED_RULE/g)).toHaveLength(1);
-
-  const [, repeated] = await turn(session.id, 'docs/notes.txt');
-  expect(repeated.workspaceInstructions.match(/FIXTURE_NESTED_RULE/g)).toHaveLength(1);
-  const [, external] = await turn(session.id, '../other/README.md');
-  expect(external.result?.isError).toBe(false);
-  expect(external.workspaceInstructions).not.toContain('FIXTURE_OTHER_RULE');
-  const [, linked] = await turn(session.id, 'alias/README.md');
-  expect(linked.result?.isError).toBe(false);
-  expect(linked.workspaceInstructions).not.toContain('FIXTURE_OTHER_RULE');
-
-  const trajectory = origin + '/api/conversations/' + session.id + '/trajectory';
-  const records = (await readTrajectory(harness.fetch(trajectory))).flatMap(
-    ({ records }) => records,
-  );
-  const contexts = records.filter((record) => record.kind === 'context');
-  expect(contexts.map(({ text }) => text)).toEqual([
+  expect(records.filter((record) => record.kind === 'context').map(({ text }) => text)).toEqual([
     'Host AGENTS.md, AGENTS.override.md',
     'docs/AGENTS.md',
   ]);
+});
+
+test('discovers nested instructions on access and traces their first application', async (context) => {
+  const { harness, session } = await setupNestedInstructions(context);
+  const [first, afterTool] = await harness.turn(session.id, 'docs/notes.txt');
+  expect(first.workspaceInstructions).not.toContain('FIXTURE_NESTED_RULE');
+  expect(afterTool.workspaceInstructions.match(/FIXTURE_NESTED_RULE/g)).toHaveLength(1);
+  const records = await trajectoryRecords(harness, session.id);
+  const contexts = records.filter((record) => record.kind === 'context');
   const nested = contexts.find(({ text }) => text === 'docs/AGENTS.md');
   expect(nested).toMatchObject({ changes: [{ action: 'add', path: 'docs/AGENTS.md' }] });
   expect(records.find(({ id }) => id === nested?.modelRequestId)?.kind).toBe('assistant');
-  expect(await readTrajectory(harness.fetch(trajectory + '?q=docs%2Fagents.md'))).toHaveLength(1);
+  const url = `${origin}/api/conversations/${session.id}/trajectory?q=docs%2Fagents.md`;
+  const matches = await readTrajectory(harness.fetch(url));
+  expect(matches).toHaveLength(1);
+  expect(matches[0].records).toContainEqual(nested);
+});
 
+test('applies and records unchanged nested instructions only once', async (context) => {
+  const { harness, session } = await setupNestedInstructions(context);
+  await harness.turn(session.id, 'docs/notes.txt');
+  const [, repeated] = await harness.turn(session.id, 'docs/notes.txt');
+  expect(repeated.workspaceInstructions.match(/FIXTURE_NESTED_RULE/g)).toHaveLength(1);
+  const records = await trajectoryRecords(harness, session.id);
+  expect(
+    records.filter((record) => record.kind === 'context' && record.text === 'docs/AGENTS.md'),
+  ).toHaveLength(1);
+});
+
+test.for([
+  { name: 'a relative path', path: '../other/README.md' },
+  { name: 'a directory link', path: 'alias/README.md' },
+  { name: 'an absolute path', path: null },
+])(
+  'does not discover instructions outside the workspace when reading $name',
+  async ({ path }, context) => {
+    const harness = await setupHarness(context);
+    await writeFile(join(harness.other, 'AGENTS.md'), 'FIXTURE_OTHER_RULE');
+    const session = await startSession(harness);
+    const [, afterTool] = await harness.turn(session.id, path ?? harness.outside);
+    expect(afterTool.result?.isError).toBe(false);
+    expect(afterTool.workspaceInstructions).not.toContain('FIXTURE_OTHER_RULE');
+  },
+);
+
+test('reloads Host instructions and restores previously discovered scopes after restart', async (context) => {
+  const { harness, session } = await setupNestedInstructions(context);
+  const globalFile = join(dirname(harness.databasePath), 'AGENTS.md');
+  await writeFile(globalFile, 'FIXTURE_GLOBAL_RULE');
+  await harness.turn(session.id, 'docs/notes.txt');
   await writeFile(globalFile, 'FIXTURE_UPDATED_GLOBAL');
-  await restart();
-  const [restored] = await turn(session.id, 'README.md');
+  await harness.restart();
+  const [restored] = await harness.turn(session.id, 'README.md');
   expect(restored.workspaceInstructions).toContain('FIXTURE_UPDATED_GLOBAL');
   expect(restored.workspaceInstructions.match(/FIXTURE_NESTED_RULE/g)).toHaveLength(1);
+});
+
+test('removes a deleted instruction file and rediscovers it on later access', async (context) => {
+  const { harness, nestedFile, session } = await setupNestedInstructions(context);
+  await harness.turn(session.id, 'docs/notes.txt');
   await unlink(nestedFile);
-  const [, afterRemoval] = await turn(session.id, 'README.md');
+  const [, afterRemoval] = await harness.turn(session.id, 'README.md');
   expect(afterRemoval.workspaceInstructions).toContain('Instructions removed: "docs/AGENTS.md"');
 
   await writeFile(nestedFile, 'FIXTURE_REDISCOVERED_RULE');
-  const [, rediscovered] = await turn(session.id, 'docs/notes.txt');
+  const [, rediscovered] = await harness.turn(session.id, 'docs/notes.txt');
   expect(rediscovered.workspaceInstructions).toContain('FIXTURE_REDISCOVERED_RULE');
-  await rename(join(project, 'docs'), join(project, 'original-docs'));
-  await symlink(other, join(project, 'docs'), 'junction');
-  const [, afterFolderReplacement] = await turn(session.id, 'README.md');
+});
+
+test('removes nested instructions when their folder becomes a link outside the workspace', async (context) => {
+  const { harness, session } = await setupNestedInstructions(context);
+  await writeFile(join(harness.other, 'AGENTS.md'), 'FIXTURE_OTHER_RULE');
+  await harness.turn(session.id, 'docs/notes.txt');
+  await rename(join(harness.project, 'docs'), join(harness.project, 'original-docs'));
+  await symlink(harness.other, join(harness.project, 'docs'), 'junction');
+  const [, afterFolderReplacement] = await harness.turn(session.id, 'README.md');
   expect(afterFolderReplacement.workspaceInstructions).not.toContain('FIXTURE_OTHER_RULE');
-  const allRecords = (await readTrajectory(harness.fetch(trajectory))).flatMap(
-    ({ records }) => records,
-  );
+  const allRecords = await trajectoryRecords(harness, session.id);
   expect(allRecords.filter((record) => record.kind === 'context').at(-1)?.changes).toEqual([
     { action: 'remove', path: 'docs/AGENTS.md' },
   ]);
@@ -93,18 +154,13 @@ test('keeps Host instructions separate from project instructions in a folder nam
     writeFile(join(folder, 'AGENTS.md'), 'FIXTURE_LOCAL_RULE'),
     writeFile(join(folder, 'notes.txt'), 'Fixture file'),
   ]);
-  const workspace = await harness.prepareWorkspace();
-  const preset = await harness.createPreset(['agent-instructions', 'file.read']);
-  const session = await harness.create(workspace.id, preset.id);
+  const session = await startSession(harness);
   const [first, second] = await harness.turn(session.id, 'Host/notes.txt');
   expect(first.workspaceInstructions).toContain('FIXTURE_GLOBAL_RULE');
   expect(first.workspaceInstructions).not.toContain('FIXTURE_LOCAL_RULE');
   expect(second.workspaceInstructions).toMatch(/FIXTURE_GLOBAL_RULE[\s\S]*FIXTURE_LOCAL_RULE/);
 
-  const trajectory = origin + '/api/conversations/' + session.id + '/trajectory';
-  const records = (await readTrajectory(harness.fetch(trajectory))).flatMap(
-    ({ records }) => records,
-  );
+  const records = await trajectoryRecords(harness, session.id);
   expect(
     records.filter((record) => record.kind === 'context').flatMap((record) => record.changes),
   ).toEqual([
@@ -113,7 +169,7 @@ test('keeps Host instructions separate from project instructions in a folder nam
   ]);
 });
 
-test('loads instructions after successful writes and cuts UTF-8 at the project budget', async (context) => {
+test('discovers nested instructions after a successful write', async (context) => {
   const harness = await setupHarness(context, allCapabilities);
   const workspace = await harness.prepareWorkspace();
   const preset = await harness.createPreset(['agent-instructions', 'file.read', 'file.write']);
@@ -135,22 +191,24 @@ test('loads instructions after successful writes and cuts UTF-8 at the project b
   expect(afterWrite.workspaceInstructions).toMatch(/FIXTURE_PROJECT[\s\S]*FIXTURE_WRITE_SCOPE/);
   expect(afterWrite.result?.isError).toBe(false);
   expect(JSON.stringify(afterWrite.result)).not.toContain('FIXTURE_WRITE_SCOPE');
+});
 
-  await writeFile(file, '가'.repeat(24_000) + 'FIXTURE_BEYOND_LIMIT');
+test('trims updated instructions to the UTF-8 budget and reuses the bounded context on access', async (context) => {
+  const { harness, nestedFile, session } = await setupNestedInstructions(context);
+  await writeFile(join(harness.project, 'AGENTS.md'), 'FIXTURE_PROJECT');
+  await harness.turn(session.id, 'docs/notes.txt');
+  await writeFile(nestedFile, '가'.repeat(24_000) + 'FIXTURE_BEYOND_LIMIT');
   const [, bounded] = await harness.turn(session.id, 'README.md');
   expect(bounded.workspaceInstructions).toContain('docs/AGENTS.md" (truncated)');
   expect(bounded.workspaceInstructions).toContain('omitted due to the size limit');
   expect(bounded.workspaceInstructions).not.toMatch(/FIXTURE_BEYOND_LIMIT|�/);
-  const trajectory = origin + '/api/conversations/' + session.id + '/trajectory';
-  const records = (await readTrajectory(harness.fetch(trajectory))).flatMap(
-    ({ records }) => records,
-  );
+  const records = await trajectoryRecords(harness, session.id);
   const update = records.findLast((record) => record.kind === 'context');
-  expect(Buffer.byteLength(update?.body ?? '')).toBeLessThanOrEqual(64 * 1024);
-  await harness.turn(session.id, 'docs/new.txt');
-  const repeated = (await readTrajectory(harness.fetch(trajectory))).flatMap(
-    ({ records }) => records,
-  );
+  assert(update?.body);
+  expect(update.body).toContain('가');
+  expect(Buffer.byteLength(update.body)).toBeLessThanOrEqual(64 * 1024);
+  await harness.turn(session.id, 'docs/notes.txt');
+  const repeated = await trajectoryRecords(harness, session.id);
   expect(repeated.filter((record) => record.kind === 'context').map(({ id }) => id)).toEqual(
     records.filter((record) => record.kind === 'context').map(({ id }) => id),
   );

@@ -4,13 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@workspace/ui/components/theme-provider';
 import { TooltipProvider } from '@workspace/ui/components/tooltip';
 import { MemoryRouter } from 'react-router';
-import { expect, test } from 'vitest';
+import { type TestContext, expect, test } from 'vitest';
 import { App } from './App.tsx';
 import { createProduct } from './product.ts';
 
-test('reveals the related response in an older turn without clearing the search', async ({
-  onTestFinished,
-}) => {
+async function renderTrajectory({ onTestFinished }: TestContext) {
   const user = userEvent.setup();
   const turns: TrajectoryPage['requests'] = Array.from({ length: 60 }, (_, index) => {
     const turn = index + 1;
@@ -95,6 +93,11 @@ test('reveals the related response in an older turn without clearing the search'
   await user.click(screen.getByRole('tab', { name: 'Trajectory' }));
   // The first visit loads the Trajectory module before requesting the latest page.
   await screen.findByRole('button', { name: 'Turn 11' }, { timeout: 5_000 });
+  return user;
+}
+
+test('expands and collapses trajectory rows from the keyboard without losing focus', async (context) => {
+  const user = await renderTrajectory(context);
   const assistantRow = { name: 'Assistant: Answer 11' };
   const toolRow = { name: /^Tool read:/ };
   const turnFold = screen.getByRole('button', { name: 'Turn 11 records' });
@@ -116,7 +119,10 @@ test('reveals the related response in an older turn without clearing the search'
   await user.keyboard(' ');
   expect(toolFold).toHaveAttribute('aria-expanded', 'true');
   expect(screen.getByRole('row', toolRow)).toBeVisible();
+}, 10_000);
 
+test('reveals the related response in an older turn without clearing the search', async (context) => {
+  const user = await renderTrajectory(context);
   const search = screen.getByRole('searchbox', { name: 'Search trajectory' });
   fireEvent.change(search, { target: { value: 'original question' } });
   await user.click(await screen.findByRole('button', { name: 'Turn 1' }));
