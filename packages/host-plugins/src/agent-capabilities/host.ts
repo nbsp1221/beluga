@@ -15,7 +15,10 @@ interface AgentToolCapability {
 
 interface AgentContextCapability {
   metadata: AgentCapabilityMetadata;
-  useContext(cwd: string | undefined): {
+  useContext(
+    cwd: string | undefined,
+    sessionId: string,
+  ): {
     onFiles: OnFiles;
   };
 }

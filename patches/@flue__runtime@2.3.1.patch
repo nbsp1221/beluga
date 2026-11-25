@@ -1,12 +1,12 @@
 diff --git a/dist/agent-execution-store-HWARCScI.d.mts b/dist/agent-execution-store-HWARCScI.d.mts
-index c9814eee223d3e933e0f2affa778160245f86184..c533eef8ee45b92e1048a9e23efdcf97cff8282c 100644
+index c9814eee223d3e933e0f2affa778160245f86184..1b5c4f5120f6cf758a56beb390b18446e5011708 100644
 --- a/dist/agent-execution-store-HWARCScI.d.mts
 +++ b/dist/agent-execution-store-HWARCScI.d.mts
 @@ -644,6 +644,7 @@ interface AgentAppendMessage extends AgentSignalAppend {
   * Prefer dispatching; reach for `append` only when a delivery is wrong.
   */
  interface AgentStartContext {
-+  readonly hasContextSignal: (type: string, id: string) => boolean;
++  readonly contextSignals: (type: string) => readonly { content: string; attributes?: Readonly<Record<string, string>> }[];
    readonly append: (message: AgentAppendMessage) => void;
    readonly harness: FlueHarness;
    readonly log: FlueLogger;
@@ -19,7 +19,7 @@ index c9814eee223d3e933e0f2affa778160245f86184..c533eef8ee45b92e1048a9e23efdcf97
  /** One `useAgentFinish` declaration; identity is the declaration index. */
  interface AgentFinishDeclaration {
 diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
-index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..2046238b7281d62ff0b76bcc9e468f11fe78ecc3 100644
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705f02ff7e4 100644
 --- a/dist/conversation-stream-store-BJbg7IHa.mjs
 +++ b/dist/conversation-stream-store-BJbg7IHa.mjs
 @@ -964,6 +964,7 @@ function toTurnMessage(message) {
@@ -97,21 +97,18 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..2046238b7281d62ff0b76bcc9e468f11
  	}
  	/**
  	* All durable records of one type for this conversation and submission, in
-@@ -1686,6 +1699,13 @@ var Session = class {
+@@ -1686,6 +1699,10 @@ var Session = class {
  				appends.push(assertAppendMessage(message));
  			},
  			log: this.createHookLogger("useAgentStart", index),
-+			hasContextSignal: (type, id) => {
-+				const matches = (message) => {
-+					const source = message[Symbol.for("flue.contextSignal")];
-+					return source?.type === type && source.attributes?.id === id;
-+				};
-+				return this.agentLoop.state.messages.some(matches) || this.agentLoop.peekQueuedMessages().some(matches);
-+			},
++			contextSignals: (type) => [...this.agentLoop.state.messages, ...this.agentLoop.peekQueuedMessages()].flatMap((message) => {
++				const source = message[Symbol.for("flue.contextSignal")];
++				return source?.type === type ? [{ content: source.content, attributes: source.attributes }] : [];
++			}),
  			signal,
  			get harness() {
  				harness ??= session.createInvocationHarness(generateInvocationId(), signal);
-@@ -1695,6 +1715,7 @@ var Session = class {
+@@ -1695,6 +1712,7 @@ var Session = class {
  		try {
  			await hook.run(ctx);
  		} catch (error) {
@@ -119,7 +116,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..2046238b7281d62ff0b76bcc9e468f11
  			throw new Error(`[flue] A useAgentStart callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
  		} finally {
  			appendWindowOpen = false;
-@@ -4133,6 +4154,7 @@ var Session = class {
+@@ -4133,6 +4151,7 @@ var Session = class {
  			}
  			if (overflow || retryable) throwIfHalted();
  			try {
@@ -127,7 +124,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..2046238b7281d62ff0b76bcc9e468f11
  				await start();
  				await this.agentLoop.waitForIdle();
  			} catch (error) {
-@@ -5118,6 +5140,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
+@@ -5118,6 +5137,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
  	emitCoordinatorEvent({
  		type: "submission_settled",
  		submissionId: submission.submissionId,
@@ -135,7 +132,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..2046238b7281d62ff0b76bcc9e468f11
  		outcome,
  		error: serializeSubmissionError(error)
  	}, errorInfo);
-@@ -5310,6 +5333,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
+@@ -5310,6 +5330,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
  	const event = ctx.createEvent({
  		type: "submission_settled",
  		submissionId: attempt.submissionId,
@@ -143,7 +140,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..2046238b7281d62ff0b76bcc9e468f11
  		outcome,
  		...outcome === "completed" ? {} : { error: serializeSubmissionError(error) }
  	});
-@@ -5419,6 +5443,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
+@@ -5419,6 +5440,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
  	emitCoordinatorEvent?.({
  		type: "submission_settled",
  		submissionId: pending.submissionId,
@@ -177,7 +174,7 @@ index 4af08391f41d94893ede44aede6614283528b44a..b27bc97da1d6947d26425a6be4e51469
  			});
  			index += 1;
 diff --git a/dist/index.d.mts b/dist/index.d.mts
-index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..3bfe58b2dd3112bb0a24952bd6d012a21fafda5f 100644
+index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..7f81c109fe447682433bb634b0675a1060b7824a 100644
 --- a/dist/index.d.mts
 +++ b/dist/index.d.mts
 @@ -333,7 +333,9 @@ declare function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise

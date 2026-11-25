@@ -410,7 +410,7 @@ function createPresetAgent(
     const cwd = sessions.workspaceRootForSession(sessionId);
     const contexts = capabilities
       .filter((capability) => 'useContext' in capability)
-      .map((capability) => capability.useContext(cwd));
+      .map((capability) => capability.useContext(cwd, sessionId));
     const onFiles =
       contexts.length > 0
         ? async (paths: readonly string[], toolCallId: string, signal?: AbortSignal) => {

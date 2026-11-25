@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { FlueError } from '@flue/runtime';
 import { workspaceInstructionsRootError } from '@workspace/protocol/host';
+import * as v from 'valibot';
 import type { WorkspaceFiles } from '../workspace/services.js';
 import { FileReadError } from '../filesystem/read.js';
 
@@ -42,7 +43,6 @@ interface ScopeUpdate {
 
 export interface InstructionState {
   instance?: string;
-  signalIds?: string[];
   root?: string;
   global?: InstructionFile;
   project: InstructionFile[];
@@ -323,7 +323,7 @@ export async function discoverTouchedInstructions(
     }
   }
   if (directories.size === 0) {
-    return (previous: InstructionState) => previous;
+    return previous;
   }
   const root = await resolveInstructionRoot(files, cwd, signal, options);
   const globalUpdate = await readScope(files, directory, true, maxSourceBytes, signal);
@@ -335,20 +335,12 @@ export async function discoverTouchedInstructions(
     }
     updates.push(await readScope(files, scope, false, maxSourceBytes, signal));
   }
-  return (previous: InstructionState) => {
-    const known =
-      previous.root === root
-        ? previous
-        : { ...initialInstructions, instance: previous.instance, signalIds: previous.signalIds };
-    const global = globalUpdate.unavailable
-      ? previous.global
-      : capGlobal(known, globalUpdate.file, maxBytes);
-    return applyScopes(
-      { ...known, root, global },
-      updates.filter(({ directory: scope }) => !known.omitted.includes(scope)),
-      maxBytes,
-    );
-  };
+  const known =
+    previous.root === root ? previous : { ...initialInstructions, instance: previous.instance };
+  const global = globalUpdate.unavailable
+    ? previous.global
+    : capGlobal(known, globalUpdate.file, maxBytes);
+  return applyScopes({ ...known, root, global }, updates, maxBytes);
 }
 
 const introduction =
@@ -416,40 +408,86 @@ function truncateInstruction(
     : undefined;
 }
 
-type Change = { action: 'add' | 'replace' | 'remove'; path: string };
+const changeSchema = v.array(
+  v.object({
+    action: v.picklist(['add', 'replace', 'remove']),
+    path: v.string(),
+    digest: v.optional(v.string()),
+  }),
+);
 
-export function diffInstructions(
-  previous: InstructionState,
-  next: InstructionState,
-  rebuild = false,
-) {
-  const filesFor = (state: InstructionState) => {
-    const entries = state.project.map(
-      (file) => [instructionPath(state, file), instructionSection(state, file)] as const,
-    );
-    if (state.global) {
-      entries.unshift([
-        instructionPath(state, state.global, true),
-        instructionSection(state, state.global, true),
-      ]);
+type Change = v.InferOutput<typeof changeSchema>[number];
+type InstructionVersions = ReadonlyMap<string, string | undefined>;
+
+function instructionSections(state: InstructionState) {
+  const entries = state.project.map(
+    (file) => [instructionPath(state, file), instructionSection(state, file)] as const,
+  );
+  if (state.global) {
+    entries.unshift([
+      instructionPath(state, state.global, true),
+      instructionSection(state, state.global, true),
+    ]);
+  }
+  return entries.map(([path, section]) => ({
+    path,
+    section,
+    digest: createHash('sha256').update(section).digest('hex'),
+  }));
+}
+
+export function instructionVersions(state: InstructionState): InstructionVersions {
+  return new Map(instructionSections(state).map(({ path, digest }) => [path, digest]));
+}
+
+export function visibleInstructionVersions(
+  signals: readonly { content: string; attributes?: Readonly<Record<string, string>> }[],
+): InstructionVersions {
+  const versions = new Map<string, string | undefined>();
+  for (const { content, attributes } of signals) {
+    if (content.startsWith(`${introduction}\n\n${resetNotice}`)) {
+      versions.clear();
     }
-    return new Map(entries);
-  };
+    const rawChanges = attributes?.changes;
+    if (!rawChanges) {
+      continue;
+    }
+    let changes: unknown;
+    try {
+      changes = JSON.parse(rawChanges);
+    } catch {
+      continue;
+    }
+    const parsed = v.safeParse(changeSchema, changes);
+    if (!parsed.success) {
+      continue;
+    }
+    for (const { action, path, digest } of parsed.output) {
+      if (action === 'remove') {
+        versions.delete(path);
+      } else {
+        versions.set(path, digest);
+      }
+    }
+  }
+  return versions;
+}
 
-  const before = filesFor(previous);
-  const after = filesFor(next);
+export function diffInstructions(before: InstructionVersions, next: InstructionState) {
+  const after = instructionSections(next);
+  const paths = new Set(after.map(({ path }) => path));
   const changes: Change[] = [];
   const sections: string[] = [];
   for (const path of before.keys()) {
-    if (!after.has(path)) {
+    if (!paths.has(path)) {
       changes.push({ action: 'remove', path });
       sections.push(removalSection(path));
     }
   }
-  for (const [path, section] of after) {
-    if (rebuild || before.get(path) !== section) {
+  for (const { path, section, digest } of after) {
+    if (before.get(path) !== digest) {
       const action = before.has(path) ? 'replace' : 'add';
-      changes.push({ action, path });
+      changes.push({ action, path, digest });
       sections.push(action === 'replace' ? updateNotice + section : section);
     }
   }
@@ -458,9 +496,6 @@ export function diffInstructions(
   }
   if (next.omitted.length > 0) {
     sections.unshift(omissionNotice);
-  }
-  if (rebuild) {
-    sections.unshift(resetNotice);
   }
   return {
     kind: 'signal',

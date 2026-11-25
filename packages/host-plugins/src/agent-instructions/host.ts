@@ -13,8 +13,10 @@ import {
   diffInstructions,
   discoverTouchedInstructions,
   initialInstructions,
+  instructionVersions,
   refreshInstructions,
   resolveInstructionRoot,
+  visibleInstructionVersions,
 } from './discovery.js';
 
 const id = 'agent-instructions';
@@ -39,34 +41,51 @@ export function agentInstructionsCapability(
       setup(context) {
         const files = context.get('workspaceFiles');
         const instance = crypto.randomUUID();
+        const pendingUpdates = new Map<string, Promise<void>>();
+
+        function queueUpdate(sessionId: string, run: () => Promise<void>) {
+          const update = (pendingUpdates.get(sessionId) ?? Promise.resolve()).then(run);
+          const tail = update.catch(() => {});
+          pendingUpdates.set(sessionId, tail);
+          return update.finally(() => {
+            if (pendingUpdates.get(sessionId) === tail) {
+              pendingUpdates.delete(sessionId);
+            }
+          });
+        }
+
         context.provide('agentInstructions', {
           metadata: {
             id,
             name: 'Workspace instructions',
             description: 'Load AGENTS.md guidance relevant to the conversation’s workspace.',
           },
-          useContext(cwd) {
+          useContext(cwd, sessionId) {
             const delivery = useDelivery();
             const dispatch = useDispatchMessage();
             const [state, setState] = usePersistentState<InstructionState>(
               'workspace-context',
               initialInstructions,
             );
+            let current = state;
 
             async function reconcile(
-              { append, hasContextSignal, signal }: AgentStartContext,
+              { append, contextSignals, signal }: AgentStartContext,
               restoring = false,
             ) {
               if (!cwd) {
                 return;
               }
-              const currentIds = state.signalIds ?? [];
-              const missingContext = currentIds.some((signalId) => !hasContextSignal(id, signalId));
+              const visible = visibleInstructionVersions(contextSignals(id));
+              const known = instructionVersions(current);
+              const missingContext =
+                visible.size !== known.size ||
+                [...known].some(([path, digest]) => visible.get(path) !== digest);
               if (restoring && !missingContext) {
                 return;
               }
               const root = await resolveInstructionRoot(files, cwd, signal, options);
-              if (state.instance === instance && state.root === root && !missingContext) {
+              if (current.instance === instance && current.root === root && !missingContext) {
                 return;
               }
               const next = await refreshInstructions(
@@ -74,21 +93,18 @@ export function agentInstructionsCapability(
                 directory,
                 cwd,
                 root,
-                state,
+                current,
                 signal,
                 options,
                 missingContext,
               );
-              const changes = diffInstructions(state, next, missingContext);
+              signal.throwIfAborted();
+              const changes = diffInstructions(visible, next);
               if (changes) {
                 append(changes);
               }
-              const signalIds = missingContext ? [] : currentIds;
-              setState({
-                ...next,
-                instance,
-                signalIds: changes ? [...signalIds, changes.attributes.id] : signalIds,
-              });
+              current = { ...next, instance };
+              setState(current);
             }
 
             useAgentStart(
@@ -104,41 +120,42 @@ export function agentInstructionsCapability(
             );
 
             return {
-              async onFiles(paths, toolCallId, signal) {
+              onFiles(paths, toolCallId, signal) {
                 if (!cwd) {
-                  return;
+                  return Promise.resolve();
                 }
-                const update = await discoverTouchedInstructions(
-                  files,
-                  directory,
-                  cwd,
-                  paths,
-                  state,
-                  signal,
-                  options,
-                ).catch(async (error: unknown) => {
-                  if (!(error instanceof WorkspaceInstructionsRootError)) {
-                    throw error;
+                return queueUpdate(sessionId, async () => {
+                  signal?.throwIfAborted();
+                  const next = await discoverTouchedInstructions(
+                    files,
+                    directory,
+                    cwd,
+                    paths,
+                    current,
+                    signal,
+                    options,
+                  ).catch(async (error: unknown) => {
+                    if (!(error instanceof WorkspaceInstructionsRootError)) {
+                      throw error;
+                    }
+                    // Tool failures become model-visible results. A joined start hook stops
+                    // this response before the next provider call instead.
+                    await dispatch({ kind: 'signal', type: unavailableRoot, body: error.message });
+                  });
+                  if (!next) {
+                    return;
                   }
-                  // Tool failures become model-visible results. A joined start hook stops
-                  // this response before the next provider call instead.
-                  await dispatch({ kind: 'signal', type: unavailableRoot, body: error.message });
+                  signal?.throwIfAborted();
+                  const changes = diffInstructions(instructionVersions(current), next);
+                  current = next;
+                  setState(current);
+                  if (changes) {
+                    await dispatch({
+                      ...changes,
+                      attributes: { ...changes.attributes, toolCallId },
+                    });
+                  }
                 });
-                if (!update) {
-                  return;
-                }
-                signal?.throwIfAborted();
-                let changes: ReturnType<typeof diffInstructions>;
-                setState((previous) => {
-                  const next = update(previous);
-                  changes = diffInstructions(previous, next);
-                  return changes
-                    ? { ...next, signalIds: [...(previous.signalIds ?? []), changes.attributes.id] }
-                    : next;
-                });
-                if (changes) {
-                  await dispatch({ ...changes, attributes: { ...changes.attributes, toolCallId } });
-                }
               },
             };
           },
