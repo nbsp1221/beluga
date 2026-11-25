@@ -38,6 +38,7 @@ import type { ConversationClient, Session } from '../contract.js';
 import { useLayout } from '../../../workbench/contract.js';
 import { AccessMode, previewAccessModes } from './access-mode.js';
 import { ModelMenu, effortLabels } from './model-menu.js';
+import { SkillSuggestions, useSkillSuggestions } from './skill-suggestions.js';
 
 const editorInset = 'px-1.5 py-1.5';
 
@@ -68,6 +69,7 @@ export function Composer({
   const { mobile, viewportHeight } = useLayout();
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const skills = useSkillSuggestions(client, session, !workspacePicker);
   const [attachments, setAttachments] = useState<readonly string[]>([]);
 
   const savedSettings = session.runSettings;
@@ -180,11 +182,11 @@ export function Composer({
     setSubmitting(true);
     setError('');
     try {
-      await client.send(session.id, { mode, attachments });
+      await client.send(session.id, { mode, attachments, selectedSkill: skills.selected });
       setAttachments([]);
     } catch (error) {
       setError(
-        error instanceof Error && session.isDraft
+        error instanceof Error && (session.isDraft || skills.selected)
           ? error.message
           : 'Unable to send this message. Try again.',
       );
@@ -218,6 +220,7 @@ export function Composer({
             }}
           />
         )}
+        <SkillSuggestions suggestions={skills} />
         {workspacePicker ? (
           <Button
             type="button"
@@ -233,6 +236,10 @@ export function Composer({
           <Textarea
             ref={editorRef}
             aria-label="Message"
+            aria-controls={skills.items.length ? skills.listId : undefined}
+            aria-activedescendant={
+              skills.current < 0 ? undefined : `${skills.listId}-${skills.current}`
+            }
             aria-describedby={error ? 'message-error' : undefined}
             aria-invalid={Boolean(error)}
             className={`max-h-[min(20rem,25dvh)] min-h-14 flex-1 resize-none border-0 bg-transparent focus-visible:ring-0 aria-invalid:ring-0 md:max-h-80 dark:bg-transparent dark:aria-invalid:ring-0 ${editorInset}`}
@@ -246,9 +253,15 @@ export function Composer({
             value={session.draft}
             onChange={(event) => {
               client.setDraft(session.id, event.target.value);
+              skills.changed(event.target.value);
               setError('');
             }}
+            onFocus={() => skills.setFocused(true)}
+            onBlur={() => skills.setFocused(false)}
             onKeyDown={(event) => {
+              if (skills.keyDown(event)) {
+                return;
+              }
               if (
                 event.key === 'Enter' &&
                 !event.shiftKey &&

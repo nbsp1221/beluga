@@ -20,6 +20,7 @@ import { fileSearchCapability } from '../../src/agent-capabilities/file/search/h
 import { fileWriteCapability } from '../../src/agent-capabilities/file/write/host.js';
 import { shellExecCapability } from '../../src/agent-capabilities/shell/host.js';
 import { agentInstructionsCapability } from '../../src/agent-instructions/host.js';
+import { agentSkillsCapability } from '../../src/agent-skills/host.js';
 import { createAccessCodeVerifier } from '../../src/auth/access-code.js';
 import { createAccessCodeAuth } from '../../src/auth/host.js';
 import { createHarnessHost } from '../../src/harness/host.js';
@@ -67,7 +68,11 @@ export async function setupHarness(
   ];
 
   const boot = (capabilities: AgentCapabilityPlugin[] = [fileReadCapability]) => {
-    const registered = [...capabilities, agentInstructionsCapability(root)];
+    const registered = [
+      ...capabilities,
+      agentInstructionsCapability(root),
+      agentSkillsCapability(root, join(root, 'home')),
+    ];
     return createRuntime([
       createTrajectoryHost(`${databasePath}.trajectory`),
       createHarnessHost(

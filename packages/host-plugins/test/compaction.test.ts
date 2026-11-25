@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import {
   type AssistantMessage,
   type Provider,
   createAssistantMessageEventStream,
 } from '@earendil-works/pi-ai';
 import {
+  agentSkillsCapabilityId,
   conversationUsageSchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
@@ -247,6 +248,55 @@ test(
     );
     expect(last.records.some((record) => record.kind === 'system')).toBe(false);
     expect((await usage()).context).toMatchObject({ status: 'available', inputTokens: 1500 });
+  },
+);
+
+test.for(['threshold', 'overflow'] as const)(
+  'restores an activated skill once after %s compaction',
+  async (reason, context) => {
+    const harness = await setupHarness(context, [], undefined, () => compactionProvider());
+    const skillDirectory = join(dirname(harness.databasePath), 'skills', 'compact');
+    await mkdir(skillDirectory, { recursive: true });
+    const marker = 'QA_ACTIVE_SKILL_SURVIVES_COMPACTION';
+    await writeFile(
+      join(skillDirectory, 'SKILL.md'),
+      `---\nname: compact\ndescription: Keep a decision\n---\n\n${marker}\n`,
+    );
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset([agentSkillsCapabilityId]);
+    const { id } = await harness.create(workspace.id, preset.id);
+    const client = harness.sdk(id);
+
+    const submit = async (body: string) =>
+      client.wait(await client.send({ message: { kind: 'user', body } }), {
+        signal: AbortSignal.timeout(5_000),
+      });
+
+    await submit('/compact remember the decision');
+    for (let index = 0; index < 4; index++) {
+      await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
+    }
+    await submit(reason === 'threshold' ? 'Trigger threshold' : 'Trigger overflow');
+    if (reason === 'threshold') {
+      await harness.restart();
+      await submit('Continue after restart.');
+    }
+    const path = `${origin}/api/conversations/${id}/trajectory`;
+    const turns = await readTrajectory(harness.fetch(path));
+    const compaction = turns
+      .flatMap(({ records }) => records)
+      .find((record) => record.kind === 'compaction' && record.reason === reason);
+    assert(compaction?.kind === 'compaction');
+    expect(compaction.status).toBe('completed');
+    const turn = turns.at(-1);
+    const model = turn?.records.findLast(
+      (record) => record.kind === 'assistant' && record.purpose === 'agent',
+    );
+    assert(turn && model);
+    const response = await harness.fetch(`${path}/${turn.id}/${model.id}`);
+    const input = trajectoryModelInputResponseSchema.parse(await response.json());
+    expect(JSON.stringify(input.messages).split(marker)).toHaveLength(2);
+    expect(JSON.stringify(input.messages)).toContain(checkpoint);
   },
 );
 

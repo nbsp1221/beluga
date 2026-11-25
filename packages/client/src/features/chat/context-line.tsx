@@ -1,4 +1,4 @@
-import type { WorkspaceInstructionChanges } from '@workspace/protocol/host';
+import type { SkillContext, WorkspaceInstructionChanges } from '@workspace/protocol/host';
 import {
   TraceCollapsible,
   TraceCollapsibleContent,
@@ -12,9 +12,11 @@ import { FileText } from 'lucide-react';
 export function ContextLine({
   changes,
   text,
+  skill,
 }: {
   changes: WorkspaceInstructionChanges;
   text: string;
+  skill?: SkillContext;
 }) {
   return (
     <TraceCollapsible>
@@ -24,7 +26,9 @@ export function ContextLine({
             <FileText />
           </TraceIcon>
           <TraceTitle>
-            Workspace instructions · {changes.map(({ path }) => path).join(', ')}
+            {skill
+              ? `Loaded skill · ${skill.name}`
+              : `Workspace instructions · ${changes.map(({ path }) => path).join(', ')}`}
           </TraceTitle>
         </TraceLine>
       </TraceCollapsibleTrigger>

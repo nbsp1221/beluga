@@ -1,5 +1,6 @@
 import {
   AGENT_PRESETS_PATH,
+  AGENT_SKILLS_PATH,
   AUTH_PATH,
   CONVERSATION_PATH,
   PROVIDERS_PATH,
@@ -9,7 +10,12 @@ import {
 import { createRuntime } from '@workspace/runtime';
 import { type HostOptions, hostPlugins } from './product.js';
 
-const conversationRoutes = [CONVERSATION_PATH, PROVIDERS_PATH, AGENT_PRESETS_PATH];
+const conversationRoutes = [
+  CONVERSATION_PATH,
+  PROVIDERS_PATH,
+  AGENT_PRESETS_PATH,
+  AGENT_SKILLS_PATH,
+];
 let connectedHostActive = false;
 
 export async function createHost(options: HostOptions = {}) {

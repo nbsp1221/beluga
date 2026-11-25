@@ -14,9 +14,47 @@ export const AUTH_PATH = '/api/auth';
 export const DESKTOP_CONNECTIONS_PATH = '/api/desktop/connections';
 export const WORKSPACES_PATH = '/api/workspaces';
 export const WORKSPACE_FOLDERS_PATH = `${WORKSPACES_PATH}/folders`;
+export const AGENT_SKILLS_PATH = '/api/agent-skills';
+export const agentSkillsCapabilityId = 'agent-skills';
+export const skillInvocationSignal = 'skill-invocation';
+export const selectedSkillUnavailable = {
+  type: 'selected_skill_unavailable',
+  message: 'The selected skill is no longer available.',
+} as const;
+export const selectedSkillUnavailableSchema = z.object({
+  error: z.object({ type: z.literal(selectedSkillUnavailable.type), message: z.string() }),
+});
+export const skillNameSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+export const skillSummarySchema = z.object({
+  name: skillNameSchema,
+  description: z.string(),
+  userOnly: z.boolean(),
+});
+
+export type SkillSummary = z.infer<typeof skillSummarySchema>;
+
+export const skillInvocationAttributesSchema = z.object({
+  id: z.string(),
+  name: skillNameSchema,
+  scope: z.enum(['project', 'global']),
+  toolCallId: z.string().optional(),
+  restored: z.literal('true').optional(),
+});
+export const skillContextSchema = skillInvocationAttributesSchema.pick({ name: true, scope: true });
+
+export type SkillContext = z.infer<typeof skillContextSchema>;
+
+export function explicitSkillName(text: string) {
+  const name = /^\/([a-z0-9-]+)(?=\s|$)/.exec(text)?.[1];
+  return skillNameSchema.safeParse(name).data;
+}
 
 // The explicitly supported product routes are shared by Host registration and Desktop forwarding.
 export const productRoutes = {
+  listSkills: { method: 'GET', path: AGENT_SKILLS_PATH },
   listConversations: { method: 'GET', path: CONVERSATION_PATH },
   conversationActivity: { method: 'GET', path: CONVERSATION_ACTIVITY_PATH },
   acknowledgeConversation: { method: 'PUT', path: `${CONVERSATION_PATH}/:id/read` },
@@ -100,6 +138,7 @@ export const trajectoryRecordSchema = z.discriminatedUnion('kind', [
     text: z.string(),
     body: z.string(),
     changes: workspaceInstructionChangesSchema,
+    skill: skillContextSchema.optional(),
     modelRequestId: z.string(),
     timestamp: z.string().optional(),
   }),

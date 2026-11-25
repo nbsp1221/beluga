@@ -7,10 +7,13 @@ import {
   type RunSettings,
   accessModeInputSchema,
   agentPresetInputSchema,
+  agentSkillsCapabilityId,
   availableAccessModes,
   createSessionSchema,
+  explicitSkillName,
   productRoutes,
   runSettingsSchema,
+  selectedSkillUnavailable,
 } from '@workspace/protocol/host';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -25,6 +28,7 @@ import '../auth/services.js';
 import { primaryAgentName } from '../trajectory/contract.js';
 import { allowsTools, workspaceToolAccess } from '../workspace/tool-access.js';
 import { observeConversationActivity } from './activity.js';
+import { mountSkillSuggestions } from './skills-http.js';
 
 const initialData = v.object({ sessionId: v.string() });
 
@@ -110,6 +114,7 @@ export function createHarnessHost(
         catalog,
         capabilitiesById,
         context.get('workspaceToolSessions'),
+        providers.contextWindow,
       );
       const runtime = await start({
         agents: [BelugaPresetAgent],
@@ -136,6 +141,12 @@ export function createHarnessHost(
       mountProviders(app, providers, catalog);
 
       activity.mountRoutes(app);
+
+      const skills = capabilitiesById.get(agentSkillsCapabilityId);
+      const listSkills = skills && 'useContext' in skills ? skills.listSkills : undefined;
+      if (listSkills) {
+        mountSkillSuggestions(app, catalog, listSkills);
+      }
 
       app.on(
         productRoutes.listConversations.method,
@@ -321,6 +332,21 @@ export function createHarnessHost(
           if (!message) {
             return c.json({ error: 'Send a text message.' }, 400);
           }
+          if (message.selectedSkill !== undefined) {
+            const selected = explicitSkillName(message.body);
+            const workspace = catalog.find(session.workspaceId);
+            const available =
+              selected &&
+              selected === message.selectedSkill &&
+              workspace &&
+              session.agentPresetCapabilities.includes(agentSkillsCapabilityId) &&
+              (await listSkills?.(workspace.path, c.req.raw.signal))?.some(
+                ({ name }) => name === selected,
+              );
+            if (!available) {
+              return c.json({ error: selectedSkillUnavailable }, 409);
+            }
+          }
           const response = await presetRouter.fetch(
             bindSession(c.req.raw, options.origin, id, message),
           );
@@ -386,6 +412,7 @@ function createPresetAgent(
   catalog: Pick<WorkspaceCatalog, 'findSession' | 'sessionPreset' | 'sessionAccessMode'>,
   capabilitiesById: ReadonlyMap<string, AgentCapability>,
   sessions: WorkspaceToolSessions,
+  contextWindow: ReturnType<OpenModelProviders>['contextWindow'],
 ) {
   function BelugaPresetAgent() {
     const { sessionId } = useInitialData<v.InferOutput<typeof initialData>>();
@@ -408,14 +435,22 @@ function createPresetAgent(
       return capability;
     });
     const cwd = sessions.workspaceRootForSession(sessionId);
-    const contexts = capabilities
+    const separator = settings.model.indexOf('/');
+    const window = contextWindow(
+      settings.model.slice(0, separator),
+      settings.model.slice(separator + 1),
+    );
+    const fileHooks = capabilities
       .filter((capability) => 'useContext' in capability)
-      .map((capability) => capability.useContext(cwd, sessionId));
+      .flatMap((capability) => {
+        const { onFiles } = capability.useContext(cwd, sessionId, window);
+        return onFiles ? [onFiles] : [];
+      });
     const onFiles =
-      contexts.length > 0
+      fileHooks.length > 0
         ? async (paths: readonly string[], toolCallId: string, signal?: AbortSignal) => {
-            for (const context of contexts) {
-              await context.onFiles(paths, toolCallId, signal);
+            for (const hook of fileHooks) {
+              await hook(paths, toolCallId, signal);
             }
           }
         : undefined;
@@ -461,6 +496,7 @@ async function parseTextMessage(request: Request) {
   }
   return {
     body: value.body,
+    selectedSkill: 'selectedSkill' in value ? value.selectedSkill : undefined,
     uid: 'uid' in value ? value.uid : undefined,
     idempotencyKey: 'idempotencyKey' in value ? value.idempotencyKey : undefined,
   };

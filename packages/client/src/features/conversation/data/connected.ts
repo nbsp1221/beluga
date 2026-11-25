@@ -1,13 +1,17 @@
-import { FlueExecutionError } from '@flue/sdk';
+import { FlueApiError, FlueExecutionError } from '@flue/sdk';
 import {
+  AGENT_SKILLS_PATH,
   CONVERSATION_PATH,
   type SessionSummary,
   accessModeInputSchema,
   availableAccessModes,
   conversationCatalogSchema,
   conversationUsageSchema,
+  explicitSkillName,
   runSettingsSchema,
+  selectedSkillUnavailableSchema,
   sessionSummarySchema,
+  skillSummarySchema,
 } from '@workspace/protocol/host';
 import { readPreference, writePreference } from '@workspace/ui/lib/browser-storage';
 import { v4 as uuid } from 'uuid';
@@ -157,6 +161,25 @@ export function createConnectedConversation({
     activity,
     getSnapshot,
     subscribe,
+    async listSkills(session, query, signal) {
+      const params = new URLSearchParams({ q: query });
+      if (session.isDraft) {
+        const state = agentPresets.getSnapshot();
+        const id = session.agentPresetId ?? state.defaultPresetId;
+        const preset = state.presets.find((item) => item.id === id);
+        if (!session.workspaceId || !preset) {
+          return [];
+        }
+        params.set('workspaceId', session.workspaceId);
+        params.set('presetId', preset.id);
+        params.set('presetVersion', String(preset.version));
+      } else {
+        params.set('sessionId', session.id);
+      }
+      return skillSummarySchema
+        .array()
+        .parse(await request(`${AGENT_SKILLS_PATH}?${params}`, undefined, 'GET', signal));
+    },
     createSession(workspaceId) {
       const session = draftSession(workspaceId ?? preferredWorkspace(getSnapshot().sessions));
       rememberWorkspace(session.workspaceId);
@@ -430,11 +453,27 @@ function createSubmissionClient({
       const delivery = existing?.text === text ? existing : { text, key: uuid() };
       pendingDeliveries.set(id, delivery);
       const client = connect(id);
-      const receipt = await client.send({
-        message: { kind: 'user', body: text },
-        idempotencyKey: delivery.key,
-        signal,
-      });
+      const message = {
+        kind: 'user' as const,
+        body: text,
+        selectedSkill:
+          explicitSkillName(text) === options.selectedSkill ? options.selectedSkill : undefined,
+      };
+      const receipt = await client
+        .send({
+          message,
+          idempotencyKey: delivery.key,
+          signal,
+        })
+        .catch((error: unknown) => {
+          if (error instanceof FlueApiError) {
+            const parsed = selectedSkillUnavailableSchema.safeParse(error.body);
+            if (parsed.success) {
+              throw new Error(parsed.data.error.message, { cause: error });
+            }
+          }
+          throw error;
+        });
 
       pendingDeliveries.delete(id);
       update(id, (session) => ({

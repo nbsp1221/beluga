@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-17
+last_reviewed: 2026-11-25
 ---
 
 # Host a Beluga server
@@ -138,6 +138,22 @@ Stop the Host before copying the complete data directory. To restore, stop the H
 Put shared instructions in the project's `AGENTS.md` and select **Workspace instructions** in the agent preset. New installations include it in Standard. Beluga loads rules from the project root to the workspace before the first model request. Outside a Git checkout it starts at the workspace folder. A successful file read, write, or edit can add applicable subfolder rules before the next model request. A closer rule takes precedence for files in its scope. Use `AGENTS.override.md` in the same folder to replace that folder's `AGENTS.md`.
 
 For instructions across projects, place `AGENTS.md` in the Host's data directory. For the standard Docker setup this is `/data` inside the container. A browser uses the rules on its connected Host. Files are reconciled on file activity, session resume and when compaction removes earlier instruction context. The default budgets are 64 KiB for each of the Host-wide and project chains, with a 1 MiB limit per source file. Instructions guide the model within the session's access mode. Chat shows the contributing files in a collapsible row. In Trajectory, search for the filename or open a Context row to inspect the changes and their model request.
+
+## Agent skills
+
+Put an [Agent Skill](https://agentskills.io/specification) in a folder named after the skill, with a `SKILL.md` that declares its `name` and `description`. Select **Agent skills** in the preset. New installations include it in Standard. Existing presets and conversations keep their saved capabilities.
+
+Beluga looks for the skill in this order:
+
+1. `.agents/skills/<name>/SKILL.md` in the workspace and its parent folders through the nearest Git root. Outside a Git checkout it searches only the workspace folder.
+2. `skills/<name>/SKILL.md` under the Host's Beluga data directory.
+3. `.agents/skills/<name>/SKILL.md` in the Host account's home directory.
+
+The closest valid definition wins. Skills reached through links must resolve inside their project or global search root. All paths are on the Host, including when you connect from another computer.
+
+Type `/` in the composer to find a skill or start a message with `/<name>` followed by the task. The model also gets a bounded list of names and descriptions and can load a skill as needed. Set `disable-model-invocation: true` for manual use only or `user-invocable: false` to hide a skill from direct selection. The next message refreshes discovery. A skill supplies instructions within the conversation's existing file and shell permissions.
+
+Expand a skill in Chat to read the loaded instructions. In Trajectory, **System Prompt** shows the list offered to the model, and a **Context** row shows the instructions sent with a specific request. You can search Trajectory by skill name.
 
 ## Diagnose connection problems
 

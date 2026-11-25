@@ -5,6 +5,7 @@ import { workspaceInstructionsRootError } from '@workspace/protocol/host';
 import * as v from 'valibot';
 import type { WorkspaceFiles } from '../workspace/services.js';
 import { FileReadError } from '../filesystem/read.js';
+import { resolveProjectRoot } from '../workspace/project-root.js';
 
 const filenames = ['AGENTS.override.md', 'AGENTS.md'];
 
@@ -77,30 +78,6 @@ function ancestorChain(root: string, directory: string) {
   return directories.reverse();
 }
 
-async function projectRoot(
-  files: WorkspaceFiles,
-  cwd: string,
-  markers: readonly string[],
-  signal?: AbortSignal,
-) {
-  for (let directory = cwd; ; directory = dirname(directory)) {
-    signal?.throwIfAborted();
-    for (const name of markers) {
-      const marker = await files.stat(join(directory, name)).catch((error: unknown) => {
-        if (!isMissing(error)) {
-          throw error;
-        }
-      });
-      if (marker) {
-        return directory;
-      }
-    }
-    if (dirname(directory) === directory) {
-      return cwd;
-    }
-  }
-}
-
 export async function resolveInstructionRoot(
   files: WorkspaceFiles,
   cwd: string,
@@ -108,10 +85,7 @@ export async function resolveInstructionRoot(
   options: InstructionOptions = {},
 ) {
   try {
-    if (relative(cwd, await files.realpath(cwd))) {
-      throw new Error('The registered workspace now points to a different folder.');
-    }
-    return await projectRoot(
+    return await resolveProjectRoot(
       files,
       cwd,
       options.projectRootMarkers ?? defaults.projectRootMarkers,

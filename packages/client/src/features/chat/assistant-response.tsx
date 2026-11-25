@@ -166,7 +166,12 @@ function AssistantParts({ parts }: { parts: readonly AssistantMessagePart[] }) {
       activity.push(<ReasoningLine key={`reasoning:${part.id}`} part={part} />);
     } else if (part.type === 'context') {
       activity.push(
-        <ContextLine key={`context:${part.id}`} changes={part.changes} text={part.text} />,
+        <ContextLine
+          key={`context:${part.id}`}
+          changes={part.changes}
+          text={part.text}
+          skill={part.skill}
+        />,
       );
     } else {
       activity.push(<ToolLine key={`tool:${part.id}`} part={part} />);

@@ -1,4 +1,4 @@
-import type { AgentCapabilityMetadata } from '@workspace/protocol/host';
+import type { AgentCapabilityMetadata, SkillSummary } from '@workspace/protocol/host';
 import type { Plugin, Services } from '@workspace/runtime';
 import type { workspaceToolAccess } from '../workspace/tool-access.js';
 import type { AgentToolRegistration, OnFiles } from './tool.js';
@@ -13,13 +13,19 @@ interface AgentToolCapability {
   ): readonly AgentToolRegistration[];
 }
 
-interface AgentContextCapability {
+export interface AgentContextCapability {
   metadata: AgentCapabilityMetadata;
+  listSkills?(
+    this: void,
+    cwd: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<readonly SkillSummary[]>;
   useContext(
     cwd: string | undefined,
     sessionId: string,
+    contextWindow?: number,
   ): {
-    onFiles: OnFiles;
+    onFiles?: OnFiles;
   };
 }
 

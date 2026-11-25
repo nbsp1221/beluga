@@ -1,6 +1,8 @@
 import { type FlueObservation, observe } from '@flue/runtime';
 import {
   type TrajectoryRecord,
+  skillInvocationAttributesSchema,
+  skillInvocationSignal,
   workspaceInstructionChanges,
   workspaceInstructionsRootError,
 } from '@workspace/protocol/host';
@@ -55,13 +57,13 @@ function errorText(value: unknown) {
 
 const contextMessage = v.object({
   contextSignal: v.object({
-    type: v.literal('agent-instructions'),
+    type: v.picklist(['agent-instructions', skillInvocationSignal]),
     content: v.string(),
-    attributes: v.object({ id: v.string(), changes: v.string() }),
+    attributes: v.record(v.string(), v.string()),
   }),
 });
 
-function appliedInstructions(
+function appliedContexts(
   messages: readonly unknown[],
   modelRequestId: string,
   timestamp: string,
@@ -71,9 +73,26 @@ function appliedInstructions(
     if (!parsed.success) {
       return [];
     }
-    const { content, attributes } = parsed.output.contextSignal;
+    const { content, attributes, type } = parsed.output.contextSignal;
+    if (type === skillInvocationSignal) {
+      const skill = skillInvocationAttributesSchema.safeParse(attributes).data;
+      return skill
+        ? [
+            {
+              kind: 'context',
+              id: `context:${skill.id}`,
+              modelRequestId,
+              timestamp,
+              text: skill.name,
+              body: content,
+              changes: [],
+              skill: { name: skill.name, scope: skill.scope },
+            },
+          ]
+        : [];
+    }
     const changes = workspaceInstructionChanges(attributes.changes);
-    if (!changes?.length) {
+    if (!attributes.id || !changes?.length) {
       return [];
     }
     return [
@@ -250,7 +269,7 @@ function capture(
         tools: event.request.input.tools ?? [],
       },
       ordinary,
-      ordinary ? appliedInstructions(event.request.input.messages, modelId, event.timestamp) : [],
+      ordinary ? appliedContexts(event.request.input.messages, modelId, event.timestamp) : [],
     );
     store.put(session, submission, {
       kind: 'assistant',

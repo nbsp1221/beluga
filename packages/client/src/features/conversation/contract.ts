@@ -5,6 +5,8 @@ import type {
   ConversationActivity,
   ConversationUsage,
   RunSettings,
+  SkillContext,
+  SkillSummary,
   WorkspaceInstructionChanges,
 } from '@workspace/protocol/host';
 import type { ComponentType } from 'react';
@@ -14,6 +16,7 @@ type ContextMessage = {
   id: string;
   text: string;
   changes: WorkspaceInstructionChanges;
+  skill?: SkillContext;
 };
 
 export type AssistantMessagePart =
@@ -28,6 +31,7 @@ export type AssistantMessagePart =
       status: 'running' | 'completed' | 'failed' | 'incomplete';
       output?: unknown;
       error?: string;
+      skillInstructions?: string;
     };
 
 export type TurnActivity =
@@ -73,6 +77,7 @@ export interface ConversationSnapshot {
 export interface SendOptions {
   mode: string;
   attachments: readonly string[];
+  selectedSkill?: string;
 }
 
 // Client projection contract. A future transport can publish Host snapshots here.
@@ -97,6 +102,15 @@ export interface ConversationClient {
   observeSession?(this: void, id: string): () => void;
   observeUsage?(this: void, id: string): () => void;
   setDraft(this: void, sessionId: string, text: string): void;
+  listSkills?(
+    this: void,
+    session: Pick<
+      Session,
+      'id' | 'workspaceId' | 'agentPresetId' | 'agentPresetVersion' | 'isDraft'
+    >,
+    query: string,
+    signal: AbortSignal,
+  ): Promise<readonly SkillSummary[]>;
   send(this: void, sessionId: string, options: SendOptions): Promise<void>;
   stop?(this: void, sessionId: string, submissionId: string): Promise<void>;
 }

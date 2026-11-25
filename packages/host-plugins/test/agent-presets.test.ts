@@ -53,6 +53,7 @@ test('lists the registered preset capabilities and their access levels', async (
   ).toEqual([
     { id: 'file.read', access: 'files' },
     { id: 'agent-instructions', access: undefined },
+    { id: 'agent-skills', access: undefined },
   ]);
 });
 
@@ -87,7 +88,7 @@ test('returns a service error for a pinned capability while its plugin is unavai
     agentPresetsSchema
       .parse(await (await fetch(origin + presetsPath)).json())
       .capabilities.map(({ id }) => id),
-  ).toEqual(['agent-instructions']);
+  ).toEqual(['agent-instructions', 'agent-skills']);
   expect((await turn(plain.id, 'README.md'))[0].toolNames).toEqual(['task']);
   expect((await fetch(`${origin}/api/conversations/${reading.id}?view=history`)).status).toBe(200);
   expect(
