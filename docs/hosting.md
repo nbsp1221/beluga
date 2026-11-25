@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-25
+last_reviewed: 2026-11-26
 ---
 
 # Host a Beluga server
@@ -149,9 +149,11 @@ Beluga looks for the skill in this order:
 2. `skills/<name>/SKILL.md` under the Host's Beluga data directory.
 3. `.agents/skills/<name>/SKILL.md` in the Host account's home directory.
 
-The closest valid definition wins. Skills reached through links must resolve inside their project or global search root. All paths are on the Host, including when you connect from another computer.
+The closest valid definition wins. Skill folders and files reached through links must resolve inside their project or global search root. Host logs identify invalid metadata, links that cross a search boundary, and which definition wins when two skills share a name. All paths are on the Host, including when you connect from another computer.
 
-Type `/` in the composer to find a skill or start a message with `/<name>` followed by the task. The model also gets a bounded list of names and descriptions and can load a skill as needed. Set `disable-model-invocation: true` for manual use only or `user-invocable: false` to hide a skill from direct selection. The next message refreshes discovery. A skill supplies instructions within the conversation's existing file and shell permissions.
+Type `/` in the composer to find a skill or start a message with `/<name>` followed by the task. Reopen the suggestions to refresh their list. The Host checks the selected skill at submission and refreshes the model's bounded list before each user turn. Set `disable-model-invocation: true` for manual use only or `user-invocable: false` to hide a skill from direct selection. A skill supplies instructions within the conversation's existing file and shell permissions.
+
+A skill body can use up to 5,000 estimated tokens or a quarter of the model's context window, whichever is lower. Keep longer reference material in separate files. After context compaction, Beluga restores the most recently used eligible skills within a combined budget of up to 25,000 estimated tokens or a quarter of the context window. With an unknown context window both limits are 5,000.
 
 Expand a skill in Chat to read the loaded instructions. In Trajectory, **System Prompt** shows the list offered to the model, and a **Context** row shows the instructions sent with a specific request. You can search Trajectory by skill name.
 

@@ -340,7 +340,7 @@ export function createHarnessHost(
               selected === message.selectedSkill &&
               workspace &&
               session.agentPresetCapabilities.includes(agentSkillsCapabilityId) &&
-              (await listSkills?.(workspace.path, c.req.raw.signal))?.some(
+              (await listSkills?.(workspace.path, c.req.raw.signal, selected))?.some(
                 ({ name }) => name === selected,
               );
             if (!available) {

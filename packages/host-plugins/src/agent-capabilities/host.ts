@@ -19,6 +19,7 @@ export interface AgentContextCapability {
     this: void,
     cwd: string | undefined,
     signal?: AbortSignal,
+    onlyName?: string,
   ): Promise<readonly SkillSummary[]>;
   useContext(
     cwd: string | undefined,

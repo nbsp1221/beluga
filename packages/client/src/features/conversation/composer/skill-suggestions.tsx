@@ -15,37 +15,37 @@ export function useSkillSuggestions(
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<string>();
   const [result, setResult] = useState<{ key: string; items: readonly SkillSummary[] }>();
-  const query =
-    enabled && focused && !dismissed ? /^\/([a-z0-9-]*)$/.exec(session.draft)?.[1] : undefined;
+  const query = /^\/([a-z0-9-]*)$/.exec(session.draft)?.[1];
+  const open = enabled && focused && !dismissed && query !== undefined;
   const { id, workspaceId, agentPresetId, agentPresetVersion, isDraft } = session;
-  const key =
-    query === undefined
-      ? ''
-      : JSON.stringify([id, workspaceId, agentPresetId, agentPresetVersion, isDraft, query]);
+  const key = JSON.stringify([id, workspaceId, agentPresetId, agentPresetVersion, isDraft]);
 
   useEffect(() => {
-    if (query === undefined || !client.listSkills) {
+    if (!open || !client.listSkills) {
       return;
     }
     const abort = new AbortController();
-    const listSkills = client.listSkills;
-    const timer = window.setTimeout(() => {
-      const scope = { id, workspaceId, agentPresetId, agentPresetVersion, isDraft };
-      void listSkills(scope, query, abort.signal)
-        .then((items) => {
-          if (!abort.signal.aborted) {
-            setResult({ key, items });
-          }
-        })
-        .catch(() => undefined);
-    }, 120);
-    return () => {
-      window.clearTimeout(timer);
-      abort.abort();
-    };
-  }, [client, query, key, id, workspaceId, agentPresetId, agentPresetVersion, isDraft]);
+    const scope = { id, workspaceId, agentPresetId, agentPresetVersion, isDraft };
+    void client
+      .listSkills(scope, abort.signal)
+      .then((items) => {
+        if (!abort.signal.aborted) {
+          setResult({ key, items });
+        }
+      })
+      .catch(() => undefined);
+    return () => abort.abort();
+  }, [client, open, key, id, workspaceId, agentPresetId, agentPresetVersion, isDraft]);
 
-  const items = result && result.key === key ? result.items : [];
+  const items =
+    open && result?.key === key
+      ? result.items
+          .filter(
+            ({ name, description }) =>
+              name.includes(query) || description.toLowerCase().includes(query),
+          )
+          .slice(0, 30)
+      : [];
   const current = Math.min(index, items.length - 1);
 
   useEffect(() => {
@@ -55,10 +55,15 @@ export function useSkillSuggestions(
     document.getElementById(`${listId}-${current}`)?.scrollIntoView({ block: 'nearest' });
   }, [current, key, listId]);
 
+  function dismiss() {
+    setDismissed(true);
+    setResult(undefined);
+  }
+
   function select(name: string) {
     client.setDraft(id, `/${name} `);
     setSelected(name);
-    setDismissed(true);
+    dismiss();
   }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -66,7 +71,7 @@ export function useSkillSuggestions(
       return false;
     }
     if (event.key === 'Escape') {
-      setDismissed(true);
+      dismiss();
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       setIndex((current + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length);
     } else if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
@@ -85,11 +90,19 @@ export function useSkillSuggestions(
     current,
     selected: explicitSkillName(session.draft) === selected ? selected : undefined,
     select,
-    setFocused,
-    setDismissed,
+    setFocused(focused: boolean) {
+      setFocused(focused);
+      if (!focused) {
+        setResult(undefined);
+      }
+    },
+    dismiss,
     changed(text: string) {
       setIndex(0);
       setDismissed(false);
+      if (!/^\/[a-z0-9-]*$/.test(text)) {
+        setResult(undefined);
+      }
       if (explicitSkillName(text) !== selected) {
         setSelected(undefined);
       }
@@ -109,7 +122,7 @@ export function SkillSuggestions({
       open={items.length > 0}
       onOpenChange={(open) => {
         if (!open) {
-          suggestions.setDismissed(true);
+          suggestions.dismiss();
         }
       }}
     >

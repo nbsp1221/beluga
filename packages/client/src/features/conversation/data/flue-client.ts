@@ -3,7 +3,7 @@ import {
   CONVERSATION_PATH,
   skillInvocationAttributesSchema,
   workspaceInstructionChanges,
-  workspaceInstructionsRootError,
+  conversationFailureMessage,
 } from '@workspace/protocol/host';
 import type { AssistantMessagePart, Message, TurnActivity } from '../contract.js';
 
@@ -87,13 +87,7 @@ export function conversationMessages(
     return {
       state: outcome,
       durationMs,
-      error:
-        error &&
-        typeof error === 'object' &&
-        'type' in error &&
-        error.type === workspaceInstructionsRootError.type
-          ? workspaceInstructionsRootError.message
-          : undefined,
+      error: conversationFailureMessage(error),
     };
   }
 

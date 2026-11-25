@@ -5,6 +5,23 @@ export const workspaceInstructionsRootError = {
   type: 'workspace_instructions_root_unavailable',
   message: 'Beluga could not determine the project root for workspace instructions.',
 };
+export const skillLoadFailureType = 'skill_load_failed';
+
+export function conversationFailureMessage(error: unknown) {
+  if (!error || typeof error !== 'object' || !('type' in error)) {
+    return;
+  }
+  if (error.type === workspaceInstructionsRootError.type) {
+    return workspaceInstructionsRootError.message;
+  }
+  if (
+    error.type === skillLoadFailureType &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message;
+  }
+}
 
 export const CONVERSATION_PATH = '/api/conversations';
 export const CONVERSATION_ACTIVITY_PATH = `${CONVERSATION_PATH}/activity`;

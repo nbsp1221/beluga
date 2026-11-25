@@ -1,5 +1,5 @@
 diff --git a/dist/agent-execution-store-HWARCScI.d.mts b/dist/agent-execution-store-HWARCScI.d.mts
-index c9814eee223d3e933e0f2affa778160245f86184..1b5c4f5120f6cf758a56beb390b18446e5011708 100644
+index c9814eee223d3e933e0f2affa778160245f86184..4bf2f48fb5f723b57e02e0e3eff778155fbc0b5b 100644
 --- a/dist/agent-execution-store-HWARCScI.d.mts
 +++ b/dist/agent-execution-store-HWARCScI.d.mts
 @@ -644,6 +644,7 @@ interface AgentAppendMessage extends AgentSignalAppend {
@@ -19,7 +19,7 @@ index c9814eee223d3e933e0f2affa778160245f86184..1b5c4f5120f6cf758a56beb390b18446
  /** One `useAgentFinish` declaration; identity is the declaration index. */
  interface AgentFinishDeclaration {
 diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
-index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705f02ff7e4 100644
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b11faf75c 100644
 --- a/dist/conversation-stream-store-BJbg7IHa.mjs
 +++ b/dist/conversation-stream-store-BJbg7IHa.mjs
 @@ -964,6 +964,7 @@ function toTurnMessage(message) {
@@ -97,18 +97,28 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705
  	}
  	/**
  	* All durable records of one type for this conversation and submission, in
-@@ -1686,6 +1699,10 @@ var Session = class {
+@@ -1675,6 +1688,12 @@ var Session = class {
+ 	* the finish-context writer: append is legal only while the callback
+ 	* runs.
+ 	*/
++	contextSignals(type) {
++		return [...this.agentLoop.state.messages, ...this.agentLoop.peekQueuedMessages()].flatMap((message) => {
++			const source = message[Symbol.for("flue.contextSignal")];
++			return source?.type === type ? [{ content: source.content, attributes: source.attributes }] : [];
++		});
++	}
+ 	async executeAgentStartHook(index, hook, signal) {
+ 		let harness;
+ 		let appendWindowOpen = true;
+@@ -1686,6 +1705,7 @@ var Session = class {
  				appends.push(assertAppendMessage(message));
  			},
  			log: this.createHookLogger("useAgentStart", index),
-+			contextSignals: (type) => [...this.agentLoop.state.messages, ...this.agentLoop.peekQueuedMessages()].flatMap((message) => {
-+				const source = message[Symbol.for("flue.contextSignal")];
-+				return source?.type === type ? [{ content: source.content, attributes: source.attributes }] : [];
-+			}),
++			contextSignals: (type) => this.contextSignals(type),
  			signal,
  			get harness() {
  				harness ??= session.createInvocationHarness(generateInvocationId(), signal);
-@@ -1695,6 +1712,7 @@ var Session = class {
+@@ -1695,6 +1715,7 @@ var Session = class {
  		try {
  			await hook.run(ctx);
  		} catch (error) {
@@ -116,7 +126,22 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705
  			throw new Error(`[flue] A useAgentStart callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
  		} finally {
  			appendWindowOpen = false;
-@@ -4133,6 +4151,7 @@ var Session = class {
+@@ -3489,10 +3510,11 @@ var Session = class {
+ 						const invocationId = toolDef.harness ? generateInvocationId() : void 0;
+ 						const harness = invocationId ? this.createInvocationHarness(invocationId, mergedSignal, toolDef) : void 0;
+ 						try {
+-							const context = harness ? {
++							const context = {
+ 								...parsed.context,
+-								harness
+-							} : parsed.context;
++								...harness ? { harness } : {},
++								contextSignals: (type) => this.contextSignals(type)
++							};
+ 							const resolved = resolveToolRun(toolDef, await raceToolWithDeadline(() => toolDef.run(context), mergedSignal, toolDef.timeoutMs, toolDef.name));
+ 							const output = resolved.output;
+ 							return {
+@@ -4133,6 +4155,7 @@ var Session = class {
  			}
  			if (overflow || retryable) throwIfHalted();
  			try {
@@ -124,7 +149,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705
  				await start();
  				await this.agentLoop.waitForIdle();
  			} catch (error) {
-@@ -5118,6 +5137,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
+@@ -5118,6 +5141,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
  	emitCoordinatorEvent({
  		type: "submission_settled",
  		submissionId: submission.submissionId,
@@ -132,7 +157,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705
  		outcome,
  		error: serializeSubmissionError(error)
  	}, errorInfo);
-@@ -5310,6 +5330,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
+@@ -5310,6 +5334,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
  	const event = ctx.createEvent({
  		type: "submission_settled",
  		submissionId: attempt.submissionId,
@@ -140,7 +165,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705
  		outcome,
  		...outcome === "completed" ? {} : { error: serializeSubmissionError(error) }
  	});
-@@ -5419,6 +5440,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
+@@ -5419,6 +5444,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
  	emitCoordinatorEvent?.({
  		type: "submission_settled",
  		submissionId: pending.submissionId,
@@ -208,10 +233,18 @@ index ce5ad79e75c6e9820e7e213bb79c981445580fe2..a3017563f5dcc85fab64bf3ab306cc61
  //#endregion
  //#region src/hooks/use-data-writer.ts
 diff --git a/dist/types-BBdvLv_l.d.mts b/dist/types-BBdvLv_l.d.mts
-index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..4fea4bddfabeca5a072731824e7a82cb4d8cc519 100644
+index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..db91388080bfb1321a11bcfa181c45cbf56a8965 100644
 --- a/dist/types-BBdvLv_l.d.mts
 +++ b/dist/types-BBdvLv_l.d.mts
-@@ -1437,6 +1437,7 @@ type FlueEventVariant = {
+@@ -133,6 +133,7 @@ type ToolContext<S extends ToolInputSchema | undefined, H extends boolean | unde
+    * model turn behind it (evals, direct execution), the id is synthesized.
+    */
+   readonly toolCallId: string;
++  readonly contextSignals?: (type: string) => readonly { content: string; attributes?: Readonly<Record<string, string>> }[];
+   readonly signal?: AbortSignal;
+   /**
+    * Progress logging for long-running tools. Lines are emitted into the
+@@ -1437,6 +1438,7 @@ type FlueEventVariant = {
  } | {
    type: 'submission_settled';
    submissionId: string;

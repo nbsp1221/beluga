@@ -6,6 +6,7 @@ import {
   accessModeInputSchema,
   availableAccessModes,
   conversationCatalogSchema,
+  conversationFailureMessage,
   conversationUsageSchema,
   explicitSkillName,
   runSettingsSchema,
@@ -161,8 +162,8 @@ export function createConnectedConversation({
     activity,
     getSnapshot,
     subscribe,
-    async listSkills(session, query, signal) {
-      const params = new URLSearchParams({ q: query });
+    async listSkills(session, signal) {
+      const params = new URLSearchParams();
       if (session.isDraft) {
         const state = agentPresets.getSnapshot();
         const id = session.agentPresetId ?? state.defaultPresetId;
@@ -485,7 +486,12 @@ function createSubmissionClient({
       try {
         await client.wait(receipt, { signal });
       } catch (error) {
-        if (!(error instanceof FlueExecutionError && error.failure === 'aborted')) {
+        if (
+          !(
+            error instanceof FlueExecutionError &&
+            (error.failure === 'aborted' || conversationFailureMessage(error.error))
+          )
+        ) {
           throw error;
         }
       }

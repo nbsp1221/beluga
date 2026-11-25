@@ -1,6 +1,7 @@
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
-import { skillNameSchema } from '@workspace/protocol/host';
+import { FlueError } from '@flue/runtime';
+import { skillLoadFailureType, skillNameSchema } from '@workspace/protocol/host';
 import * as v from 'valibot';
 import { FileReadError, read } from '../filesystem/read.js';
 import { loadPi } from '../pi/tool.js';
@@ -26,6 +27,12 @@ export interface SkillSource {
   scope: 'project' | 'global';
   modelInvocable: boolean;
   userInvocable: boolean;
+}
+
+export class SkillLoadError extends FlueError {
+  constructor(message: string) {
+    super({ type: skillLoadFailureType, message, details: '', dev: '' });
+  }
 }
 
 function within(root: string, target: string) {
@@ -87,14 +94,22 @@ async function inspectSkill(
 ): Promise<SkillSource | undefined> {
   try {
     signal?.throwIfAborted();
-    const directory = await realpath(join(root, name));
+    const entry = join(root, name);
+    const directory = await realpath(entry);
+    if (!within(boundary, directory)) {
+      console.warn(`Skipped skill ${name} at ${entry}: outside the ${scope} boundary.`);
+      return;
+    }
     const path = await realpath(join(directory, 'SKILL.md'));
-    if (!within(boundary, directory) || !within(boundary, path)) {
+    if (!within(boundary, path)) {
+      console.warn(
+        `Skipped skill ${name} at ${join(entry, 'SKILL.md')}: outside the ${scope} boundary.`,
+      );
       return;
     }
     const parsed = parseSkill(await readSkill(path, true, signal), name);
     if (!parsed) {
-      console.warn(`Skipped invalid skill metadata for ${name}.`);
+      console.warn(`Skipped invalid skill metadata at ${path}.`);
       return;
     }
     return {
@@ -110,7 +125,7 @@ async function inspectSkill(
   } catch (error) {
     signal?.throwIfAborted();
     if (!missing(error)) {
-      console.warn(`Could not read skill ${name}.`);
+      console.warn(`Could not read skill ${name} at ${join(root, name, 'SKILL.md')}.`);
     }
   }
 }
@@ -119,6 +134,7 @@ export async function discoverSkills(
   cwd: string | undefined,
   globals: readonly string[],
   signal?: AbortSignal,
+  onlyName?: string,
 ) {
   const roots: { path: string; boundary?: string; scope: SkillSource['scope'] }[] = [];
   if (cwd) {
@@ -147,6 +163,7 @@ export async function discoverSkills(
     try {
       const canonical = await realpath(root);
       if (boundary && !within(boundary, canonical)) {
+        console.warn(`Skipped skill directory ${root}: outside the ${scope} boundary.`);
         continue;
       }
       const entries = (await readdir(canonical, { withFileTypes: true }))
@@ -157,10 +174,12 @@ export async function discoverSkills(
         )
         .sort((a, b) => (a.name < b.name ? -1 : Number(a.name > b.name)));
       const selected = entries.slice(0, maxCandidates - candidates);
+      const requested =
+        onlyName === undefined ? selected : selected.filter(({ name }) => name === onlyName);
       const batchSize = 16;
-      for (let offset = 0; offset < selected.length; offset += batchSize) {
+      for (let offset = 0; offset < requested.length; offset += batchSize) {
         const batch = await Promise.all(
-          selected
+          requested
             .slice(offset, offset + batchSize)
             .map(({ name }) => inspectSkill(canonical, name, scope, boundary ?? canonical, signal)),
         );
@@ -168,8 +187,12 @@ export async function discoverSkills(
           if (!skill) {
             continue;
           }
-          if (skills.has(skill.name)) {
-            console.warn(`A higher priority definition shadows skill ${skill.name}.`);
+          if (onlyName !== undefined) {
+            return [skill];
+          }
+          const winner = skills.get(skill.name);
+          if (winner) {
+            console.warn(`Skill ${skill.name} uses ${winner.path}; shadowed ${skill.path}.`);
           } else {
             skills.set(skill.name, skill);
           }
@@ -199,20 +222,20 @@ export async function loadSkill(
   const directory = await realpath(join(source.root, source.name)).catch(() => undefined);
   const path = directory && (await realpath(join(directory, 'SKILL.md')).catch(() => undefined));
   if (directory !== source.directory || path !== source.path) {
-    throw new Error(`Skill ${source.name} is no longer available.`);
+    throw new SkillLoadError(`Skill ${source.name} is no longer available.`);
   }
   const text = await readSkill(path, false, signal).catch(() => undefined);
   signal?.throwIfAborted();
   const parsed = parseSkill(text, source.name);
   if (!parsed?.body) {
-    throw new Error(`Could not load skill ${source.name}. Check SKILL.md.`);
+    throw new SkillLoadError(`Could not load skill ${source.name}. Check SKILL.md.`);
   }
   if (
     actor === 'model'
       ? parsed.metadata['disable-model-invocation'] === true
       : parsed.metadata['user-invocable'] === false
   ) {
-    throw new Error(`Skill ${source.name} does not allow this type of invocation.`);
+    throw new SkillLoadError(`Skill ${source.name} does not allow this type of invocation.`);
   }
   return parsed.body;
 }

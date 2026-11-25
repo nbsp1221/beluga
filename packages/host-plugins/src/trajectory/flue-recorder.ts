@@ -4,7 +4,7 @@ import {
   skillInvocationAttributesSchema,
   skillInvocationSignal,
   workspaceInstructionChanges,
-  workspaceInstructionsRootError,
+  conversationFailureMessage,
 } from '@workspace/protocol/host';
 import * as v from 'valibot';
 import type { TrajectoryStore } from './store.js';
@@ -203,9 +203,7 @@ function capture(
       event.outcome === 'aborted' ? 'interrupted' : event.outcome,
       event.timestamp,
       event.outcome === 'failed'
-        ? event.error?.type === workspaceInstructionsRootError.type
-          ? workspaceInstructionsRootError.message
-          : 'The run failed.'
+        ? (conversationFailureMessage(event.error) ?? 'The run failed.')
         : undefined,
     );
   } else if (event.type === 'compaction_start' && context) {

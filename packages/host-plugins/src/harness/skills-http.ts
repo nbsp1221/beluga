@@ -9,7 +9,7 @@ export function mountSkillSuggestions(
   listSkills: NonNullable<AgentContextCapability['listSkills']>,
 ) {
   app.on(productRoutes.listSkills.method, productRoutes.listSkills.path, async (c) => {
-    const { sessionId, presetId, presetVersion, q = '' } = c.req.query();
+    const { sessionId, presetId, presetVersion } = c.req.query();
     const session = sessionId ? catalog.findSession(sessionId) : undefined;
     const workspaceId = c.req.query('workspaceId') ?? '';
     const workspace = catalog.find(session?.workspaceId ?? workspaceId);
@@ -23,15 +23,6 @@ export function mountSkillSuggestions(
     if (!preset.capabilities.includes(agentSkillsCapabilityId)) {
       return c.json([]);
     }
-    const query = q.trim().toLowerCase();
-    const entries = await listSkills(workspace.path, c.req.raw.signal);
-    return c.json(
-      entries
-        .filter(
-          ({ name, description }) =>
-            name.includes(query) || description.toLowerCase().includes(query),
-        )
-        .slice(0, 30),
-    );
+    return c.json(await listSkills(workspace.path, c.req.raw.signal));
   });
 }

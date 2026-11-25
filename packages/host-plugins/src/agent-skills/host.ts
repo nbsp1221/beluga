@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -19,7 +19,7 @@ import {
 } from '@workspace/protocol/host';
 import * as v from 'valibot';
 import type { AgentCapability, AgentCapabilityPlugin } from '../agent-capabilities/host.js';
-import { type SkillSource, discoverSkills, loadSkill } from './discovery.js';
+import { SkillLoadError, type SkillSource, discoverSkills, loadSkill } from './discovery.js';
 import { skillBodyLimit, skillBodyTokens, skillCatalog } from './prompt.js';
 
 interface Activation {
@@ -29,7 +29,6 @@ interface Activation {
   path: string;
   actor: 'model' | 'user';
   toolCallId?: string;
-  digest: string;
   tokens: number;
   body: string;
 }
@@ -65,6 +64,38 @@ function canRestore(activation: Activation, sources: readonly SkillSource[]) {
   );
 }
 
+function visibleActivation(
+  activation: Activation,
+  signals: ReturnType<AgentStartContext['contextSignals']>,
+) {
+  const previous = signals.findLast(({ attributes }) => attributes?.name === activation.name);
+  if (previous?.attributes?.id && previous.content === activation.body) {
+    return {
+      ...activation,
+      id: previous.attributes.id,
+      toolCallId: previous.attributes.toolCallId,
+    };
+  }
+}
+
+function withinRestoreBudget(active: readonly Activation[], limit: number) {
+  let used = 0;
+  return active.filter(({ tokens }) => {
+    if (used + tokens > limit) {
+      return false;
+    }
+    used += tokens;
+    return true;
+  });
+}
+
+function remember(active: readonly Activation[], activation: Activation, limit: number) {
+  return withinRestoreBudget(
+    [activation, ...active.filter(({ name }) => name !== activation.name)],
+    limit,
+  );
+}
+
 declare module '@workspace/runtime' {
   interface Services {
     agentSkills: AgentCapability;
@@ -92,8 +123,8 @@ export function agentSkillsCapability(
             name: 'Agent skills',
             description: 'Discover and load reusable instructions from SKILL.md files.',
           },
-          async listSkills(cwd, signal) {
-            return (await discoverSkills(cwd, roots, signal))
+          async listSkills(cwd, signal, onlyName) {
+            return (await discoverSkills(cwd, roots, signal, onlyName))
               .filter(({ userInvocable }) => userInvocable)
               .map(({ name, description, modelInvocable }) => ({
                 name,
@@ -122,17 +153,16 @@ export function agentSkillsCapability(
                 !sessions.sessionHasCapability(sessionId, agentSkillsCapabilityId) ||
                 (source.scope === 'project' && sessions.workspaceRootForSession(sessionId) !== cwd)
               ) {
-                throw new Error('The conversation no longer allows this skill.');
+                throw new SkillLoadError('The conversation no longer allows this skill.');
               }
               const instructions = await loadSkill(source, actor, signal);
               const body = `Skill directory: ${source.directory}\nResolve relative references from this directory.\n\n${instructions}`;
               const tokens = skillBodyTokens(body, source.name);
               if (tokens > bodyLimit) {
-                throw new Error(
-                  `Skill ${source.name} exceeds the ${bodyLimit}-token instruction limit.`,
+                throw new SkillLoadError(
+                  `Skill ${source.name} exceeds the ${bodyLimit}-token estimated instruction limit.`,
                 );
               }
-              const digest = createHash('sha256').update(body).digest('hex');
               return {
                 id: randomUUID(),
                 name: source.name,
@@ -140,45 +170,23 @@ export function agentSkillsCapability(
                 path: source.path,
                 actor,
                 toolCallId,
-                digest,
                 tokens,
                 body,
               } satisfies Activation;
             }
 
-            function save(activation: Activation) {
-              setState((current) => {
-                let used = 0;
-                const active = [
-                  activation,
-                  ...current.active.filter(({ name }) => name !== activation.name),
-                ].filter(({ tokens }) => {
-                  if (used + tokens > restoreLimit) {
-                    return false;
-                  }
-                  used += tokens;
-                  return true;
-                });
-                return { ...current, active };
-              });
-            }
-
             function restore(
               { append, contextSignals }: AgentStartContext,
-              sources?: readonly SkillSource[],
+              active: readonly Activation[],
             ) {
               const visible = new Set(
                 contextSignals(skillInvocationSignal).map(({ attributes }) => attributes?.id),
               );
-              let left = restoreLimit;
-              for (const activation of state.active) {
-                if ((sources && !canRestore(activation, sources)) || activation.tokens > left) {
-                  continue;
-                }
-                if (visible.has(activation.id)) {
-                  left -= activation.tokens;
-                } else if (trajectory.hasAppliedContext(sessionId, activation.id)) {
-                  left -= activation.tokens;
+              for (const activation of withinRestoreBudget(active, restoreLimit)) {
+                if (
+                  !visible.has(activation.id) &&
+                  trajectory.hasAppliedContext(sessionId, activation.id)
+                ) {
                   append(activationSignal(activation, true));
                 }
               }
@@ -190,34 +198,26 @@ export function agentSkillsCapability(
                   return;
                 }
                 const sources = await discoverSkills(cwd, roots, start.signal);
-                const visible = new Set(
-                  start
-                    .contextSignals(skillInvocationSignal)
-                    .map(({ attributes }) => attributes?.id),
-                );
                 const selected = explicitSkillName(delivery.body);
                 const source = sources.find(
                   ({ name, userInvocable }) => userInvocable && name === selected,
                 );
                 const next = source && (await activate(source, 'user', start.signal));
                 start.signal.throwIfAborted();
-                setState((current) => ({
-                  ...current,
+                const previous =
+                  next && visibleActivation(next, start.contextSignals(skillInvocationSignal));
+                const eligible = state.active.filter((item) => canRestore(item, sources));
+                const active = next ? remember(eligible, previous ?? next, restoreLimit) : eligible;
+                setState({
                   catalog: skillCatalog(sources, contextWindow),
-                  active: current.active.filter((item) => canRestore(item, sources)),
-                }));
-                restore(start, next ? sources.filter(({ name }) => name !== next.name) : sources);
-                if (next) {
-                  const previous = state.active.find(
-                    ({ name, digest }) => name === next.name && digest === next.digest,
-                  );
-                  if (!previous || !visible.has(previous.id)) {
-                    start.append(activationSignal(next));
-                    save(next);
-                  }
+                  active,
+                });
+                restore(start, active);
+                if (next && !previous) {
+                  start.append(activationSignal(next));
                 }
               },
-              { restoreContext: (start) => restore(start) },
+              { restoreContext: (start) => restore(start, state.active) },
             );
 
             const instructions = catalog.text ? [catalog.text] : [];
@@ -228,7 +228,7 @@ export function agentSkillsCapability(
                     name: 'skill',
                     description: 'Load the full instructions for one listed skill.',
                     input: v.object({ name: v.string() }),
-                    async run({ data, signal, toolCallId }) {
+                    async run({ data, signal, toolCallId, contextSignals }) {
                       const source = catalog.entries.find(({ name }) => name === data.name);
                       if (!source) {
                         throw new Error('Choose a skill from the available skills list.');
@@ -243,15 +243,18 @@ export function agentSkillsCapability(
                       const job = (async () => {
                         const next = await activate(source, 'model', signal, toolCallId);
                         signal?.throwIfAborted();
-                        if (
-                          !state.active.some(
-                            ({ name, digest }) => name === next.name && digest === next.digest,
-                          )
-                        ) {
+                        const previous = visibleActivation(
+                          next,
+                          contextSignals?.(skillInvocationSignal) ?? [],
+                        );
+                        if (!previous) {
                           await dispatch(activationSignal(next));
                           signal?.throwIfAborted();
-                          save(next);
                         }
+                        setState((current) => ({
+                          ...current,
+                          active: remember(current.active, previous ?? next, restoreLimit),
+                        }));
                         return `Loaded skill: ${next.name}.`;
                       })();
                       pending.set(source.name, job);

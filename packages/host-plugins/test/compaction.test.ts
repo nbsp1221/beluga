@@ -300,6 +300,62 @@ test.for(['threshold', 'overflow'] as const)(
   },
 );
 
+test('restores the most recently reused skill when older bodies exceed the budget', async (context) => {
+  let providerInput = '';
+  const harness = await setupHarness(context, [], undefined, () => {
+    const provider = compactionProvider();
+    return {
+      ...provider,
+      streamSimple(model, input, options) {
+        providerInput = JSON.stringify(input.messages);
+        return provider.streamSimple(model, input, options);
+      },
+    };
+  });
+  for (const name of ['first', 'second', 'third']) {
+    const directory = join(dirname(harness.databasePath), 'skills', name);
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: Keep a decision\n---\n\nRULE_${name} ${'a'.repeat(12_000)}\n`,
+    );
+  }
+  const workspace = await harness.prepareWorkspace();
+  const { id } = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  const client = harness.sdk(id);
+
+  const submit = async (body: string) =>
+    client.wait(await client.send({ message: { kind: 'user', body } }), {
+      signal: AbortSignal.timeout(5_000),
+    });
+
+  for (const name of ['first', 'second', 'first', 'third']) {
+    await submit(`/${name} keep this workflow`);
+  }
+  for (let index = 0; index < 4; index++) {
+    await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
+  }
+  await submit('Trigger overflow');
+  const path = `${origin}/api/conversations/${id}/trajectory`;
+  const turn = (await readTrajectory(harness.fetch(path))).at(-1);
+  const model = turn?.records.findLast(
+    (record) => record.kind === 'assistant' && record.purpose === 'agent',
+  );
+  assert(turn && model);
+  const input = trajectoryModelInputResponseSchema.parse(
+    await (await harness.fetch(`${path}/${turn.id}/${model.id}`)).json(),
+  );
+  for (const prompt of [providerInput, JSON.stringify(input.messages)]) {
+    expect(prompt).toContain(checkpoint);
+    expect(prompt.match(/RULE_first/g)).toHaveLength(1);
+    expect(prompt.match(/RULE_third/g)).toHaveLength(1);
+    expect(prompt).not.toContain('RULE_second');
+  }
+});
+
 test('reports context usage for the selected model after it responds', async (context) => {
   const harness = await setupHarness(context, [], undefined, () => compactionProvider());
   const workspace = await harness.prepareWorkspace();

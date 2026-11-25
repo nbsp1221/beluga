@@ -7,7 +7,7 @@ import {
   skillSummarySchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { linkDirectory, origin, readTrajectory, setupHarness } from './fixtures/harness.js';
 
 async function writeSkill(root: string, name: string, marker: string, flags = '') {
@@ -37,6 +37,10 @@ function deferred() {
 }
 
 test('loads project overrides, then Host and shared global skills in other workspaces', async (context) => {
+  const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  context.onTestFinished(() => {
+    warnings.mockRestore();
+  });
   const harness = await setupHarness(context);
   const global = dirname(harness.databasePath);
   const shared = join(global, 'home', '.agents', 'skills');
@@ -49,7 +53,8 @@ test('loads project overrides, then Host and shared global skills in other works
   await writeSkill(project, 'review', 'PROJECT_BODY');
   const nestedReview = await writeSkill(nested, 'review', 'NESTED_BODY');
   const outside = await writeSkill(join(harness.other, 'other-skills'), 'linked', 'OUTSIDE_BODY');
-  await linkDirectory(outside, join(nested, 'linked'));
+  const linked = join(nested, 'linked');
+  await linkDirectory(outside, linked);
 
   await harness.prepareWorkspace();
   const workspace = await harness.registerWorkspace(join(harness.project, 'docs'));
@@ -66,6 +71,14 @@ test('loads project overrides, then Host and shared global skills in other works
   expect(automatic[0].toolNames.sort()).toEqual(['skill', 'task']);
   expect(automatic.at(-1)?.skillInstructions).toContain('NESTED_BODY');
   expect(automatic.at(-1)?.skillInstructions).not.toMatch(/HOST_BODY|SHARED_BODY|PROJECT_BODY/);
+  expect(warnings).toHaveBeenCalledWith(
+    expect.stringContaining(
+      `uses ${join(nestedReview, 'SKILL.md')}; shadowed ${join(hostReview, 'SKILL.md')}`,
+    ),
+  );
+  expect(warnings).toHaveBeenCalledWith(
+    expect.stringContaining(`${linked}: outside the project boundary.`),
+  );
   const [turn] = await readTrajectory(
     harness.fetch(`${origin}/api/conversations/${session.id}/trajectory`),
   );
@@ -186,6 +199,67 @@ test('does not apply an interrupted skill invocation on the next request', async
   expect(interrupted.records.some((record) => record.kind === 'context' && record.skill)).toBe(
     false,
   );
+});
+
+test.for(['user', 'model'] as const)(
+  'does not append an identical skill already in model input when called by the %s',
+  async (actor, context) => {
+    const harness = await setupHarness(context);
+    const skills = join(dirname(harness.databasePath), 'skills');
+    await writeSkill(skills, 'first', 'FIRST_SKILL ' + 'a'.repeat(17_500));
+    await writeSkill(skills, 'second', 'SECOND_SKILL ' + 'b'.repeat(17_500));
+    const workspace = await harness.prepareWorkspace();
+    const { id } = await harness.create(
+      workspace.id,
+      (await harness.createPreset([agentSkillsCapabilityId])).id,
+    );
+    await submit(harness, id, '/first First task');
+    await submit(harness, id, '/second Second task');
+    const requests = await submit(
+      harness,
+      id,
+      actor === 'user' ? '/first Again' : JSON.stringify({ tool: 'skill', name: 'first' }),
+    );
+    expect(requests.at(-1)?.skillInstructions.match(/FIRST_SKILL/g)).toHaveLength(1);
+    const path = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(path))).at(-1);
+    const model = turn?.records.findLast((record) => record.kind === 'assistant');
+    if (!turn || !model) {
+      throw new Error('Missing final model request.');
+    }
+    const response = await harness.fetch(`${path}/${turn.id}/${model.id}`);
+    const input = trajectoryModelInputResponseSchema.parse(await response.json());
+    expect(JSON.stringify(input.messages).match(/FIRST_SKILL/g)).toHaveLength(1);
+    expect(turn.records.some((record) => record.kind === 'context')).toBe(false);
+  },
+);
+
+test('records a selected skill body failure without sending a model request', async (context) => {
+  const harness = await setupHarness(context);
+  await writeSkill(
+    join(dirname(harness.databasePath), 'skills'),
+    'oversized',
+    'LARGE_SKILL ' + 'a'.repeat(24_000),
+  );
+  const workspace = await harness.prepareWorkspace();
+  const { id } = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  const client = harness.sdk(id);
+  const message = { kind: 'user' as const, body: '/oversized Try it', selectedSkill: 'oversized' };
+  const receipt = await client.send({ message });
+  await expect(client.wait(receipt, { signal: AbortSignal.timeout(5_000) })).rejects.toMatchObject({
+    failure: 'failed',
+  });
+  expect(harness.observed).toHaveLength(0);
+  const [turn] = await readTrajectory(
+    harness.fetch(`${origin}/api/conversations/${id}/trajectory`),
+  );
+  expect(turn.status).toBe('failed');
+  const error = 'Skill oversized exceeds the 5000-token estimated instruction limit.';
+  expect(turn.error).toBe(error);
+  expect((await client.history()).settlements.at(-1)?.error).toMatchObject({ message: error });
 });
 
 test(

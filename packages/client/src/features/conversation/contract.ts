@@ -108,7 +108,6 @@ export interface ConversationClient {
       Session,
       'id' | 'workspaceId' | 'agentPresetId' | 'agentPresetVersion' | 'isDraft'
     >,
-    query: string,
     signal: AbortSignal,
   ): Promise<readonly SkillSummary[]>;
   send(this: void, sessionId: string, options: SendOptions): Promise<void>;
