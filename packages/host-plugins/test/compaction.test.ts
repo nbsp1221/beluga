@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   type AssistantMessage,
   type Provider,
@@ -168,8 +170,9 @@ test(
         await releaseSummary.promise;
       }),
     );
+    await writeFile(join(harness.project, 'AGENTS.md'), 'FIXTURE_RULE_SURVIVES_COMPACTION');
     const workspace = await harness.prepareWorkspace();
-    const preset = await harness.createPreset();
+    const preset = await harness.createPreset(['agent-instructions']);
     const { id } = await harness.create(workspace.id, preset.id);
     const url = `${origin}/api/conversations/${id}`;
     const client = harness.sdk(id);
@@ -239,38 +242,91 @@ test(
       await (await harness.fetch(`${url}/trajectory/${last.id}/${model.id}`)).json(),
     );
     expect(JSON.stringify(input.messages)).toContain(checkpoint);
+    expect(JSON.stringify(input.messages).match(/FIXTURE_RULE_SURVIVES_COMPACTION/g)).toHaveLength(
+      1,
+    );
     expect(last.records.some((record) => record.kind === 'system')).toBe(false);
     expect((await usage()).context).toMatchObject({ status: 'available', inputTokens: 1500 });
-
-    const select = async (model: string, effort = 'default') => {
-      const response = await harness.fetch(`${url}/run-settings`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model, effort }),
-      });
-      expect(response.status).toBe(200);
-    };
-
-    await select('test-read/fixture', 'low');
-    expect((await usage()).context?.status).toBe('available');
-    await select('test-read/alternate');
-    expect((await usage()).context?.status).toBe('unavailable');
-    await select('test-read/fixture');
-    expect((await usage()).context?.status).toBe('unavailable');
-    await select('test-read/alternate');
-    await wait('Use the alternate model.');
-    const alternate = (await usage()).context;
-    expect(alternate).toMatchObject({
-      status: 'available',
-      inputTokens: 1500,
-      contextWindow: 128_000,
-      model: 'test-read/alternate',
-    });
-    expect(
-      alternate?.status === 'available' && alternate.estimatedTokens?.messages,
-    ).toBeGreaterThan(0);
   },
 );
+
+test('reports context usage for the selected model after it responds', async (context) => {
+  const harness = await setupHarness(context, [], undefined, () => compactionProvider());
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset();
+  const { id } = await harness.create(workspace.id, preset.id);
+  const url = `${origin}/api/conversations/${id}`;
+
+  const usage = async () =>
+    conversationUsageSchema.parse(await (await harness.fetch(`${url}/usage`)).json());
+
+  await harness.turn(id, 'Reply with the initial model.');
+
+  const select = async (model: string, effort = 'default') => {
+    const response = await harness.fetch(`${url}/run-settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, effort }),
+    });
+    expect(response.status).toBe(200);
+  };
+
+  await select('test-read/fixture', 'low');
+  expect((await usage()).context?.status).toBe('available');
+  await select('test-read/alternate');
+  expect((await usage()).context?.status).toBe('unavailable');
+  await select('test-read/fixture');
+  expect((await usage()).context?.status).toBe('unavailable');
+  await select('test-read/alternate');
+  await harness.turn(id, 'Use the alternate model.');
+  const alternate = (await usage()).context;
+  expect(alternate).toMatchObject({
+    status: 'available',
+    inputTokens: 1500,
+    contextWindow: 128_000,
+    model: 'test-read/alternate',
+  });
+  expect(alternate?.status === 'available' && alternate.estimatedTokens?.messages).toBeGreaterThan(
+    0,
+  );
+});
+
+test('restores workspace instructions in the model request that retries an overflow', async (context) => {
+  const rule = 'FIXTURE_RULE_SURVIVES_OVERFLOW';
+  const harness = await setupHarness(context, [], undefined, () => compactionProvider());
+  await writeFile(join(harness.project, 'AGENTS.md'), rule);
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset(['agent-instructions']);
+  const { id } = await harness.create(workspace.id, preset.id);
+  for (let index = 0; index < 4; index++) {
+    await harness.turn(id, `Seed ${index}: ${'work '.repeat(4_000)}`);
+  }
+  await harness.turn(id, 'Trigger overflow');
+
+  const url = `${origin}/api/conversations/${id}/trajectory`;
+  const overflowTurn = (await readTrajectory(harness.fetch(url))).at(-1);
+  assert(overflowTurn);
+  expect(overflowTurn.records).toContainEqual(
+    expect.objectContaining({ kind: 'compaction', reason: 'overflow', status: 'completed' }),
+  );
+  const attempts = overflowTurn.records.filter(
+    (record) => record.kind === 'assistant' && record.purpose === 'agent',
+  );
+  expect(attempts).toMatchObject([
+    { status: 'failed' },
+    { status: 'completed', contextCompacted: true },
+  ]);
+  const inputs = await Promise.all(
+    attempts.map(async ({ id }) => {
+      const response = await harness.fetch(`${url}/${overflowTurn.id}/${id}`);
+      return trajectoryModelInputResponseSchema.parse(await response.json());
+    }),
+  );
+  expect(JSON.stringify(inputs[0].messages)).toContain(rule);
+  const retry = JSON.stringify(inputs[1].messages);
+  expect(retry).toContain(checkpoint);
+  expect(retry.match(new RegExp(rule, 'g')) ?? []).toHaveLength(1);
+});
 
 test.for(['failed', 'interrupted', 'overflow'] as const)(
   'records a %s compaction outcome from Flue',

@@ -8,7 +8,7 @@ import { expect, test } from 'vitest';
 import { mountTrajectoryRoutes } from '../src/trajectory/http.js';
 import { createTrajectoryStore } from '../src/trajectory/store.js';
 
-test('pages a long history, finds older matches, and skips unchanged responses', async () => {
+test('pages and searches the complete Trajectory history', () => {
   const db = new DatabaseSync(':memory:');
   try {
     const store = createTrajectoryStore(db);
@@ -31,7 +31,16 @@ test('pages a long history, finds older matches, and skips unchanged responses',
       turn: 32,
       precedingModelRequests: 31,
     });
+  } finally {
+    db.close();
+  }
+});
 
+test('returns a fresh Trajectory response only when its ETag changes', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const store = createTrajectoryStore(db);
+    store.put('session', 'turn', { id: 'input', kind: 'user', text: 'Work' });
     const app = new Hono();
     mountTrajectoryRoutes(
       app,
@@ -47,7 +56,7 @@ test('pages a long history, finds older matches, and skips unchanged responses',
     const headers = { 'If-None-Match': tag ?? '' };
     expect((await app.request(url, { headers })).status).toBe(304);
 
-    store.put('session', '210', { id: 'tool', kind: 'tool', name: 'read', status: 'completed' });
+    store.put('session', 'turn', { id: 'tool', kind: 'tool', name: 'read', status: 'completed' });
     expect((await app.request(url, { headers })).status).toBe(200);
   } finally {
     db.close();
@@ -114,12 +123,7 @@ test('restores model inputs and only records initial or changed system prompts',
       estimatedTokens: {
         systemPrompt: 2,
         tools: 0,
-        messages: Math.ceil(
-          second.messages.reduce(
-            (bytes, message) => bytes + Buffer.byteLength(JSON.stringify(message)),
-            0,
-          ) / 4,
-        ),
+        messages: 28, // The three fixture messages contain 112 UTF-8 bytes.
       },
     });
     expect(reopened.modelInput('another-session', 'turn', 'model:2')).toBe(undefined);

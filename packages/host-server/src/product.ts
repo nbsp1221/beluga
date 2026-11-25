@@ -4,6 +4,7 @@ import { fileReadCapability } from '@workspace/host-plugins/agent-capabilities/f
 import { fileSearchCapability } from '@workspace/host-plugins/agent-capabilities/file/search';
 import { fileWriteCapability } from '@workspace/host-plugins/agent-capabilities/file/write';
 import { shellExecCapability } from '@workspace/host-plugins/agent-capabilities/shell';
+import { agentInstructionsCapability } from '@workspace/host-plugins/agent-instructions/host';
 import { connectionHost } from '@workspace/host-plugins/connection/host';
 import { type HarnessOptions, createHarnessHost } from '@workspace/host-plugins/harness/host';
 import { createTrajectoryHost } from '@workspace/host-plugins/trajectory/host';
@@ -11,7 +12,7 @@ import { workspaceFileAccessPolicy } from '@workspace/host-plugins/workspace/fil
 import { createWorkspaceHost, workspaceCatalogPath } from '@workspace/host-plugins/workspace/host';
 import initialAgentPreset from './initial-agent-preset.json' with { type: 'json' };
 
-const agentCapabilities = [
+const toolCapabilities = [
   fileReadCapability,
   fileSearchCapability,
   fileWriteCapability,
@@ -30,6 +31,10 @@ export function hostPlugins(options: HostOptions): Plugin[] {
     plugins.push(options.auth);
   }
   if (options.harness) {
+    const agentCapabilities = [
+      ...toolCapabilities,
+      agentInstructionsCapability(options.harness.instructionsDirectory),
+    ];
     plugins.push(
       createWorkspaceHost(workspaceCatalogPath(options.harness.databasePath)),
       workspaceFileAccessPolicy,

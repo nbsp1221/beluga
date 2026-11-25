@@ -1,6 +1,13 @@
-import { Bot, Minimize2, Settings2, UserRound, Wrench } from 'lucide-react';
+import { Bot, FileText, Minimize2, Settings2, UserRound, Wrench } from 'lucide-react';
 
 export const trajectoryRoles = {
+  context: {
+    icon: FileText,
+    label: 'Context',
+    tag: 'bg-muted text-foreground',
+    mark: 'bg-muted-foreground',
+    lane: 0,
+  },
   system: {
     icon: Settings2,
     label: 'System',

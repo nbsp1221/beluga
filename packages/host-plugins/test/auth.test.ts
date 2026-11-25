@@ -107,26 +107,30 @@ test('renews a 24-hour session on a site visit and lets it expire after further 
   expect(await auth.authenticate(read)).toBe(false);
 });
 
-test('persists sessions across restart and revokes them on logout or access-code rotation', async (context) => {
-  const { session, restart, rotate } = await authFixture(context);
+test('restores sessions after a restart and persists logout for only that session', async (context) => {
+  const { session, restart } = await authFixture(context);
   const loggedOut = await session();
-  const rotated = await session();
+  const other = await session();
   const auth = await restart();
   expect(await auth.authenticate(loggedOut.read)).toBe(true);
-  expect(await auth.authenticate(rotated.read)).toBe(true);
-  const { http } = auth;
-  assert(http);
+  expect(await auth.authenticate(other.read)).toBe(true);
+  assert(auth.http);
+  expect((await auth.http.fetch(post('/api/auth/logout', loggedOut.cookie))).status).toBe(204);
 
-  expect((await http.fetch(post('/api/auth/logout', loggedOut.cookie))).status).toBe(204);
   const afterLogout = await restart();
   expect(await afterLogout.authenticate(loggedOut.read)).toBe(false);
-  expect(await afterLogout.authenticate(rotated.read)).toBe(true);
+  expect(await afterLogout.authenticate(other.read)).toBe(true);
+});
 
+test('rejects sessions and credentials from before an access-code rotation', async (context) => {
+  const { session, restart, rotate } = await authFixture(context);
+  const previous = await session();
+  const auth = await restart();
   const newCode = 'new-test-only-access-code';
   await rotate(newCode);
-  expect(await afterLogout.authenticate(post('/api/auth/visit', rotated.cookie))).toBe(false);
+  expect(await auth.authenticate(post('/api/auth/visit', previous.cookie))).toBe(false);
   const afterRotation = await restart();
-  expect(await afterRotation.authenticate(rotated.read)).toBe(false);
+  expect(await afterRotation.authenticate(previous.read)).toBe(false);
   assert(afterRotation.http);
   expect(
     (await afterRotation.http.fetch(post('/api/auth/login', '', origin, { code: accessCode })))

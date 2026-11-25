@@ -1,7 +1,7 @@
 ---
 status: current
 owner: maintainers
-last_reviewed: 2026-11-20
+last_reviewed: 2026-11-25
 ---
 
 # Development
@@ -157,6 +157,38 @@ for internal dependencies. CI or clean checkouts should use
 
 Git checks out text files with LF on every platform. Editors that support
 [EditorConfig](../.editorconfig) use LF, UTF-8, and two-space indentation.
+
+### Write and review tests
+
+Start from a working example that exercises the same boundary. The
+[workspace instructions suite](../packages/host-plugins/test/agent-instructions.test.ts)
+uses the [Host fixture](../packages/host-plugins/test/fixtures/harness.ts) for a
+fresh SQLite database, workspace, and deterministic model for each case.
+The [Connections test](../apps/web/src/Connections.test.tsx) drives the UI by
+role and verifies a state change with an in-flight request. The
+[connected product suite](../test/connected-product.test.ts) covers the contracts
+that need both the Host and the web client.
+
+- Give each independently observable behavior its own test. Use multiple
+  steps when the behavior depends on the sequence, such as restoring a record
+  after restarting the Host. Add new inputs for the same behavior with
+  `test.for`, as in the workspace instructions suite's external path cases.
+  Each case gets its own workspace and session.
+- Use the nearest public boundary that exercises the contract. Assert on
+  results, persisted records, or rendered controls. Let each test own its
+  data and cleanup through the fixture or the runner's lifecycle.
+- Wait for a response, event, or observable state. Use local fixtures for
+  dependencies such as model calls. Keep production credentials and fixed
+  delays out of the setup.
+- When a case times out, check which operation was slow and see whether
+  unrelated behaviors share that case. Raising a timeout does not address
+  those causes. Use a longer deadline only for an operation with a known
+  reason to take longer.
+
+Run the affected file with `pnpm --filter <package> exec vitest run <file> --reporter=verbose`
+or `pnpm test:integration <file> --reporter=verbose` for a root integration test.
+Then run `pnpm check`. For platform-sensitive changes, use both CI jobs and
+record the failing case and runner when reporting a timeout.
 
 ## Agent presets API
 

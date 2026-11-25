@@ -1,5 +1,9 @@
 import { type FlueConversationPart, type FlueConversationState, createFlueClient } from '@flue/sdk';
-import { CONVERSATION_PATH } from '@workspace/protocol/host';
+import {
+  CONVERSATION_PATH,
+  workspaceInstructionChanges,
+  workspaceInstructionsRootError,
+} from '@workspace/protocol/host';
 import type { AssistantMessagePart, Message, TurnActivity } from '../contract.js';
 
 export function connectConversation(id: string, fetchHost: typeof fetch, prefix = '') {
@@ -23,10 +27,36 @@ export function conversationMessages(
   { messages, settlements }: FlueConversationState,
   runningId?: string,
 ): Message[] {
-  const visible = messages.filter((message) => message.display === 'visible');
+  const visible = messages.filter(
+    (message) => message.display === 'visible' || message.signal?.tagName === 'system-reminder',
+  );
   const starts = new Map<string, number | undefined>();
   const responses = new Set<string>();
-  for (const { role, submissionId, timestamp } of visible) {
+  const toolIds = new Set<string>();
+  const contextsByTool = new Map<string, Extract<AssistantMessagePart, { type: 'context' }>[]>();
+  const contexts = new Map<string, Extract<AssistantMessagePart, { type: 'context' }>>();
+  for (const { id, role, submissionId, timestamp, parts, signal } of visible) {
+    if (signal?.tagName === 'system-reminder') {
+      const changes = workspaceInstructionChanges(signal.attributes?.changes);
+      if (changes?.length) {
+        const text = parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('');
+        const context = { type: 'context' as const, id, changes, text };
+        contexts.set(id, context);
+        const toolId = signal.attributes?.toolCallId;
+        if (toolId) {
+          const attached = contextsByTool.get(toolId) ?? [];
+          attached.push(context);
+          contextsByTool.set(toolId, attached);
+        }
+      }
+    }
+    if (role === 'assistant') {
+      for (const part of parts) {
+        if (part.type === 'dynamic-tool') {
+          toolIds.add(part.toolCallId);
+        }
+      }
+    }
     if (!submissionId) {
       continue;
     }
@@ -42,6 +72,7 @@ export function conversationMessages(
     id: string,
     outcome: (typeof settlements)[number]['outcome'] | undefined,
     endedAt: number | undefined,
+    error: unknown,
   ): TurnActivity | undefined {
     const startedAt = starts.get(id);
     if (!outcome) {
@@ -51,14 +82,31 @@ export function conversationMessages(
       startedAt !== undefined && endedAt !== undefined && endedAt >= startedAt
         ? endedAt - startedAt
         : undefined;
-    return { state: outcome, durationMs };
+    return {
+      state: outcome,
+      durationMs,
+      error:
+        error &&
+        typeof error === 'object' &&
+        'type' in error &&
+        error.type === workspaceInstructionsRootError.type
+          ? workspaceInstructionsRootError.message
+          : undefined,
+    };
   }
 
   return visible.flatMap<Message>((message) => {
+    if (message.signal?.tagName === 'system-reminder') {
+      const context = contexts.get(message.id);
+      const toolId = message.signal.attributes?.toolCallId;
+      return context && (!toolId || !toolIds.has(toolId))
+        ? [{ id: context.id, role: 'context', changes: context.changes, text: context.text }]
+        : [];
+    }
     const result = message.submissionId ? results.get(message.submissionId) : undefined;
     const endedAt = captureTime(result?.timestamp);
     const activity = message.submissionId
-      ? activityFor(message.submissionId, result?.outcome, endedAt)
+      ? activityFor(message.submissionId, result?.outcome, endedAt, result?.error)
       : undefined;
     const responseId = message.submissionId ? `turn:${message.submissionId}` : message.id;
 
@@ -118,6 +166,10 @@ export function conversationMessages(
         output: part.output,
         error: part.errorText,
       });
+      const attached = contextsByTool.get(part.toolCallId);
+      if (attached) {
+        parts.push(...attached);
+      }
     }
 
     return parts.length || activity

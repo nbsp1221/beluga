@@ -1,8 +1,10 @@
+import { realpath, stat } from 'node:fs/promises';
 import type { Plugin } from '@workspace/runtime';
 import { productRoutes } from '@workspace/protocol/host';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import '../auth/services.js';
+import { read } from '../filesystem/read.js';
 import { openWorkspaceCatalog } from './catalog.js';
 import { FolderError, browseFolders, resolveFolder } from './folders.js';
 import './services.js';
@@ -13,7 +15,13 @@ export function createWorkspaceHost(catalogPath: string): Plugin {
   return {
     id: 'workspace',
     requires: ['auth'],
-    provides: ['workspaceCatalog', 'workspaceToolSessions', 'sessionExists', 'workspaceHttp'],
+    provides: [
+      'workspaceCatalog',
+      'workspaceToolSessions',
+      'workspaceFiles',
+      'sessionExists',
+      'workspaceHttp',
+    ],
     setup(context) {
       const auth = context.get('auth');
       const { catalog, close } = openWorkspaceCatalog(catalogPath);
@@ -61,6 +69,7 @@ export function createWorkspaceHost(catalogPath: string): Plugin {
         },
       );
       context.provide('workspaceCatalog', conversationCatalog);
+      context.provide('workspaceFiles', { realpath, stat, read });
       context.provide('workspaceToolSessions', {
         workspaceRootForSession,
         sessionHasCapability: (id, capabilityId) =>

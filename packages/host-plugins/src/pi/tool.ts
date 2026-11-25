@@ -26,7 +26,7 @@ interface PiTool<Schema extends TSchema> {
 
 export function adaptPiTool<Schema extends TSchema>(
   tool: PiTool<Schema>,
-  forCall: (signal?: AbortSignal) => PiTool<Schema> = () => tool,
+  forCall: (signal?: AbortSignal, onFile?: (path: string) => void) => PiTool<Schema> = () => tool,
 ) {
   return {
     description: tool.description,
@@ -37,8 +37,13 @@ export function adaptPiTool<Schema extends TSchema>(
       const input = tool.prepareArguments ? tool.prepareArguments(structuredClone(data)) : data;
       return Check(tool.parameters, input) ? input : undefined;
     },
-    async execute(input: Static<Schema>, signal?: AbortSignal, toolCallId = '') {
-      const { content, isError } = await forCall(signal).execute(toolCallId, input, signal);
+    async execute(
+      input: Static<Schema>,
+      signal?: AbortSignal,
+      toolCallId = '',
+      onFile?: (path: string) => void,
+    ) {
+      const { content, isError } = await forCall(signal, onFile).execute(toolCallId, input, signal);
       const output = content
         .map((part) => {
           if (part.type !== 'text' || !('text' in part) || typeof part.text !== 'string') {

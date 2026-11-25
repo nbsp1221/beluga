@@ -19,6 +19,10 @@
       "types": "./dist/harness/host.d.ts",
       "default": "./dist/harness/host.js"
     },
+    "./agent-instructions/host": {
+      "types": "./dist/agent-instructions/host.d.ts",
+      "default": "./dist/agent-instructions/host.js"
+    },
     "./workspace/host": {
       "types": "./dist/workspace/host.d.ts",
       "default": "./dist/workspace/host.js"

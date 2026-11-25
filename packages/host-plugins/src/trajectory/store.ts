@@ -139,6 +139,9 @@ export function createTrajectoryStore(db: DatabaseSync) {
   const selectRecord = db.prepare(
     'SELECT value FROM trajectory_record WHERE session_id = ? AND submission_id = ? AND record_id = ?',
   );
+  const existingContext = db.prepare(
+    'SELECT 1 FROM trajectory_record WHERE session_id = ? AND record_id = ? LIMIT 1',
+  );
   const upsertRecord = db.prepare(`
     INSERT INTO trajectory_record (session_id, submission_id, record_id, value) VALUES (?, ?, ?, ?)
     ON CONFLICT (session_id, submission_id, record_id) DO UPDATE SET value = excluded.value
@@ -303,6 +306,7 @@ export function createTrajectoryStore(db: DatabaseSync) {
       timestamp: string,
       input: TrajectoryModelInput,
       observeSystemPrompt = true,
+      contexts: Extract<TrajectoryRecord, { kind: 'context' }>[] = [],
     ) {
       db.exec('BEGIN');
       try {
@@ -330,6 +334,11 @@ export function createTrajectoryStore(db: DatabaseSync) {
             text: previous ? 'System Prompt Updated' : 'Initial System Prompt',
           };
           upsertRecord.run(sessionId, submissionId, record.id, JSON.stringify(record));
+        }
+        for (const context of contexts) {
+          if (!existingContext.get(sessionId, context.id)) {
+            upsertRecord.run(sessionId, submissionId, context.id, JSON.stringify(context));
+          }
         }
 
         db.exec('COMMIT');

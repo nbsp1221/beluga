@@ -6,7 +6,20 @@ function createTool(cwd: string, operations?: (signal?: AbortSignal) => WriteOpe
   const tool = createWriteTool(cwd);
   return adaptPiTool(
     tool,
-    operations ? (signal) => createWriteTool(cwd, { operations: operations(signal) }) : undefined,
+    operations
+      ? (signal, onFile) => {
+          const io = operations(signal);
+          return createWriteTool(cwd, {
+            operations: {
+              ...io,
+              async writeFile(path, content) {
+                await io.writeFile(path, content);
+                onFile?.(path);
+              },
+            },
+          });
+        }
+      : undefined,
   );
 }
 

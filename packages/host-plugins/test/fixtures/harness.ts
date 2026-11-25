@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ToolResultMessage } from '@earendil-works/pi-ai';
@@ -19,6 +19,7 @@ import { fileReadCapability } from '../../src/agent-capabilities/file/read/host.
 import { fileSearchCapability } from '../../src/agent-capabilities/file/search/host.js';
 import { fileWriteCapability } from '../../src/agent-capabilities/file/write/host.js';
 import { shellExecCapability } from '../../src/agent-capabilities/shell/host.js';
+import { agentInstructionsCapability } from '../../src/agent-instructions/host.js';
 import { createAccessCodeVerifier } from '../../src/auth/access-code.js';
 import { createAccessCodeAuth } from '../../src/auth/host.js';
 import { createHarnessHost } from '../../src/harness/host.js';
@@ -54,17 +55,9 @@ export async function setupHarness(
   await mkdir(other);
   await writeFile(join(project, 'README.md'), 'project README\nsecond line\nthird line\n');
   await writeFile(join(project, 'docs', 'notes.txt'), 'other in-project file');
-  await writeFile(join(project, 'unicode.txt'), ('\uD55C'.repeat(100) + '\n').repeat(200));
-  await writeFile(join(project, 'long.txt'), 'line\n'.repeat(2_001));
-  await writeFile(join(project, 'large.txt'), 'a'.repeat(1_048_577));
 
   const outside = join(other, 'README.md');
   await writeFile(outside, 'outside marker');
-  await symlink(other, join(project, 'alias'), process.platform === 'win32' ? 'junction' : 'dir');
-  if (process.platform !== 'win32') {
-    await symlink(outside, join(project, 'symlink.txt'));
-  }
-  await link(outside, join(project, 'hardlink.txt'));
 
   const databasePath = join(root, 'chat.sqlite');
   const verifier = await createAccessCodeVerifier(accessCode);
@@ -73,8 +66,9 @@ export async function setupHarness(
     { id: 'test-read/alternate', name: 'Alternate', providerName: 'Fixture', efforts: ['low'] },
   ];
 
-  const boot = (capabilities: AgentCapabilityPlugin[] = [fileReadCapability]) =>
-    createRuntime([
+  const boot = (capabilities: AgentCapabilityPlugin[] = [fileReadCapability]) => {
+    const registered = [...capabilities, agentInstructionsCapability(root)];
+    return createRuntime([
       createTrajectoryHost(`${databasePath}.trajectory`),
       createHarnessHost(
         {
@@ -104,10 +98,11 @@ export async function setupHarness(
             };
           },
           databasePath,
+          instructionsDirectory: root,
         },
-        capabilities.map(({ service }) => service),
+        registered.map(({ service }) => service),
       ),
-      ...capabilities.map(({ plugin }) => plugin),
+      ...registered.map(({ plugin }) => plugin),
       workspaceFileAccessPolicy,
       createWorkspaceHost(`${databasePath}.catalog`),
       createAccessCodeAuth({
@@ -116,6 +111,7 @@ export async function setupHarness(
         loadVerifier: () => Promise.resolve(verifier),
       }),
     ]);
+  };
 
   let cookie = '';
 
@@ -247,6 +243,17 @@ export async function setupHarness(
 
 export const resultText = (result: ToolResultMessage) =>
   result.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('');
+
+export function linkDirectory(target: string, path: string) {
+  return symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
+export function readToolResult(calls: ModelRequest[]) {
+  expect(calls[0].toolNames.toSorted()).toEqual(['read', 'task']);
+  const result = calls.at(-1)?.result;
+  assert(result);
+  return result;
+}
 
 export const allCapabilities = [
   fileReadCapability,

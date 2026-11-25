@@ -239,6 +239,25 @@ function CompactionSummary({
   );
 }
 
+function InstructionContextDetails({
+  record,
+}: {
+  record: Extract<TrajectoryRecord, { kind: 'context' }>;
+}) {
+  return (
+    <DetailSection title="Workspace instructions">
+      <ul className="flex flex-col gap-1">
+        {record.changes.map(({ action, path }) => (
+          <li key={`${action}:${path}`} className="break-words">
+            {{ add: 'Added', replace: 'Updated', remove: 'Removed' }[action]} <code>{path}</code>
+          </li>
+        ))}
+      </ul>
+      <Payload value={record.body} empty="No instructions" />
+    </DetailSection>
+  );
+}
+
 export function TrajectoryInspector({
   sessionId,
   loadModelInput,
@@ -265,10 +284,12 @@ export function TrajectoryInspector({
   const tool = record?.kind === 'tool' ? record : undefined;
   const model = record?.kind === 'assistant' ? record : undefined;
   const system = record?.kind === 'system' ? record : undefined;
+  const context = record?.kind === 'context' ? record : undefined;
   const compaction = record?.kind === 'compaction' ? record : undefined;
   const message = record?.kind === 'user' || record?.kind === 'assistant' ? record : undefined;
   const status = tool?.status ?? model?.status ?? compaction?.status ?? request.status;
-  const parent = tool && request.records.find(({ id }) => id === tool.modelRequestId);
+  const parentId = (tool ?? context)?.modelRequestId;
+  const parent = parentId && request.records.find(({ id }) => id === parentId);
   const linkedModelRequest = parent ?? (modelRequest ? undefined : model);
   const error = tool?.error ?? compaction?.error ?? (!record ? request.error : undefined);
 
@@ -465,6 +486,7 @@ export function TrajectoryInspector({
           />
         )}
         {message && !modelRequest && preview}
+        {context && <InstructionContextDetails record={context} />}
         {!record && (
           <DetailSection title="Records">
             <ul>

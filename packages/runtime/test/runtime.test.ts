@@ -58,43 +58,48 @@ test('dependencies activate before consumers, regardless of product order', asyn
   expect(() => runtime.get('result')).toThrow(/disposed/);
 });
 
-test('invalid compositions fail before setup acquires resources', async () => {
-  let started = false;
-
-  const setup = () => {
-    started = true;
-  };
-
-  const cases: [Plugin[], RegExp][] = [
-    [
-      [
-        { id: 'same', setup },
-        { id: 'same', setup },
-      ],
-      /Duplicate plugin: same/,
+test.for([
+  {
+    name: 'a duplicate plugin ID',
+    plugins: [{ id: 'same' }, { id: 'same' }],
+    error: /Duplicate plugin: same/,
+  },
+  {
+    name: 'a duplicate service',
+    plugins: [
+      { id: 'one', provides: ['value'] },
+      { id: 'two', provides: ['value'] },
     ],
-    [
-      [
-        { id: 'one', provides: ['value'], setup },
-        { id: 'two', provides: ['value'], setup },
-      ],
-      /Duplicate service "value"/,
+    error: /Duplicate service "value"/,
+  },
+  {
+    name: 'a missing service',
+    plugins: [{ id: 'consumer', requires: ['missing'] }],
+    error: /requires missing service "missing"/,
+  },
+  {
+    name: 'a dependency cycle',
+    plugins: [
+      { id: 'one', requires: ['two'], provides: ['one'] },
+      { id: 'two', requires: ['one'], provides: ['two'] },
     ],
-    [[{ id: 'consumer', requires: ['missing'], setup }], /requires missing service "missing"/],
-    [
-      [
-        { id: 'one', requires: ['two'], provides: ['one'], setup },
-        { id: 'two', requires: ['one'], provides: ['two'], setup },
-      ],
-      /Cyclic plugin dependency/,
-    ],
-  ];
+    error: /Cyclic plugin dependency/,
+  },
+] satisfies { name: string; plugins: Omit<Plugin, 'setup'>[]; error: RegExp }[])(
+  'rejects $name before setup acquires resources',
+  async ({ plugins, error }) => {
+    let started = false;
 
-  for (const [plugins, error] of cases) {
-    await expect(createRuntime(plugins)).rejects.toThrow(error);
-  }
-  expect(started).toBe(false);
-});
+    const setup = () => {
+      started = true;
+    };
+
+    await expect(createRuntime(plugins.map((plugin) => ({ ...plugin, setup })))).rejects.toThrow(
+      error,
+    );
+    expect(started).toBe(false);
+  },
+);
 
 test('failed startup rolls back the failing plugin and its provider', async () => {
   const disposed: string[] = [];

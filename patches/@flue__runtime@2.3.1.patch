@@ -1,0 +1,221 @@
+diff --git a/dist/agent-execution-store-HWARCScI.d.mts b/dist/agent-execution-store-HWARCScI.d.mts
+index c9814eee223d3e933e0f2affa778160245f86184..1b5c4f5120f6cf758a56beb390b18446e5011708 100644
+--- a/dist/agent-execution-store-HWARCScI.d.mts
++++ b/dist/agent-execution-store-HWARCScI.d.mts
+@@ -644,6 +644,7 @@ interface AgentAppendMessage extends AgentSignalAppend {
+  * Prefer dispatching; reach for `append` only when a delivery is wrong.
+  */
+ interface AgentStartContext {
++  readonly contextSignals: (type: string) => readonly { content: string; attributes?: Readonly<Record<string, string>> }[];
+   readonly append: (message: AgentAppendMessage) => void;
+   readonly harness: FlueHarness;
+   readonly log: FlueLogger;
+@@ -685,6 +686,7 @@ interface AgentFinishContext {
+ /** One `useAgentStart` declaration; identity is the declaration index. */
+ interface AgentStartDeclaration {
+   run: (ctx: AgentStartContext) => void | Promise<void>;
++  restoreContext?: (ctx: AgentStartContext) => void | Promise<void>;
+ }
+ /** One `useAgentFinish` declaration; identity is the declaration index. */
+ interface AgentFinishDeclaration {
+diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705f02ff7e4 100644
+--- a/dist/conversation-stream-store-BJbg7IHa.mjs
++++ b/dist/conversation-stream-store-BJbg7IHa.mjs
+@@ -964,6 +964,7 @@ function toTurnMessage(message) {
+ 	};
+ 	if (message.role === "user") return {
+ 		role: "user",
++		...(message[Symbol.for("flue.contextSignal")] ? { contextSignal: message[Symbol.for("flue.contextSignal")] } : {}),
+ 		content: typeof message.content === "string" ? message.content : message.content.map(toTurnContent)
+ 	};
+ 	if (message.role === "assistant") return {
+@@ -1550,14 +1551,15 @@ var Session = class {
+ 			content: signal.body,
+ 			...signal.attributes ? { attributes: signal.attributes } : {}
+ 		});
+-		this.agentLoop.steer(createUserContextMessage(renderSignalMessage({
++		const contextSignal = {
+ 			role: "signal",
+ 			type: signal.type,
+ 			tagName: signal.tagName,
+ 			content: signal.body,
+ 			attributes: signal.attributes,
+ 			timestamp: new Date(timestamp).getTime()
+-		}), timestamp));
++		};
++		this.agentLoop.steer(createUserContextMessage(renderSignalMessage(contextSignal), timestamp, [], contextSignal));
+ 		if (options?.advance === false) return;
+ 		this.advanceDelivery?.({
+ 			kind: "signal",
+@@ -1622,26 +1624,37 @@ var Session = class {
+ 		if (!options?.joined && this.responseHasCompletedStep) return;
+ 		if (await this.hasAgentStartRun(submissionId)) return;
+ 		if (options?.joined) await this.prepareRerenderTurn();
+-		const declarations = this.outputChannel.agentStarts;
++		const { records, hasStateWrites } = await this.collectAgentStartEffects(this.outputChannel.agentStarts, signal);
++		await this.appendCanonical([
++			...records,
++			{
++				...this.canonicalEnvelope("agent_start_run"),
++				submissionId,
++				type: "agent_start_run"
++			}
++		]);
++		if (hasStateWrites) await this.prepareRerenderTurn();
++	}
++	async restoreAgentContext(signal) {
++		const declarations = this.outputChannel?.agentStarts.flatMap(({ restoreContext }) => restoreContext ? [{ run: restoreContext }] : []) ?? [];
++		if (declarations.length === 0) return;
++		const { records, hasStateWrites } = await this.collectAgentStartEffects(declarations, signal, { advance: false });
++		if (records.length > 0) await this.appendCanonical(records);
++		if (hasStateWrites) await this.prepareRerenderTurn();
++	}
++	async collectAgentStartEffects(declarations, signal, appendOptions) {
+ 		const outcomes = await Promise.allSettled(declarations.map((hook, index) => this.executeAgentStartHook(index, hook, signal)));
+ 		const failures = outcomes.flatMap((outcome) => outcome.status === "rejected" ? [outcome.reason] : []);
+ 		if (failures.length === 1) throw failures[0];
+ 		if (failures.length > 1) throw new AggregateError(failures, "[flue] Multiple useAgentStart callbacks threw.");
+ 		for (const outcome of outcomes) {
+ 			if (outcome.status !== "fulfilled") continue;
+-			for (const message of outcome.value) this.enqueueSignalAppend(message);
++			for (const message of outcome.value) this.enqueueSignalAppend(message, appendOptions);
+ 		}
+ 		const parentId = this.pendingSignalAppends.length > 0 ? await this.conversationWriter.getConversationLeaf(this.conversationId) : null;
+ 		const { records: signalRecords } = this.drainSignalAppendRecords(parentId);
+-		await this.appendCanonical([
+-			...signalRecords,
+-			...this.drainHookStateRecords(),
+-			{
+-				...this.canonicalEnvelope("agent_start_run"),
+-				submissionId,
+-				type: "agent_start_run"
+-			}
+-		]);
++		const stateRecords = this.drainHookStateRecords();
++		return { records: [...signalRecords, ...stateRecords], hasStateWrites: stateRecords.length > 0 };
+ 	}
+ 	/**
+ 	* All durable records of one type for this conversation and submission, in
+@@ -1686,6 +1699,10 @@ var Session = class {
+ 				appends.push(assertAppendMessage(message));
+ 			},
+ 			log: this.createHookLogger("useAgentStart", index),
++			contextSignals: (type) => [...this.agentLoop.state.messages, ...this.agentLoop.peekQueuedMessages()].flatMap((message) => {
++				const source = message[Symbol.for("flue.contextSignal")];
++				return source?.type === type ? [{ content: source.content, attributes: source.attributes }] : [];
++			}),
+ 			signal,
+ 			get harness() {
+ 				harness ??= session.createInvocationHarness(generateInvocationId(), signal);
+@@ -1695,6 +1712,7 @@ var Session = class {
+ 		try {
+ 			await hook.run(ctx);
+ 		} catch (error) {
++			if (error instanceof FlueError) throw error;
+ 			throw new Error(`[flue] A useAgentStart callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+ 		} finally {
+ 			appendWindowOpen = false;
+@@ -4133,6 +4151,7 @@ var Session = class {
+ 			}
+ 			if (overflow || retryable) throwIfHalted();
+ 			try {
++				if (this.contextCompacted && (overflow || options.resume)) await this.restoreAgentContext(options.signal);
+ 				await start();
+ 				await this.agentLoop.waitForIdle();
+ 			} catch (error) {
+@@ -5118,6 +5137,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
+ 	emitCoordinatorEvent({
+ 		type: "submission_settled",
+ 		submissionId: submission.submissionId,
++		kind: submission.kind,
+ 		outcome,
+ 		error: serializeSubmissionError(error)
+ 	}, errorInfo);
+@@ -5310,6 +5330,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
+ 	const event = ctx.createEvent({
+ 		type: "submission_settled",
+ 		submissionId: attempt.submissionId,
++		kind,
+ 		outcome,
+ 		...outcome === "completed" ? {} : { error: serializeSubmissionError(error) }
+ 	});
+@@ -5419,6 +5440,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
+ 	emitCoordinatorEvent?.({
+ 		type: "submission_settled",
+ 		submissionId: pending.submissionId,
++		kind: (await submissions.getSubmission(pending.submissionId))?.kind,
+ 		outcome: pending.record.outcome,
+ 		...pending.record.outcome === "completed" || pending.record.error === void 0 ? {} : { error: pending.record.error }
+ 	});
+diff --git a/dist/dispatch-DTmMreLV.mjs b/dist/dispatch-DTmMreLV.mjs
+index 4af08391f41d94893ede44aede6614283528b44a..b27bc97da1d6947d26425a6be4e51469474af487 100644
+--- a/dist/dispatch-DTmMreLV.mjs
++++ b/dist/dispatch-DTmMreLV.mjs
+@@ -354,9 +354,10 @@ function isPlainObject(value) {
+ }
+ //#endregion
+ //#region src/message-rendering.ts
+-function createUserContextMessage(text, timestamp, images = []) {
++function createUserContextMessage(text, timestamp, images = [], signal) {
+ 	return {
+ 		role: "user",
++		...(signal ? { [Symbol.for("flue.contextSignal")]: signal } : {}),
+ 		content: [{
+ 			type: "text",
+ 			text
+@@ -945,7 +946,7 @@ function pathToContextEntries(path, options) {
+ 		const message = resolveMessageAttachments(entry, options);
+ 		if (message.role === "signal") {
+ 			messages.push({
+-				message: createUserContextMessage(renderSignalMessage(message), entry.timestamp),
++				message: createUserContextMessage(renderSignalMessage(message), entry.timestamp, [], message),
+ 				sourceEntry: entry
+ 			});
+ 			index += 1;
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..7f81c109fe447682433bb634b0675a1060b7824a 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -333,7 +333,9 @@ declare function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise
+  *   eat it — durable state and disk. A signal is the announcement, not the
+  *   storage.
+  */
+-declare function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>): void;
++declare function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>, options?: {
++  restoreContext?: (ctx: AgentStartContext) => void | Promise<void>;
++}): void;
+ //#endregion
+ //#region src/hooks/use-data-writer.d.ts
+ /**
+diff --git a/dist/index.mjs b/dist/index.mjs
+index ce5ad79e75c6e9820e7e213bb79c981445580fe2..a3017563f5dcc85fab64bf3ab306cc613fb2b34e 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -386,11 +386,11 @@ function useAgentFinish(run) {
+ *   eat it — durable state and disk. A signal is the announcement, not the
+ *   storage.
+ */
+-function useAgentStart(run) {
++function useAgentStart(run, { restoreContext } = {}) {
+ 	const frame = requireRenderFrame("useAgentStart");
+ 	if (frame.kind === "subagent") throw new Error("[flue] useAgentStart() is not available in a subagent render. Lifecycle hooks run against the root agent's durable record log; a delegate runs a detached task — do its up-front work in the task itself.");
+-	if (typeof run !== "function") throw new Error("[flue] useAgentStart(run) takes a callback as its only argument.");
+-	frame.agentStarts.push({ run });
++	if (typeof run !== "function") throw new Error("[flue] useAgentStart(run) requires a callback.");
++	frame.agentStarts.push({ run, restoreContext });
+ }
+ //#endregion
+ //#region src/hooks/use-data-writer.ts
+diff --git a/dist/types-BBdvLv_l.d.mts b/dist/types-BBdvLv_l.d.mts
+index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..4fea4bddfabeca5a072731824e7a82cb4d8cc519 100644
+--- a/dist/types-BBdvLv_l.d.mts
++++ b/dist/types-BBdvLv_l.d.mts
+@@ -1437,6 +1437,7 @@ type FlueEventVariant = {
+ } | {
+   type: 'submission_settled';
+   submissionId: string;
++  kind?: 'dispatch' | 'direct';
+   outcome: 'completed' | 'failed' | 'aborted';
+   error?: {
+     name?: string;

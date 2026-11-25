@@ -13,6 +13,7 @@ import { Brain } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import type { AssistantMessagePart, TurnActivity } from '../conversation/contract.js';
 import { ChatMarkdown } from './chat-markdown.js';
+import { ContextLine } from './context-line.js';
 import { MessageActions } from './message-actions.js';
 import { ToolLine } from './tool-line.js';
 
@@ -66,6 +67,9 @@ export function AssistantResponse({
             </>
           )}
         </Trace>
+      )}
+      {activity?.state === 'failed' && activity.error && (
+        <p className="text-sm text-destructive">{activity.error}</p>
       )}
       {response.length > 0 && (
         <div className="flex min-w-0 flex-col md:gap-1.5">
@@ -160,6 +164,10 @@ function AssistantParts({ parts }: { parts: readonly AssistantMessagePart[] }) {
       activityKey = `activity:after:${part.id}`;
     } else if (part.type === 'reasoning') {
       activity.push(<ReasoningLine key={`reasoning:${part.id}`} part={part} />);
+    } else if (part.type === 'context') {
+      activity.push(
+        <ContextLine key={`context:${part.id}`} changes={part.changes} text={part.text} />,
+      );
     } else {
       activity.push(<ToolLine key={`tool:${part.id}`} part={part} />);
     }

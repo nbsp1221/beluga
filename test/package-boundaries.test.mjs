@@ -91,7 +91,7 @@ describe('workspace import boundaries', () => {
       "import { createGrepTool } from '@earendil-works/pi-coding-agent';",
       'Agent registration must use the Pi adapter',
     ],
-  ])('rejects a forbidden import in %s', (source, contents, reason) => {
+  ])('rejects %s containing %s', (source, contents, reason) => {
     expect(findBoundaryViolations(source, contents)).toEqual([expect.stringContaining(reason)]);
   });
 
@@ -119,7 +119,7 @@ describe('workspace import boundaries', () => {
       'packages/ui/eslint.config.mjs',
       "import { reactConfig } from '@workspace/tooling-config/eslint';",
     ],
-  ])('allows the intended dependency in %s', (source, contents) => {
+  ])('allows %s containing %s', (source, contents) => {
     expect(findBoundaryViolations(source, contents)).toEqual([]);
   });
 });

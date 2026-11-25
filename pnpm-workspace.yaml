@@ -31,3 +31,6 @@ allowBuilds:
 overrides:
   # Match the parser pinned by @retn0/eslint-config.
   '@vitest/eslint-plugin>@typescript-eslint/eslint-plugin': '8.71.0'
+
+patchedDependencies:
+  '@flue/runtime@2.3.1': patches/@flue__runtime@2.3.1.patch

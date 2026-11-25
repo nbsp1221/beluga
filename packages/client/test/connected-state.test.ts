@@ -60,18 +60,34 @@ test('an earlier response stays with the Trajectory page chain that requested it
       ],
     });
 
-  const fetchHost = vi
-    .fn<typeof fetch>()
-    .mockResolvedValueOnce(page(51, 51))
-    .mockImplementationOnce(() => refreshed.promise)
-    .mockImplementationOnce(() => older.promise);
+  let latest = Promise.resolve(page(51, 51));
+  const fetchOlderPage = vi.fn(() => older.promise);
+
+  const fetchHost: typeof fetch = (input) => {
+    const url = new URL(input instanceof Request ? input.url : input, 'http://localhost');
+    if (url.pathname !== '/api/conversations/session/trajectory') {
+      return Promise.resolve(new Response(null, { status: 404 }));
+    }
+    const cursor = url.searchParams.get('before');
+    if (cursor === '51') {
+      return fetchOlderPage();
+    }
+    return cursor === null ? latest : Promise.resolve(new Response(null, { status: 400 }));
+  };
+
   const trajectory = createConnectedTrajectory(new AbortController().signal, fetchHost);
   const initial = trajectory.observe('session', '');
-  await vi.waitFor(() => expect(trajectory.getSnapshot('session')?.before).toBe(51));
-  initial();
+  try {
+    await vi.waitFor(() => expect(trajectory.getSnapshot('session')?.before).toBe(51));
+  } finally {
+    initial();
+  }
+  latest = refreshed.promise;
   const stop = trajectory.observe('session', '');
   try {
     trajectory.loadEarlier('session');
+    await vi.waitFor(() => expect(fetchOlderPage).toHaveBeenCalled());
+    expect(trajectory.getSnapshot('session')?.loadingEarlier).toBe(true);
     refreshed.resolve(page(101, 101));
     await vi.waitFor(() => expect(trajectory.getSnapshot('session')?.before).toBe(101));
     older.resolve(page(1, null));
@@ -134,6 +150,8 @@ test('changing one conversation model preserves another conversation’s pending
   try {
     change.resolve(updated);
     await changing;
+    const first = client.getSnapshot().sessions.find(({ id }) => id === 'first');
+    expect(first?.runSettings).toEqual(updated);
     response.resolve(Response.json(usage));
     await vi.waitFor(() => {
       const second = client.getSnapshot().sessions.find(({ id }) => id === 'second');

@@ -9,7 +9,7 @@ const firstLineExceedsLimit = v.object({
   truncation: v.object({ firstLineExceedsLimit: v.literal(true) }),
 });
 
-function createReadToolForCall(cwd: string, signal?: AbortSignal) {
+function createReadToolForCall(cwd: string, signal?: AbortSignal, onFile?: (path: string) => void) {
   const {
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINES,
@@ -19,7 +19,10 @@ function createReadToolForCall(cwd: string, signal?: AbortSignal) {
   } = loadPi();
   const tool = createReadTool(cwd, {
     operations: {
-      access: (absolutePath) => access(absolutePath, constants.R_OK),
+      async access(absolutePath) {
+        await access(absolutePath, constants.R_OK);
+        onFile?.(absolutePath);
+      },
       readFile: (absolutePath) => buffer(read({ absolutePath }, { signal })),
       createReadStream: (absolutePath, options) => read({ absolutePath }, options),
       async detectImageMimeType(absolutePath) {
@@ -56,5 +59,7 @@ function createReadToolForCall(cwd: string, signal?: AbortSignal) {
 }
 
 export function createPiRead(cwd: string) {
-  return adaptPiTool(createReadToolForCall(cwd), (signal) => createReadToolForCall(cwd, signal));
+  return adaptPiTool(createReadToolForCall(cwd), (signal, onFile) =>
+    createReadToolForCall(cwd, signal, onFile),
+  );
 }

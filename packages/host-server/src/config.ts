@@ -63,6 +63,7 @@ export async function connectedHostOptions(
       origin,
       openProviders: openModelProviders(workspaceCatalogPath(databasePath), dataDir),
       databasePath,
+      instructionsDirectory: dataDir,
     },
     web: await createWeb(webDir, desktop),
   };
