@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   type AssistantMessage,
   type Provider,
+  type ToolCall,
   createAssistantMessageEventStream,
 } from '@earendil-works/pi-ai';
 import { instrument } from '@flue/runtime';
@@ -467,6 +468,157 @@ test.for(['user before eviction', 'user after eviction', 'model after eviction']
       expect(prompt.match(/RULE_first/g)).toHaveLength(1);
       expect(prompt.match(/RULE_third/g)).toHaveLength(1);
       expect(prompt).not.toContain('RULE_second');
+    }
+  },
+);
+
+test.for(['joined user message', 'newer skill in the same batch'] as const)(
+  'restores skills in last-use order with a %s',
+  { timeout: 30_000 },
+  async (scenario, context) => {
+    const joined = scenario === 'joined user message';
+    const runTools = 'Use the requested skills';
+    const followUp = 'One more thing for this response';
+    const inputs: string[] = [];
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider();
+      let called = false;
+
+      const streamSimple: Provider['streamSimple'] = (model, input, options) => {
+        const prompt = JSON.stringify(input.messages);
+        inputs.push(prompt);
+        if (called || !prompt.includes(runTools)) {
+          return provider.streamSimple(model, input, options);
+        }
+        called = true;
+        const calls: ToolCall[] = (joined ? ['first'] : ['first', 'second']).map((name) => ({
+          type: 'toolCall',
+          id: `load-${name}`,
+          name: 'skill',
+          arguments: { name },
+        }));
+        const message: AssistantMessage = {
+          role: 'assistant',
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          content: calls,
+          stopReason: 'toolUse',
+          timestamp: Date.now(),
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { ...model.cost, total: 0 },
+          },
+        };
+        const stream = createAssistantMessageEventStream();
+        stream.push({ type: 'start', partial: message });
+        for (const [contentIndex, toolCall] of calls.entries()) {
+          stream.push({ type: 'toolcall_end', contentIndex, toolCall, partial: message });
+        }
+        stream.push({ type: 'done', reason: 'toolUse', message });
+        return stream;
+      };
+
+      return { ...provider, stream: (model, input) => streamSimple(model, input), streamSimple };
+    });
+    for (const name of joined ? ['first', 'second', 'third'] : ['first', 'second']) {
+      const directory = join(dirname(harness.databasePath), 'skills', name);
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, 'SKILL.md'),
+        `---\nname: ${name}\ndescription: Keep a decision\n---\n\nRULE_${name} ${'a'.repeat(joined ? 12_000 : 18_000)}\n`,
+      );
+    }
+    const workspace = await harness.prepareWorkspace();
+    const { id } = await harness.create(
+      workspace.id,
+      (await harness.createPreset([agentSkillsCapabilityId])).id,
+    );
+    const client = harness.sdk(id);
+
+    const send = (body: string) => client.send({ message: { kind: 'user', body } });
+
+    const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
+      client.wait(receipt, { signal: AbortSignal.timeout(10_000) });
+
+    const submit = async (body: string) => wait(await send(body));
+
+    await submit('/first Keep this workflow');
+    if (joined) {
+      await submit('/second Keep this workflow');
+    }
+
+    const firstLoaded = deferred();
+    const releaseFirst = deferred();
+    const dispose = instrument({
+      observe() {},
+      dispose() {},
+      async interceptor(operation, _, next) {
+        if (operation.type !== 'tool') {
+          return next();
+        }
+        if (operation.toolCallId === 'load-second') {
+          await firstLoaded.promise;
+          return next();
+        }
+        const result = await next();
+        if (operation.toolCallId === 'load-first') {
+          firstLoaded.resolve();
+          if (joined) {
+            await releaseFirst.promise;
+          }
+        }
+        return result;
+      },
+    });
+    try {
+      const reply = wait(await send(runTools));
+      try {
+        if (joined) {
+          await Promise.race([firstLoaded.promise, reply]);
+          const followUpReceipt = await send(followUp);
+          releaseFirst.resolve();
+          await wait(followUpReceipt);
+        }
+      } finally {
+        releaseFirst.resolve();
+        await reply;
+      }
+    } finally {
+      firstLoaded.resolve();
+      await dispose();
+    }
+    const afterTools = inputs.at(-1);
+    assert(afterTools);
+    expect(afterTools).toContain('Loaded skill: first.');
+    expect(afterTools).toContain(joined ? followUp : 'Loaded skill: second.');
+
+    if (joined) {
+      await submit('/third Keep this workflow');
+    }
+    for (let index = 0; index < 4; index++) {
+      await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
+    }
+    await submit('Trigger overflow');
+    const path = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(path))).at(-1);
+    const model = turn?.records.findLast(
+      (record) => record.kind === 'assistant' && record.purpose === 'agent',
+    );
+    assert(turn && model);
+    const input = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${path}/${turn.id}/${model.id}`)).json(),
+    );
+    for (const prompt of [inputs.at(-1), JSON.stringify(input.messages)]) {
+      assert(prompt);
+      expect(prompt).toContain(checkpoint);
+      expect(prompt.match(/RULE_\w+/g)?.sort()).toEqual(
+        joined ? ['RULE_first', 'RULE_third'] : ['RULE_second'],
+      );
     }
   },
 );

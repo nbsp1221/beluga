@@ -10,6 +10,7 @@ import {
   useDispatchMessage,
   useInstruction,
   usePersistentState,
+  useResponseStart,
   useTool,
 } from '@flue/runtime';
 import {
@@ -43,8 +44,7 @@ interface Activation {
 interface SkillState {
   catalog: ReturnType<typeof skillCatalog>;
   active: readonly Activation[];
-  lastObservedId?: string;
-  pendingReuses?: readonly Pick<Activation, 'id' | 'actor'>[];
+  pendingUses?: readonly Pick<Activation, 'id' | 'actor'>[];
 }
 
 function activationSignal(activation: Activation, restored = false): AgentAppendMessage {
@@ -191,6 +191,12 @@ export function agentSkillsCapability(
             const { catalog } = state;
             const restoreLimit = skillRestoreLimit(contextWindow);
 
+            useResponseStart(() => {
+              setState((current) =>
+                current.pendingUses?.length ? { ...current, pendingUses: [] } : current,
+              );
+            });
+
             async function activate(
               source: SkillSource,
               actor: Activation['actor'],
@@ -262,12 +268,18 @@ export function agentSkillsCapability(
                   }),
                 );
                 const eligible = active.filter((item) => item !== undefined);
-                setState({
-                  ...state,
+                const used = previous ?? next;
+                setState((current) => ({
+                  ...current,
                   catalog: skillCatalog(sources, contextWindow),
                   active: eligible,
-                  pendingReuses: previous ? [{ id: previous.id, actor: previous.actor }] : [],
-                });
+                  ...(used && {
+                    pendingUses: [
+                      ...(current.pendingUses ?? []),
+                      { id: used.id, actor: used.actor },
+                    ],
+                  }),
+                }));
                 restore(start, eligible);
                 if (next && !previous) {
                   start.append(activationSignal(next));
@@ -276,39 +288,25 @@ export function agentSkillsCapability(
               {
                 restoreContext: (start) => restore(start, state.active),
                 onModelInput(contextSignals) {
-                  const visible = contextSignals(skillInvocationSignal);
-                  const activations = visible
-                    .filter(({ attributes }) => !attributes?.restored)
-                    .flatMap((signal) => {
-                      const activation = readActivation(signal);
-                      return activation ? [activation] : [];
-                    });
                   setState((current) => {
-                    if (!activations.length && !current.pendingReuses?.length) {
+                    if (!current.pendingUses?.length) {
                       return current;
                     }
-                    const lastIndex = activations.findLastIndex(
-                      ({ id }) => id === current.lastObservedId,
-                    );
-                    const next = activations.slice(lastIndex + 1);
-                    for (const reuse of current.pendingReuses ?? []) {
-                      const signal = visible.find(({ attributes }) => attributes?.id === reuse.id);
+                    const visible = contextSignals(skillInvocationSignal);
+                    let active = current.active;
+                    for (const use of current.pendingUses) {
+                      const signal = visible.find(({ attributes }) => attributes?.id === use.id);
                       const activation = signal && readActivation(signal);
                       if (activation) {
-                        next.push({ ...activation, actor: reuse.actor });
+                        // A newer version supersedes the old one even when it cannot be restored.
+                        active = remember(
+                          active,
+                          { ...activation, actor: use.actor },
+                          restoreLimit,
+                        );
                       }
                     }
-                    let active = current.active;
-                    for (const item of next) {
-                      // A newer version supersedes the old one even when it cannot be restored.
-                      active = remember(active, item, restoreLimit);
-                    }
-                    return {
-                      ...current,
-                      active,
-                      lastObservedId: activations.at(-1)?.id ?? current.lastObservedId,
-                      pendingReuses: [],
-                    };
+                    return { ...current, active, pendingUses: [] };
                   });
                 },
               },
@@ -344,15 +342,15 @@ export function agentSkillsCapability(
                         if (!previous) {
                           await dispatch(activationSignal(next));
                           signal?.throwIfAborted();
-                        } else {
-                          setState((current) => ({
-                            ...current,
-                            pendingReuses: [
-                              ...(current.pendingReuses ?? []),
-                              { id: previous.id, actor: previous.actor },
-                            ],
-                          }));
                         }
+                        const used = previous ?? next;
+                        setState((current) => ({
+                          ...current,
+                          pendingUses: [
+                            ...(current.pendingUses ?? []),
+                            { id: used.id, actor: used.actor },
+                          ],
+                        }));
                         return `Loaded skill: ${next.name}.`;
                       })();
                       pending.set(source.name, job);

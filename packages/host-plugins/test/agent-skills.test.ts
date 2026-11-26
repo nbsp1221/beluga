@@ -37,7 +37,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-test('loads project overrides, then Host and shared global skills in other workspaces', async (context) => {
+test('loads, reuses, and refreshes project skill overrides', async (context) => {
   const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   context.onTestFinished(() => {
     warnings.mockRestore();
@@ -110,15 +110,25 @@ test('loads project overrides, then Host and shared global skills in other works
   await rm(nestedReview, { recursive: true });
   const [parent] = await submit(harness, session.id, '/review now use parent');
   expect(parent.skillInstructions.match(/PROJECT_BODY/g)).toHaveLength(1);
+});
 
+test('prefers Host skills to shared global skills and falls back after restart', async (context) => {
+  const harness = await setupHarness(context);
+  const global = dirname(harness.databasePath);
+  const hostReview = await writeSkill(join(global, 'skills'), 'review', 'HOST_BODY');
+  await writeSkill(join(global, 'home', '.agents', 'skills'), 'review', 'SHARED_BODY');
+  await harness.prepareWorkspace();
   const other = await harness.registerWorkspace(harness.other);
-  const second = await harness.create(other.id, preset.id);
-  expect(
-    (await submit(harness, second.id, '/review check changes'))[0].skillInstructions,
-  ).toContain('HOST_BODY');
+  const { id } = await harness.create(
+    other.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  expect((await submit(harness, id, '/review check changes'))[0].skillInstructions).toContain(
+    'HOST_BODY',
+  );
   await rm(hostReview, { recursive: true });
   await harness.restart();
-  expect((await submit(harness, second.id, '/review check again'))[0].skillInstructions).toContain(
+  expect((await submit(harness, id, '/review check again'))[0].skillInstructions).toContain(
     'SHARED_BODY',
   );
 });
