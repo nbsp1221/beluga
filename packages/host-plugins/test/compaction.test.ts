@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
@@ -14,11 +14,38 @@ import {
   conversationUsageSchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { origin, readTrajectory, setupHarness } from './fixtures/harness.js';
 import { fixtureProvider } from './fixtures/model-provider.js';
 
 const checkpoint = 'Keep the original decision to use port 4173.';
+
+function toolResponse(model: Parameters<Provider['streamSimple']>[0], calls: ToolCall[]) {
+  const message: AssistantMessage = {
+    role: 'assistant',
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    content: calls,
+    stopReason: 'toolUse',
+    timestamp: Date.now(),
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { ...model.cost, total: 0 },
+    },
+  };
+  const stream = createAssistantMessageEventStream();
+  stream.push({ type: 'start', partial: message });
+  for (const [contentIndex, toolCall] of calls.entries()) {
+    stream.push({ type: 'toolcall_end', contentIndex, toolCall, partial: message });
+  }
+  stream.push({ type: 'done', reason: 'toolUse', message });
+  return stream;
+}
 
 function compactionProvider(
   onSummary?: (signal?: AbortSignal) => Promise<void>,
@@ -29,9 +56,19 @@ function compactionProvider(
   const [model] = provider.getModels();
 
   const streamSimple: Provider['streamSimple'] = (selected, context, options) => {
-    const user = JSON.stringify(context.messages.findLast(({ role }) => role === 'user') ?? null);
-    const summary = user.includes('<conversation>');
-    const pressure = !summary && user.includes('Trigger threshold') ? 29_000 : 1_000;
+    const user = context.messages.findLast((message) => {
+      if (message.role !== 'user') {
+        return false;
+      }
+      const text =
+        typeof message.content === 'string'
+          ? message.content
+          : message.content.find((part) => part.type === 'text')?.text;
+      return !text?.startsWith('<system-reminder ');
+    });
+    const userInput = JSON.stringify(user ?? null);
+    const summary = userInput.includes('<conversation>');
+    const pressure = !summary && userInput.includes('Trigger threshold') ? 29_000 : 1_000;
     const stream = createAssistantMessageEventStream();
     const response: AssistantMessage = {
       role: 'assistant',
@@ -54,7 +91,7 @@ function compactionProvider(
     const send = () => {
       if (
         !summary &&
-        user.includes('Trigger overflow') &&
+        userInput.includes('Trigger overflow') &&
         !JSON.stringify(context.messages).includes(checkpoint)
       ) {
         stream.push({
@@ -73,7 +110,7 @@ function compactionProvider(
 
     const hold = summary
       ? onSummary?.(options?.signal)
-      : user.includes('Hold model response')
+      : userInput.includes('Hold model response')
         ? beforeReply?.()
         : undefined;
     if (hold) {
@@ -472,11 +509,16 @@ test.for(['user before eviction', 'user after eviction', 'model after eviction']
   },
 );
 
-test.for(['joined user message', 'newer skill in the same batch'] as const)(
+test.for([
+  'joined user message',
+  'newer skill in the same batch',
+  'removed skill and a joined message',
+] as const)(
   'restores skills in last-use order with a %s',
   { timeout: 30_000 },
   async (scenario, context) => {
-    const joined = scenario === 'joined user message';
+    const removed = scenario === 'removed skill and a joined message';
+    const joined = scenario !== 'newer skill in the same batch';
     const runTools = 'Use the requested skills';
     const followUp = 'One more thing for this response';
     const inputs: string[] = [];
@@ -497,40 +539,19 @@ test.for(['joined user message', 'newer skill in the same batch'] as const)(
           name: 'skill',
           arguments: { name },
         }));
-        const message: AssistantMessage = {
-          role: 'assistant',
-          api: model.api,
-          provider: model.provider,
-          model: model.id,
-          content: calls,
-          stopReason: 'toolUse',
-          timestamp: Date.now(),
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: { ...model.cost, total: 0 },
-          },
-        };
-        const stream = createAssistantMessageEventStream();
-        stream.push({ type: 'start', partial: message });
-        for (const [contentIndex, toolCall] of calls.entries()) {
-          stream.push({ type: 'toolcall_end', contentIndex, toolCall, partial: message });
-        }
-        stream.push({ type: 'done', reason: 'toolUse', message });
-        return stream;
+        return toolResponse(model, calls);
       };
 
       return { ...provider, stream: (model, input) => streamSimple(model, input), streamSimple };
     });
-    for (const name of joined ? ['first', 'second', 'third'] : ['first', 'second']) {
-      const directory = join(dirname(harness.databasePath), 'skills', name);
+    const skills = join(dirname(harness.databasePath), 'skills');
+    const keepThird = joined && !removed;
+    for (const name of keepThird ? ['first', 'second', 'third'] : ['first', 'second']) {
+      const directory = join(skills, name);
       await mkdir(directory, { recursive: true });
       await writeFile(
         join(directory, 'SKILL.md'),
-        `---\nname: ${name}\ndescription: Keep a decision\n---\n\nRULE_${name} ${'a'.repeat(joined ? 12_000 : 18_000)}\n`,
+        `---\nname: ${name}\ndescription: Keep a decision\n---\n\nRULE_${name} ${'a'.repeat(keepThird ? 12_000 : 18_000)}\n`,
       );
     }
     const workspace = await harness.prepareWorkspace();
@@ -580,6 +601,9 @@ test.for(['joined user message', 'newer skill in the same batch'] as const)(
       try {
         if (joined) {
           await Promise.race([firstLoaded.promise, reply]);
+          if (removed) {
+            await rm(join(skills, 'first'), { recursive: true });
+          }
           const followUpReceipt = await send(followUp);
           releaseFirst.resolve();
           await wait(followUpReceipt);
@@ -597,7 +621,7 @@ test.for(['joined user message', 'newer skill in the same batch'] as const)(
     expect(afterTools).toContain('Loaded skill: first.');
     expect(afterTools).toContain(joined ? followUp : 'Loaded skill: second.');
 
-    if (joined) {
+    if (keepThird) {
       await submit('/third Keep this workflow');
     }
     for (let index = 0; index < 4; index++) {
@@ -617,8 +641,154 @@ test.for(['joined user message', 'newer skill in the same batch'] as const)(
       assert(prompt);
       expect(prompt).toContain(checkpoint);
       expect(prompt.match(/RULE_\w+/g)?.sort()).toEqual(
-        joined ? ['RULE_first', 'RULE_third'] : ['RULE_second'],
+        keepThird ? ['RULE_first', 'RULE_third'] : ['RULE_second'],
       );
+    }
+  },
+);
+
+test.for([
+  'selected skill before the first model call',
+  'tool result before the batch commits',
+] as const)(
+  'restores skills after resuming an interrupted response with a %s',
+  { timeout: 30_000 },
+  async (boundary, context) => {
+    const fromTool = boundary === 'tool result before the batch commits';
+    const trigger = 'Apply the review skill';
+    const inputs: string[] = [];
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider();
+
+      const streamSimple: Provider['streamSimple'] = (model, input, options) => {
+        const prompt = JSON.stringify(input.messages);
+        inputs.push(prompt);
+        if (
+          fromTool &&
+          prompt.includes(trigger) &&
+          !prompt.includes('<conversation>') &&
+          !input.messages.some(({ role }) => role === 'assistant')
+        ) {
+          return toolResponse(model, [
+            { type: 'toolCall', id: 'load-review', name: 'skill', arguments: { name: 'review' } },
+            {
+              type: 'toolCall',
+              id: 'wait-for-snapshot',
+              name: 'skill',
+              arguments: { name: 'missing' },
+            },
+          ]);
+        }
+        return provider.streamSimple(model, input, options);
+      };
+
+      return { ...provider, stream: (model, input) => streamSimple(model, input), streamSimple };
+    });
+    const directory = join(dirname(harness.databasePath), 'skills', 'review');
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'SKILL.md'),
+      '---\nname: review\ndescription: Review a change\n---\n\nRECOVERED_SKILL_RULE\n',
+    );
+    const workspace = await harness.prepareWorkspace();
+    const { id } = await harness.create(
+      workspace.id,
+      (await harness.createPreset([agentSkillsCapabilityId])).id,
+    );
+    const client = harness.sdk(id);
+
+    const send = (body: string) => client.send({ message: { kind: 'user', body } });
+
+    const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
+      client.wait(receipt, { signal: AbortSignal.timeout(10_000) });
+
+    const snapshot = `${harness.databasePath}.snapshot`;
+    let captured = false;
+
+    const capture = () => {
+      using db = new DatabaseSync(harness.databasePath);
+      db.prepare('VACUUM INTO ?').run(snapshot);
+      captured = true;
+    };
+
+    const releaseTool = deferred();
+    const dispose = instrument({
+      observe() {},
+      dispose() {},
+      async interceptor(operation, _, next) {
+        if (fromTool && operation.type === 'tool' && operation.toolCallId === 'wait-for-snapshot') {
+          await releaseTool.promise;
+        }
+        if (!fromTool && operation.type === 'model' && !captured) {
+          capture();
+        }
+        return next();
+      },
+    });
+    let receipt: Awaited<ReturnType<typeof send>>;
+    try {
+      receipt = await send(fromTool ? trigger : `/review ${trigger}`);
+      const original = wait(receipt);
+      try {
+        if (fromTool) {
+          using db = new DatabaseSync(harness.databasePath, { readOnly: true });
+          const toolOutcome = db.prepare(`
+            SELECT 1 FROM flue_conversation_stream_batches
+            WHERE instr(data, '"type":"tool_outcome"') AND instr(data, '"toolCallId":"load-review"')
+          `);
+          await vi.waitFor(() => assert(toolOutcome.get()), { timeout: 5_000 });
+          capture();
+        }
+      } finally {
+        releaseTool.resolve();
+        await original;
+      }
+    } finally {
+      await dispose();
+    }
+    assert(captured);
+
+    await harness.getRuntime().dispose();
+    await copyFile(snapshot, harness.databasePath);
+    {
+      using db = new DatabaseSync(harness.databasePath);
+      // Simulate the expired lease of the stopped worker without waiting for its real deadline.
+      assert.equal(
+        db
+          .prepare(
+            "UPDATE flue_agent_submissions SET lease_expires_at = 1 WHERE status = 'running'",
+          )
+          .run().changes,
+        1,
+      );
+    }
+    const resumeAt = inputs.length;
+    await harness.restart();
+    await wait(receipt);
+    const resumed = inputs
+      .slice(resumeAt)
+      .find((prompt) => prompt.includes('RECOVERED_SKILL_RULE'));
+    assert(resumed);
+    if (fromTool) {
+      assert(resumed.includes('Loaded skill: review.'));
+    }
+    for (let index = 0; index < 4; index++) {
+      await wait(await send(`Seed ${index}: ${'work '.repeat(4_000)}`));
+    }
+    await wait(await send('Trigger overflow'));
+    const path = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(path))).at(-1);
+    const model = turn?.records.findLast(
+      (record) => record.kind === 'assistant' && record.purpose === 'agent',
+    );
+    assert(turn && model);
+    const input = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${path}/${turn.id}/${model.id}`)).json(),
+    );
+    for (const prompt of [inputs.at(-1), JSON.stringify(input.messages)]) {
+      assert(prompt);
+      expect(prompt).toContain(checkpoint);
+      expect(prompt.match(/RECOVERED_SKILL_RULE/g)).toHaveLength(1);
     }
   },
 );

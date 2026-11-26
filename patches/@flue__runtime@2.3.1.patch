@@ -1,22 +1,23 @@
 diff --git a/dist/agent-execution-store-HWARCScI.d.mts b/dist/agent-execution-store-HWARCScI.d.mts
-index c9814eee223d3e933e0f2affa778160245f86184..17bbee64db51d93be03fdb47b3f3aaa86409573c 100644
+index c9814eee223d3e933e0f2affa778160245f86184..e1faf33cf6ebb0537475437b71be5c623ca7bb5b 100644
 --- a/dist/agent-execution-store-HWARCScI.d.mts
 +++ b/dist/agent-execution-store-HWARCScI.d.mts
-@@ -644,11 +644,13 @@ interface AgentAppendMessage extends AgentSignalAppend {
+@@ -644,11 +644,14 @@ interface AgentAppendMessage extends AgentSignalAppend {
   * Prefer dispatching; reach for `append` only when a delivery is wrong.
   */
  interface AgentStartContext {
++  readonly responseId: string;
 +  readonly contextSignals: (type: string) => readonly { content: string; attributes?: Readonly<Record<string, string>> }[];
    readonly append: (message: AgentAppendMessage) => void;
    readonly harness: FlueHarness;
    readonly log: FlueLogger;
    readonly signal: AbortSignal;
  }
-+type ModelInputHook = (contextSignals: AgentStartContext['contextSignals']) => void;
++type ModelInputHook = (contextSignals: AgentStartContext['contextSignals'], toolCallSucceeded: (id: string) => boolean) => void;
  /** One tool call the current response has made, from the durable record log. */
  interface AgentResponseToolCall {
    /** The tool's name as the model called it. */
-@@ -685,6 +687,8 @@ interface AgentFinishContext {
+@@ -685,6 +688,8 @@ interface AgentFinishContext {
  /** One `useAgentStart` declaration; identity is the declaration index. */
  interface AgentStartDeclaration {
    run: (ctx: AgentStartContext) => void | Promise<void>;
@@ -26,7 +27,7 @@ index c9814eee223d3e933e0f2affa778160245f86184..17bbee64db51d93be03fdb47b3f3aaa8
  /** One `useAgentFinish` declaration; identity is the declaration index. */
  interface AgentFinishDeclaration {
 diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
-index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809ec6e2a802 100644
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..49539c4feec696449d6397353f6daee696380d43 100644
 --- a/dist/conversation-stream-store-BJbg7IHa.mjs
 +++ b/dist/conversation-stream-store-BJbg7IHa.mjs
 @@ -964,6 +964,7 @@ function toTurnMessage(message) {
@@ -125,7 +126,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  	}
  	/**
  	* All durable records of one type for this conversation and submission, in
-@@ -1675,6 +1691,12 @@ var Session = class {
+@@ -1675,7 +1691,15 @@ var Session = class {
  	* the finish-context writer: append is legal only while the callback
  	* runs.
  	*/
@@ -136,17 +137,21 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
 +		});
 +	}
  	async executeAgentStartHook(index, hook, signal) {
++		const responseId = this.activeSubmissionId;
++		if (!responseId) throw new Error("[flue] Agent-start hooks require an active response.");
  		let harness;
  		let appendWindowOpen = true;
-@@ -1686,6 +1708,7 @@ var Session = class {
+ 		const appends = [];
+@@ -1686,6 +1710,8 @@ var Session = class {
  				appends.push(assertAppendMessage(message));
  			},
  			log: this.createHookLogger("useAgentStart", index),
++			responseId,
 +			contextSignals: (type) => this.contextSignals(type),
  			signal,
  			get harness() {
  				harness ??= session.createInvocationHarness(generateInvocationId(), signal);
-@@ -1695,6 +1718,7 @@ var Session = class {
+@@ -1695,6 +1721,7 @@ var Session = class {
  		try {
  			await hook.run(ctx);
  		} catch (error) {
@@ -154,7 +159,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  			throw new Error(`[flue] A useAgentStart callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
  		} finally {
  			appendWindowOpen = false;
-@@ -1861,7 +1885,7 @@ var Session = class {
+@@ -1861,7 +1888,7 @@ var Session = class {
  	async steerJoinedEntry(entryId) {
  		const conversation = await this.requireConversation();
  		const resolved = await this.resolveCanonicalContextAttachments(conversation);
@@ -163,7 +168,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  			const image = resolved.get(attachment.id);
  			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
  			return image;
-@@ -2125,7 +2149,8 @@ var Session = class {
+@@ -2125,7 +2152,8 @@ var Session = class {
  		const request = this.modelRequestInfo(model, purpose, options);
  		this.modelRequests.set(turnId, {
  			info: request,
@@ -173,22 +178,32 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  		});
  		this.emit({
  			type: "turn_request",
-@@ -2408,7 +2433,13 @@ var Session = class {
+@@ -2408,7 +2436,14 @@ var Session = class {
  								}]);
  								block.completed = true;
  							}
 -							await this.appendCanonical([{
 +							const modelInput = this.modelRequests.get(turnId)?.messages;
 +							if (modelInput && !signal?.aborted && event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
++								const toolCallSucceeded = (id) => modelInput.some((message) => message.role === "toolResult" && message.toolCallId === id && !message.isError);
 +								for (const hook of this.outputChannel?.agentStarts ?? []) {
-+									hook.onModelInput?.((type) => this.contextSignals(type, modelInput));
++									hook.onModelInput?.((type) => this.contextSignals(type, modelInput), toolCallSucceeded);
 +								}
 +							}
 +							await this.appendCanonical([...this.drainHookStateRecords(), {
  								...this.canonicalEnvelope("assistant_message_completed"),
  								type: "assistant_message_completed",
  								messageId: canonical.messageId,
-@@ -3489,10 +3520,11 @@ var Session = class {
+@@ -2463,7 +2498,7 @@ var Session = class {
+ 					const outcomeContent = await this.persistToolResultContent(result, messageId);
+ 					const details = result.details;
+ 					const hasStructuredOutput = !event.isError && typeof details === "object" && details !== null && "output" in details;
+-					await this.appendCanonical([{
++					await this.appendCanonical([...this.drainHookStateRecords(), {
+ 						...this.canonicalEnvelope("tool_outcome", `record_tool_outcome_${outcomeKey}`),
+ 						type: "tool_outcome",
+ 						assistantMessageId,
+@@ -3489,10 +3524,11 @@ var Session = class {
  						const invocationId = toolDef.harness ? generateInvocationId() : void 0;
  						const harness = invocationId ? this.createInvocationHarness(invocationId, mergedSignal, toolDef) : void 0;
  						try {
@@ -203,7 +218,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  							const resolved = resolveToolRun(toolDef, await raceToolWithDeadline(() => toolDef.run(context), mergedSignal, toolDef.timeoutMs, toolDef.name));
  							const output = resolved.output;
  							return {
-@@ -3898,7 +3930,7 @@ var Session = class {
+@@ -3898,7 +3934,7 @@ var Session = class {
  	}
  	visibleCanonicalAttachments(conversation) {
  		const available = /* @__PURE__ */ new Map();
@@ -212,7 +227,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  			data: attachment.id,
  			mimeType: attachment.mimeType
  		}) })) {
-@@ -4042,7 +4074,7 @@ var Session = class {
+@@ -4042,7 +4078,7 @@ var Session = class {
  	async rebuildCanonicalContext() {
  		const conversation = await this.requireConversation();
  		const resolved = await this.resolveCanonicalContextAttachments(conversation);
@@ -221,7 +236,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  			const image = resolved.get(attachment.id);
  			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
  			return image;
-@@ -4133,6 +4165,7 @@ var Session = class {
+@@ -4133,6 +4169,7 @@ var Session = class {
  			}
  			if (overflow || retryable) throwIfHalted();
  			try {
@@ -229,7 +244,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  				await start();
  				await this.agentLoop.waitForIdle();
  			} catch (error) {
-@@ -4201,7 +4234,7 @@ var Session = class {
+@@ -4201,7 +4238,7 @@ var Session = class {
  			const summarizationModel = compactionConfig?.model ? this.resolveModelForCall(compactionConfig.model) : sessionModel;
  			const canonicalConversation = await this.requireConversation();
  			const resolvedAttachments = await this.resolveCanonicalContextAttachments(canonicalConversation);
@@ -238,7 +253,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  				const image = resolvedAttachments.get(attachment.id);
  				if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
  				return image;
-@@ -4464,7 +4497,10 @@ var Session = class {
+@@ -4464,7 +4501,10 @@ var Session = class {
  			signalType: message.type,
  			...message.tagName ? { tagName: message.tagName } : {},
  			content: message.body,
@@ -250,7 +265,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  		};
  	}
  	/**
-@@ -5118,6 +5154,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
+@@ -5118,6 +5158,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
  	emitCoordinatorEvent({
  		type: "submission_settled",
  		submissionId: submission.submissionId,
@@ -258,7 +273,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  		outcome,
  		error: serializeSubmissionError(error)
  	}, errorInfo);
-@@ -5310,6 +5347,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
+@@ -5310,6 +5351,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
  	const event = ctx.createEvent({
  		type: "submission_settled",
  		submissionId: attempt.submissionId,
@@ -266,7 +281,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809e
  		outcome,
  		...outcome === "completed" ? {} : { error: serializeSubmissionError(error) }
  	});
-@@ -5419,6 +5457,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
+@@ -5419,6 +5461,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
  	emitCoordinatorEvent?.({
  		type: "submission_settled",
  		submissionId: pending.submissionId,
@@ -349,7 +364,7 @@ index 4af08391f41d94893ede44aede6614283528b44a..31ccef676a9daa15da2bc596d3e5d6da
  });
  const DeliveredSignalMessageSchema = v.object({
 diff --git a/dist/index.d.mts b/dist/index.d.mts
-index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..c113edd5f50b1dd0ed136af9bed7e10889f80a54 100644
+index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..2f50f2845e4bd32ddfa631b4c74dccb57a330f33 100644
 --- a/dist/index.d.mts
 +++ b/dist/index.d.mts
 @@ -333,7 +333,10 @@ declare function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise
@@ -359,7 +374,7 @@ index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..c113edd5f50b1dd0ed136af9bed7e108
 -declare function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>): void;
 +declare function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>, options?: {
 +  restoreContext?: (ctx: AgentStartContext) => void | Promise<void>;
-+  onModelInput?: (contextSignals: AgentStartContext['contextSignals']) => void;
++  onModelInput?: (contextSignals: AgentStartContext['contextSignals'], toolCallSucceeded: (id: string) => boolean) => void;
 +}): void;
  //#endregion
  //#region src/hooks/use-data-writer.d.ts
@@ -384,7 +399,7 @@ index ce5ad79e75c6e9820e7e213bb79c981445580fe2..bedcc0cba033971b5fff86b6e0d59a0c
  //#endregion
  //#region src/hooks/use-data-writer.ts
 diff --git a/dist/types-BBdvLv_l.d.mts b/dist/types-BBdvLv_l.d.mts
-index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..e0f42b6a15bf5d307b739e236589d56943e644ea 100644
+index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..5e9ccabfca84ec77e8d54f690210e30a6f9dc33e 100644
 --- a/dist/types-BBdvLv_l.d.mts
 +++ b/dist/types-BBdvLv_l.d.mts
 @@ -133,6 +133,7 @@ type ToolContext<S extends ToolInputSchema | undefined, H extends boolean | unde

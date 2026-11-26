@@ -10,7 +10,6 @@ import {
   useDispatchMessage,
   useInstruction,
   usePersistentState,
-  useResponseStart,
   useTool,
 } from '@flue/runtime';
 import {
@@ -41,10 +40,13 @@ interface Activation {
   body: string;
 }
 
+type SkillUse = Pick<Activation, 'id' | 'name' | 'sourceId' | 'actor' | 'toolCallId'>;
+
 interface SkillState {
   catalog: ReturnType<typeof skillCatalog>;
   active: readonly Activation[];
-  pendingUses?: readonly Pick<Activation, 'id' | 'actor'>[];
+  responseId?: string;
+  pendingUses?: readonly SkillUse[];
 }
 
 function activationSignal(activation: Activation, restored = false): AgentAppendMessage {
@@ -67,13 +69,17 @@ function activationSignal(activation: Activation, restored = false): AgentAppend
   };
 }
 
-function canRestore(activation: Activation, sources: readonly SkillSource[]) {
+function canRestore(activation: SkillUse, sources: readonly SkillSource[]) {
   return sources.some(
     (source) =>
       source.name === activation.name &&
       selectionId(source) === activation.sourceId &&
       (activation.actor === 'model' ? source.modelInvocable : source.userInvocable),
   );
+}
+
+function skillUse({ id, name, sourceId, actor }: Activation, toolCallId?: string): SkillUse {
+  return { id, name, sourceId, actor, toolCallId };
 }
 
 function visibleActivation(
@@ -191,12 +197,6 @@ export function agentSkillsCapability(
             const { catalog } = state;
             const restoreLimit = skillRestoreLimit(contextWindow);
 
-            useResponseStart(() => {
-              setState((current) =>
-                current.pendingUses?.length ? { ...current, pendingUses: [] } : current,
-              );
-            });
-
             async function activate(
               source: SkillSource,
               actor: Activation['actor'],
@@ -258,36 +258,46 @@ export function agentSkillsCapability(
                 start.signal.throwIfAborted();
                 const previous =
                   next && visibleActivation(next, start.contextSignals(skillInvocationSignal));
-                const active = await Promise.all(
-                  state.active.map(async (item) => {
-                    const matching = sources.find(({ name }) => name === item.name);
-                    const candidates = matching
-                      ? [matching]
-                      : (await discoverSkills(cwd, start.signal, item.name)).sources;
-                    return canRestore(item, candidates) ? item : undefined;
-                  }),
+                const pending =
+                  state.responseId === start.responseId ? (state.pendingUses ?? []) : [];
+                const names = new Set([...state.active, ...pending].map(({ name }) => name));
+                const candidates = new Map(
+                  await Promise.all(
+                    [...names].map(async (name) => {
+                      const matching = sources.find((source) => source.name === name);
+                      return [
+                        name,
+                        matching
+                          ? [matching]
+                          : (await discoverSkills(cwd, start.signal, name)).sources,
+                      ] as const;
+                    }),
+                  ),
                 );
-                const eligible = active.filter((item) => item !== undefined);
+
+                const eligible = (use: SkillUse) => canRestore(use, candidates.get(use.name) ?? []);
+
+                const active = state.active.filter(eligible);
+                const pendingUses = pending.filter(eligible);
                 const used = previous ?? next;
+                if (used) {
+                  pendingUses.push(skillUse(used));
+                }
                 setState((current) => ({
                   ...current,
                   catalog: skillCatalog(sources, contextWindow),
-                  active: eligible,
-                  ...(used && {
-                    pendingUses: [
-                      ...(current.pendingUses ?? []),
-                      { id: used.id, actor: used.actor },
-                    ],
-                  }),
+                  active,
+                  responseId: start.responseId,
+                  pendingUses,
                 }));
-                restore(start, eligible);
+                restore(start, active);
                 if (next && !previous) {
                   start.append(activationSignal(next));
                 }
               },
               {
                 restoreContext: (start) => restore(start, state.active),
-                onModelInput(contextSignals) {
+                onModelInput(contextSignals, toolCallSucceeded) {
                   setState((current) => {
                     if (!current.pendingUses?.length) {
                       return current;
@@ -295,6 +305,9 @@ export function agentSkillsCapability(
                     const visible = contextSignals(skillInvocationSignal);
                     let active = current.active;
                     for (const use of current.pendingUses) {
+                      if (use.toolCallId && !toolCallSucceeded(use.toolCallId)) {
+                        continue;
+                      }
                       const signal = visible.find(({ attributes }) => attributes?.id === use.id);
                       const activation = signal && readActivation(signal);
                       if (activation) {
@@ -346,10 +359,7 @@ export function agentSkillsCapability(
                         const used = previous ?? next;
                         setState((current) => ({
                           ...current,
-                          pendingUses: [
-                            ...(current.pendingUses ?? []),
-                            { id: used.id, actor: used.actor },
-                          ],
+                          pendingUses: [...(current.pendingUses ?? []), skillUse(used, toolCallId)],
                         }));
                         return `Loaded skill: ${next.name}.`;
                       })();
