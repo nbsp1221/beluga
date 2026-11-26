@@ -396,7 +396,9 @@ export function agentSkillsCapability(
                         ];
                       }
                     }
-                    return { ...current, active: withinRestoreBudget(active, restoreLimit) };
+                    return active === current.active
+                      ? current
+                      : { ...current, active: withinRestoreBudget(active, restoreLimit) };
                   });
                   setPending(null);
                 },

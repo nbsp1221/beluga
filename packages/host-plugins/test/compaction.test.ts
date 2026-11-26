@@ -748,11 +748,14 @@ test.for([
   'selected skill before the first model call',
   'tool result before the batch commits',
   'reused call ID with an interrupted result',
+  'reused call ID with an interrupted result after switching models',
 ] as const)(
   'restores skills after resuming an interrupted response with a %s',
   { timeout: 30_000 },
   async (boundary, context) => {
-    const reusedCallId = boundary === 'reused call ID with an interrupted result';
+    const switchModels =
+      boundary === 'reused call ID with an interrupted result after switching models';
+    const reusedCallId = boundary === 'reused call ID with an interrupted result' || switchModels;
     const fromTool = boundary !== 'selected skill before the first model call';
     const trigger = 'Apply the review skill';
     const prime = 'Use the original review skill';
@@ -760,7 +763,7 @@ test.for([
     const snapshotAfter = reusedCallId ? 'snapshot-sibling' : 'load-review';
     const inputs: string[] = [];
     const harness = await setupHarness(context, [], undefined, () => {
-      const provider = compactionProvider();
+      const provider = compactionProvider(undefined, switchModels ? 16_000 : undefined);
 
       const streamSimple: Provider['streamSimple'] = (model, input, options) => {
         const prompt = JSON.stringify(input.messages);
@@ -831,9 +834,21 @@ test.for([
     const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
       client.wait(receipt, { signal: AbortSignal.timeout(10_000) });
 
+    const selectModel = async (model: string) => {
+      const response = await harness.fetch(`${origin}/api/conversations/${id}/run-settings`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model, effort: 'default' }),
+      });
+      expect(response.status).toBe(200);
+    };
+
     if (reusedCallId) {
       await wait(await send(prime));
       assert(inputs.at(-1)?.includes('Loaded skill: review.'));
+    }
+    if (switchModels) {
+      await selectModel('test-read/alternate');
     }
 
     const snapshot = `${harness.databasePath}.snapshot`;
@@ -921,6 +936,9 @@ test.for([
     if (reusedCallId) {
       assert(resumed.includes('INTERRUPTED_SKILL_RULE'));
       assert(resumed.includes('Tool execution was interrupted before completion.'));
+    }
+    if (switchModels) {
+      await selectModel('test-read/fixture');
     }
     for (let index = 0; index < 4; index++) {
       await wait(await send(`Seed ${index}: ${'work '.repeat(4_000)}`));
