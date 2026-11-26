@@ -42,6 +42,7 @@ interface Activation {
 
 type SkillUse = Pick<Activation, 'id' | 'name' | 'sourceId' | 'actor'> & {
   tool?: { assistantMessageId: string; toolCallId: string };
+  deferred?: true;
 };
 
 interface PendingSkillUses {
@@ -280,6 +281,7 @@ export function agentSkillsCapability(
                     sourceId,
                     actor,
                     tool: { assistantMessageId, toolCallId },
+                    deferred: true,
                   };
                   const { sources } = await discoverSkills(cwd, start.signal, name);
                   start.signal.throwIfAborted();
@@ -348,9 +350,15 @@ export function agentSkillsCapability(
                     return;
                   }
                   const visible = contextSignals(skillInvocationSignal);
+                  // Flue applies queued signals in admission order. A deferred tool use
+                  // happened before the receiving response's own selections.
+                  const uses = [
+                    ...pending.uses.filter((use) => use.deferred),
+                    ...pending.uses.filter((use) => !use.deferred),
+                  ];
                   setState((current) => {
                     let active = current.active;
-                    for (const use of pending.uses) {
+                    for (const use of uses) {
                       if (
                         use.tool &&
                         !response.toolCallSucceeded(

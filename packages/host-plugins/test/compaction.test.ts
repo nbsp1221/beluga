@@ -982,10 +982,16 @@ test(
   },
 );
 
-test(
-  'restores a skill delivered separately after a joined submission fails',
+test.for([
+  { scenario: 'restores a skill delivered in a separate response', replacement: undefined },
+  {
+    scenario: 'restores the updated selection over a delayed signal',
+    replacement: 'UPDATED_SKILL_RULE',
+  },
+])(
+  '$scenario after a joined submission fails',
   { timeout: 30_000 },
-  async (context) => {
+  async ({ replacement }, context) => {
     const marker = 'DELAYED_SKILL_RULE';
     const trigger = 'Load the review skill';
     const inputs: string[] = [];
@@ -1008,16 +1014,18 @@ test(
       return { ...provider, stream: (model, input) => streamSimple(model, input), streamSimple };
     });
     const root = join(dirname(harness.databasePath), 'skills');
+    const reviewPath = join(root, 'review', 'SKILL.md');
+
+    const skillFile = (name: string, body: string) =>
+      `---\nname: ${name}\ndescription: Review a change\n---\n\n${body}\n`;
+
     for (const [name, body] of [
       ['review', marker],
       ['too-large', 'a'.repeat(1024 * 1024)],
     ]) {
       const directory = join(root, name);
       await mkdir(directory, { recursive: true });
-      await writeFile(
-        join(directory, 'SKILL.md'),
-        `---\nname: ${name}\ndescription: Review a change\n---\n\n${body}\n`,
-      );
+      await writeFile(join(directory, 'SKILL.md'), skillFile(name, body));
     }
     const workspace = await harness.prepareWorkspace();
     const preset = await harness.createPreset([agentSkillsCapabilityId]);
@@ -1031,6 +1039,7 @@ test(
 
     const toolStarted = deferred();
     const allowTool = deferred();
+    let receivingSubmissionId: string | null = null;
     const dispose = instrument({
       observe() {},
       dispose() {},
@@ -1038,6 +1047,11 @@ test(
         if (operation.type === 'tool' && operation.toolCallId === 'load-review') {
           toolStarted.resolve();
           await allowTool.promise;
+          const result = await next();
+          if (replacement) {
+            await writeFile(reviewPath, skillFile('review', replacement));
+          }
+          return result;
         }
         return next();
       },
@@ -1048,8 +1062,13 @@ test(
       try {
         await Promise.race([toolStarted.promise, settled]);
         const invalid = await send('/too-large fail before the skill signal arrives');
+        const updated = replacement ? await send('/review Use the current skill') : undefined;
         allowTool.resolve();
         await expect(wait(invalid)).rejects.toMatchObject({ failure: 'failed' });
+        if (updated) {
+          await wait(updated);
+          receivingSubmissionId = updated.submissionId;
+        }
       } finally {
         allowTool.resolve();
         await settled;
@@ -1070,11 +1089,16 @@ test(
       },
       { timeout: 10_000 },
     );
-    expect(delivery).toMatchObject({ joined_into: null, error: null });
+    expect(delivery).toMatchObject({
+      joined_into: receivingSubmissionId,
+      error: null,
+    });
     const applied = inputs.find((prompt) => prompt.includes(marker));
     assert(applied);
     expect(applied).toContain('Loaded skill: review.');
-    expect(applied.match(/DELAYED_SKILL_RULE/g)).toHaveLength(1);
+    expect(applied.match(/(?:DELAYED|UPDATED)_SKILL_RULE/g)?.sort()).toEqual(
+      replacement ? [marker, replacement] : [marker],
+    );
 
     for (let index = 0; index < 4; index++) {
       await wait(await send(`Seed ${index}: ${'work '.repeat(4_000)}`));
@@ -1092,7 +1116,7 @@ test(
     for (const prompt of [inputs.at(-1), JSON.stringify(input.messages)]) {
       assert(prompt);
       expect(prompt).toContain(checkpoint);
-      expect(prompt.match(/DELAYED_SKILL_RULE/g)).toHaveLength(1);
+      expect(prompt.match(/(?:DELAYED|UPDATED)_SKILL_RULE/g)).toEqual([replacement ?? marker]);
     }
   },
 );
