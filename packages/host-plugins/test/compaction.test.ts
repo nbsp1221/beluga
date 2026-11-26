@@ -982,6 +982,121 @@ test(
   },
 );
 
+test(
+  'restores a skill delivered separately after a joined submission fails',
+  { timeout: 30_000 },
+  async (context) => {
+    const marker = 'DELAYED_SKILL_RULE';
+    const trigger = 'Load the review skill';
+    const inputs: string[] = [];
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider();
+      let called = false;
+
+      const streamSimple: Provider['streamSimple'] = (model, input, options) => {
+        const prompt = JSON.stringify(input.messages);
+        inputs.push(prompt);
+        if (!called && prompt.includes(trigger)) {
+          called = true;
+          return toolResponse(model, [
+            { type: 'toolCall', id: 'load-review', name: 'skill', arguments: { name: 'review' } },
+          ]);
+        }
+        return provider.streamSimple(model, input, options);
+      };
+
+      return { ...provider, stream: (model, input) => streamSimple(model, input), streamSimple };
+    });
+    const root = join(dirname(harness.databasePath), 'skills');
+    for (const [name, body] of [
+      ['review', marker],
+      ['too-large', 'a'.repeat(1024 * 1024)],
+    ]) {
+      const directory = join(root, name);
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, 'SKILL.md'),
+        `---\nname: ${name}\ndescription: Review a change\n---\n\n${body}\n`,
+      );
+    }
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset([agentSkillsCapabilityId]);
+    const { id } = await harness.create(workspace.id, preset.id);
+    const client = harness.sdk(id);
+
+    const send = (body: string) => client.send({ message: { kind: 'user', body } });
+
+    const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
+      client.wait(receipt, { signal: AbortSignal.timeout(10_000) });
+
+    const toolStarted = deferred();
+    const allowTool = deferred();
+    const dispose = instrument({
+      observe() {},
+      dispose() {},
+      async interceptor(operation, _, next) {
+        if (operation.type === 'tool' && operation.toolCallId === 'load-review') {
+          toolStarted.resolve();
+          await allowTool.promise;
+        }
+        return next();
+      },
+    });
+    try {
+      const original = await send(trigger);
+      const settled = wait(original).catch((error: unknown) => error);
+      try {
+        await Promise.race([toolStarted.promise, settled]);
+        const invalid = await send('/too-large fail before the skill signal arrives');
+        allowTool.resolve();
+        await expect(wait(invalid)).rejects.toMatchObject({ failure: 'failed' });
+      } finally {
+        allowTool.resolve();
+        await settled;
+      }
+    } finally {
+      await dispose();
+    }
+    using db = new DatabaseSync(harness.databasePath, { readOnly: true });
+    const signalResponse = db.prepare(`
+    SELECT submission_id, joined_into, error FROM flue_agent_submissions
+    WHERE kind = 'dispatch' AND status = 'settled' AND instr(payload, ?) > 0
+  `);
+    const delivery = await vi.waitFor(
+      () => {
+        const row = signalResponse.get(marker);
+        assert(row);
+        return row;
+      },
+      { timeout: 10_000 },
+    );
+    expect(delivery).toMatchObject({ joined_into: null, error: null });
+    const applied = inputs.find((prompt) => prompt.includes(marker));
+    assert(applied);
+    expect(applied).toContain('Loaded skill: review.');
+    expect(applied.match(/DELAYED_SKILL_RULE/g)).toHaveLength(1);
+
+    for (let index = 0; index < 4; index++) {
+      await wait(await send(`Seed ${index}: ${'work '.repeat(4_000)}`));
+    }
+    await wait(await send('Trigger overflow'));
+    const path = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(path))).at(-1);
+    const model = turn?.records.findLast(
+      (record) => record.kind === 'assistant' && record.purpose === 'agent',
+    );
+    assert(turn && model);
+    const input = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${path}/${turn.id}/${model.id}`)).json(),
+    );
+    for (const prompt of [inputs.at(-1), JSON.stringify(input.messages)]) {
+      assert(prompt);
+      expect(prompt).toContain(checkpoint);
+      expect(prompt.match(/DELAYED_SKILL_RULE/g)).toHaveLength(1);
+    }
+  },
+);
+
 test('does not restore older instructions after a larger version of the same skill was used', async (context) => {
   const harness = await setupHarness(context, [], undefined, () => compactionProvider());
   const directory = join(dirname(harness.databasePath), 'skills', 'review');

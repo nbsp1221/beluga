@@ -54,7 +54,10 @@ interface SkillState {
   active: readonly Activation[];
 }
 
-function activationSignal(activation: Activation, restored = false): AgentAppendMessage {
+function activationSignal(
+  activation: Activation,
+  options: { restored?: boolean; assistantMessageId?: string } = {},
+): AgentAppendMessage {
   const { id, name, scope, sourceId, actor, toolCallId, body } = activation;
   return {
     kind: 'signal',
@@ -69,7 +72,8 @@ function activationSignal(activation: Activation, restored = false): AgentAppend
       actor,
       contextLifetime: 'response',
       ...(toolCallId && { toolCallId }),
-      ...(restored && { restored: 'true' }),
+      ...(options.assistantMessageId && { assistantMessageId: options.assistantMessageId }),
+      ...(options.restored && { restored: 'true' }),
     },
   };
 }
@@ -85,6 +89,11 @@ function canRestore(activation: SkillUse, sources: readonly SkillSource[]) {
 
 function skillUse({ id, name, sourceId, actor }: Activation, tool?: SkillUse['tool']): SkillUse {
   return { id, name, sourceId, actor, tool };
+}
+
+function recordUse(current: PendingSkillUses | null, responseId: string, use: SkillUse) {
+  const uses = current?.responseId === responseId ? current.uses : [];
+  return { responseId, uses: [...uses, use] };
 }
 
 function visibleActivation(
@@ -242,14 +251,41 @@ export function agentSkillsCapability(
               );
               for (const activation of withinRestoreBudget(active, restoreLimit)) {
                 if (!visible.has(activation.id)) {
-                  append(activationSignal(activation, true));
+                  append(activationSignal(activation, { restored: true }));
                 }
               }
             }
 
             useAgentStart(
               async (start) => {
-                if (delivery.kind !== 'user') {
+                if (delivery.kind === 'signal') {
+                  const { id, name, sourceId, actor, assistantMessageId, toolCallId } =
+                    delivery.attributes ?? {};
+                  if (
+                    delivery.type !== skillInvocationSignal ||
+                    actor !== 'model' ||
+                    !id ||
+                    !name ||
+                    !sourceId ||
+                    !assistantMessageId ||
+                    !toolCallId ||
+                    (pending?.responseId === start.responseId &&
+                      pending.uses.some((use) => use.id === id))
+                  ) {
+                    return;
+                  }
+                  const use: SkillUse = {
+                    id,
+                    name,
+                    sourceId,
+                    actor,
+                    tool: { assistantMessageId, toolCallId },
+                  };
+                  const { sources } = await discoverSkills(cwd, start.signal, name);
+                  start.signal.throwIfAborted();
+                  if (canRestore(use, sources)) {
+                    setPending((current) => recordUse(current, start.responseId, use));
+                  }
                   return;
                 }
                 const { sources } = await discoverSkills(cwd, start.signal);
@@ -374,17 +410,17 @@ export function agentSkillsCapability(
                           contextSignals?.(skillInvocationSignal) ?? [],
                         );
                         if (!previous) {
-                          await dispatch(activationSignal(next));
+                          await dispatch(activationSignal(next, { assistantMessageId }));
                           signal?.throwIfAborted();
                         }
                         const used = previous ?? next;
-                        setPending((current) => ({
-                          responseId,
-                          uses: [
-                            ...(current?.responseId === responseId ? current.uses : []),
+                        setPending((current) =>
+                          recordUse(
+                            current,
+                            responseId,
                             skillUse(used, { assistantMessageId, toolCallId }),
-                          ],
-                        }));
+                          ),
+                        );
                         return `Loaded skill: ${next.name}.`;
                       })();
                       loads.set(source.name, job);
