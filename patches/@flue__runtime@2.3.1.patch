@@ -19,9 +19,18 @@ index c9814eee223d3e933e0f2affa778160245f86184..4bf2f48fb5f723b57e02e0e3eff77815
  /** One `useAgentFinish` declaration; identity is the declaration index. */
  interface AgentFinishDeclaration {
 diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
-index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..dc766e1ca31121f661d1aa80a5cf19d54b67dfc3 100644
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..1ebee59905c5e9b38eac4b76c576d769488e6be1 100644
 --- a/dist/conversation-stream-store-BJbg7IHa.mjs
 +++ b/dist/conversation-stream-store-BJbg7IHa.mjs
+@@ -1,7 +1,7 @@
+ import { c as encodeBase64, d as abortErrorFor, f as composeTimeoutSignal, m as raceToolWithDeadline, p as createCallHandle, r as createCwdSandbox, s as decodeBase64, u as abandonToolOnAbort } from "./sandbox-CR3o1Qmd.mjs";
+ import { A as createEditTool, D as READ_SKILL_RESOURCE_TOOL_NAME, E as redactObservationDetailImages, F as createTaskTool, I as createWriteTool, L as formatBashResult, M as createGrepTool, N as createPackagedSkillReadTool, O as createActivateSkillTool, P as createReadTool, R as overlayPackagedSkills, S as renderWithFrame, T as redactEventImages, _ as packageSkillDefinition, a as buildPromptText, b as getSkillReferenceDirectory, c as buildWorkspaceSkillPrompt, d as parseSkillMarkdown, f as getPreparedToolAdapter, g as isSkillDefinition, i as buildPackagedSkillPrompt, j as createGlobTool, k as createBashTool, l as createResultTools, n as GIVE_UP_TOOL_NAME, o as buildResultFollowUpPrompt, r as ResultUnavailableError, s as buildSkillByPathlessNamePrompt, t as FINISH_TOOL_NAME, u as prepareResultTool, w as IMAGE_DATA_OMITTED } from "./result-B1iwJE0L.mjs";
+ import { A as SubmissionAbortedError, B as classifyError, C as SessionBusyError, E as SkillNotRegisteredError, G as normalizeLogAttributes, I as ToolNameConflictError, M as SubmissionInterruptedError, N as SubmissionRetryExhaustedError, P as SubmissionTimeoutError, Q as generateBlockId, X as deriveKeyedSubmissionId, Y as createConversationIdentity, Z as generateAttemptId, a as AttachmentNotAvailableError, c as ConversationRecordInvariantError, ct as generateTaskId, d as FlueError, et as generateIncarnationId, g as OperationFailedError, it as generateOperationId, j as SubmissionConflictError, k as SubagentNotDeclaredError, l as ConversationStreamStoreError, lt as generateToolCallId, m as InvalidRequestError, n as AgentInstanceNotFoundError, nt as generateInstanceUid, pt as interceptExecution, q as serializeEventError, rt as generateInvocationId, st as generateSubmissionId, t as AgentInstanceExistsError, u as DelegationDepthExceededError, ut as generateTurnId } from "./errors-BcRwz-UD.mjs";
+-import { $ as MAX_READ_LIMIT, B as DEFAULT_COMPACTION_SETTINGS, C as DeliveredMessageSchema, Ct as prepareDocumentRequest, Dt as generateConversationEntryId, E as assertDurability, Et as encodeCanonicalId, F as getActiveConversationPathSince, G as prepareCompaction, H as compact, I as getLatestConversationCompaction, J as emptyUsage, K as shouldCompact, L as countConsecutiveRetryableModelErrors, N as aggregateConversationUsageSince, Ot as generateConversationRecordId, P as classifyConversationSubmission, R as findTrailingPartialToolBatch, St as mergeOperationAttachments, Tt as RESERVED_SIGNAL_TYPES, U as deriveCompactionDefaults, V as calculateContextTokens, W as isAssistantContextOverflow, Y as fromProviderUsage, _t as assertAppendMessage, bt as fnv1a64, ct as toolOutcomeKey, d as resolveAgentInitialDataSchema, et as agentStreamPath, ft as createSessionStorageKey, gt as renderSignalMessage, ht as createUserContextMessage, it as buildConversationContextEntries, kt as toolStepRecordId, lt as toolResultEntryId, mt as parseSessionStorageKey, nt as parseOffset, ot as getActiveConversationPath, q as addUsage, rt as buildConversationContext, tt as formatOffset, w as MAX_IMAGE_DATA_LENGTH, wt as toPublicAttachment, xt as isDocumentMimeType, yt as runResponseMetadataHooks, z as isRetryableModelError } from "./dispatch-DTmMreLV.mjs";
++import { $ as MAX_READ_LIMIT, B as DEFAULT_COMPACTION_SETTINGS, Bt as projectSettlements, C as DeliveredMessageSchema, Ct as prepareDocumentRequest, Dt as generateConversationEntryId, E as assertDurability, Et as encodeCanonicalId, F as getActiveConversationPathSince, G as prepareCompaction, H as compact, I as getLatestConversationCompaction, J as emptyUsage, K as shouldCompact, L as countConsecutiveRetryableModelErrors, N as aggregateConversationUsageSince, Ot as generateConversationRecordId, P as classifyConversationSubmission, R as findTrailingPartialToolBatch, St as mergeOperationAttachments, Tt as RESERVED_SIGNAL_TYPES, U as deriveCompactionDefaults, V as calculateContextTokens, W as isAssistantContextOverflow, Y as fromProviderUsage, _t as assertAppendMessage, bt as fnv1a64, ct as toolOutcomeKey, d as resolveAgentInitialDataSchema, et as agentStreamPath, ft as createSessionStorageKey, gt as renderSignalMessage, ht as createUserContextMessage, it as buildConversationContextEntries, kt as toolStepRecordId, lt as toolResultEntryId, mt as parseSessionStorageKey, nt as parseOffset, ot as getActiveConversationPath, q as addUsage, rt as buildConversationContext, tt as formatOffset, w as MAX_IMAGE_DATA_LENGTH, wt as toPublicAttachment, xt as isDocumentMimeType, yt as runResponseMetadataHooks, z as isRetryableModelError } from "./dispatch-DTmMreLV.mjs";
+ import { a as providerTelemetryName, n as getRuntimeModels } from "./providers-DfEK_EsA.mjs";
+ import { i as valibotToJsonSchema } from "./schema-DIDpvZZa.mjs";
+ import { a as parseToolInput, n as claimStepName, o as resolveToolRun, r as cloneStepValue, t as assertToolDefinition } from "./tool-ex5dfLTb.mjs";
 @@ -964,6 +964,7 @@ function toTurnMessage(message) {
  	};
  	if (message.role === "user") return {
@@ -116,34 +125,69 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..dc766e1ca31121f661d1aa80a5cf19d5
  			throw new Error(`[flue] A useAgentStart callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
  		} finally {
  			appendWindowOpen = false;
-@@ -1861,7 +1879,7 @@ var Session = class {
+@@ -1860,12 +1878,8 @@ var Session = class {
+ 	*/
  	async steerJoinedEntry(entryId) {
  		const conversation = await this.requireConversation();
- 		const resolved = await this.resolveCanonicalContextAttachments(conversation);
+-		const resolved = await this.resolveCanonicalContextAttachments(conversation);
 -		const entry = buildConversationContextEntries(conversation, { resolveAttachment: (attachment) => {
-+		const entry = buildConversationContextEntries(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
- 			const image = resolved.get(attachment.id);
- 			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
- 			return image;
-@@ -3898,7 +3916,7 @@ var Session = class {
+-			const image = resolved.get(attachment.id);
+-			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+-			return image;
+-		} }).findLast((candidate) => candidate.sourceEntry.id === entryId);
++		const options = await this.canonicalContextOptions(conversation);
++		const entry = buildConversationContextEntries(conversation, options).findLast((candidate) => candidate.sourceEntry.id === entryId);
+ 		if (!entry) throw new Error("[flue] A joined delivery input entry is missing from the projected context.");
+ 		this.agentLoop.steer(entry.message);
  	}
- 	visibleCanonicalAttachments(conversation) {
- 		const available = /* @__PURE__ */ new Map();
--		for (const contextEntry of buildConversationContextEntries(conversation, { resolveAttachment: (attachment) => ({
-+		for (const contextEntry of buildConversationContextEntries(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => ({
- 			data: attachment.id,
- 			mimeType: attachment.mimeType
- 		}) })) {
-@@ -4042,7 +4060,7 @@ var Session = class {
+@@ -4039,14 +4053,40 @@ var Session = class {
+ 		}
+ 		return resolved;
+ 	}
++	async canonicalContextOptions(conversation) {
++		const resolved = await this.resolveCanonicalContextAttachments(conversation);
++		const joinedResponseOwners = new Map();
++		// Older queued deliveries could be recorded under their own ID without the response owner.
++		const hasLegacyScopedDelivery = getActiveConversationPath(conversation).some((entry) => {
++			if (entry.type !== "message" || entry.message.role !== "signal" || !entry.submissionId) return false;
++			const attributes = entry.message.attributes;
++			return attributes?.contextLifetime === "response" && !attributes.contextSubmissionId &&
++				["direct", "dispatch"].some((kind) => entry.id === submissionEntryId(kind, entry.submissionId));
++		});
++		if (hasLegacyScopedDelivery) {
++			const state = await this.conversationWriter.loadReducedState();
++			for (const { submissionId, answeredBySubmissionId } of projectSettlements(state, this.conversationId)) {
++				if (answeredBySubmissionId) joinedResponseOwners.set(submissionId, answeredBySubmissionId);
++			}
++			if (this.activeJoinSource) {
++				for (const { submissionId } of await this.activeJoinSource.listUnresolved()) {
++					joinedResponseOwners.set(submissionId, this.activeSubmissionId);
++				}
++			}
++		}
++		return {
++			activeSubmissionId: this.activeSubmissionId,
++			joinedResponseOwners,
++			resolveAttachment: (attachment) => {
++				const image = resolved.get(attachment.id);
++				if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
++				return image;
++			}
++		};
++	}
  	async rebuildCanonicalContext() {
  		const conversation = await this.requireConversation();
- 		const resolved = await this.resolveCanonicalContextAttachments(conversation);
+-		const resolved = await this.resolveCanonicalContextAttachments(conversation);
 -		const messages = buildConversationContext(conversation, { resolveAttachment: (attachment) => {
-+		const messages = buildConversationContext(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
- 			const image = resolved.get(attachment.id);
- 			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
- 			return image;
-@@ -4133,6 +4151,7 @@ var Session = class {
+-			const image = resolved.get(attachment.id);
+-			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+-			return image;
+-		} });
++		const messages = buildConversationContext(conversation, await this.canonicalContextOptions(conversation));
+ 		const lead = this.leadingSystemMessage();
+ 		this.agentLoop.state.messages = lead ? [lead, ...messages] : messages;
+ 		this.contextCompacted = getLatestConversationCompaction(conversation) !== void 0;
+@@ -4133,6 +4173,7 @@ var Session = class {
  			}
  			if (overflow || retryable) throwIfHalted();
  			try {
@@ -151,16 +195,35 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..dc766e1ca31121f661d1aa80a5cf19d5
  				await start();
  				await this.agentLoop.waitForIdle();
  			} catch (error) {
-@@ -4201,7 +4220,7 @@ var Session = class {
+@@ -4200,12 +4241,9 @@ var Session = class {
+ 			const compactionConfig = this.config.compaction === false ? void 0 : this.config.compaction;
  			const summarizationModel = compactionConfig?.model ? this.resolveModelForCall(compactionConfig.model) : sessionModel;
  			const canonicalConversation = await this.requireConversation();
- 			const resolvedAttachments = await this.resolveCanonicalContextAttachments(canonicalConversation);
+-			const resolvedAttachments = await this.resolveCanonicalContextAttachments(canonicalConversation);
 -			const contextEntries = buildConversationContextEntries(canonicalConversation, { resolveAttachment: (attachment) => {
-+			const contextEntries = buildConversationContextEntries(canonicalConversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
- 				const image = resolvedAttachments.get(attachment.id);
- 				if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
- 				return image;
-@@ -5118,6 +5137,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
+-				const image = resolvedAttachments.get(attachment.id);
+-				if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+-				return image;
+-			} });
++			const options = await this.canonicalContextOptions(canonicalConversation);
++			// A summary outlives this response. Do not give it unconsumed response signals.
++			const contextEntries = buildConversationContextEntries(canonicalConversation, { ...options, activeSubmissionId: void 0 });
+ 			const messages = contextEntries.map((entry) => entry.message);
+ 			const latestCompaction = getLatestConversationCompaction(canonicalConversation);
+ 			const preparation = prepareCompaction(messages, settings, latestCompaction ? {
+@@ -4464,7 +4502,10 @@ var Session = class {
+ 			signalType: message.type,
+ 			...message.tagName ? { tagName: message.tagName } : {},
+ 			content: message.body,
+-			...message.attributes ? { attributes: message.attributes } : {}
++			...message.attributes ? { attributes: message.attributes } : {},
++			...options?.asJoinedDelivery && message.attributes?.contextLifetime === "response" ? {
++				attributes: { ...message.attributes, contextSubmissionId: this.activeSubmissionId }
++			} : {}
+ 		};
+ 	}
+ 	/**
+@@ -5118,6 +5159,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
  	emitCoordinatorEvent({
  		type: "submission_settled",
  		submissionId: submission.submissionId,
@@ -168,7 +231,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..dc766e1ca31121f661d1aa80a5cf19d5
  		outcome,
  		error: serializeSubmissionError(error)
  	}, errorInfo);
-@@ -5310,6 +5330,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
+@@ -5310,6 +5352,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
  	const event = ctx.createEvent({
  		type: "submission_settled",
  		submissionId: attempt.submissionId,
@@ -176,7 +239,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..dc766e1ca31121f661d1aa80a5cf19d5
  		outcome,
  		...outcome === "completed" ? {} : { error: serializeSubmissionError(error) }
  	});
-@@ -5419,6 +5440,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
+@@ -5419,6 +5462,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
  	emitCoordinatorEvent?.({
  		type: "submission_settled",
  		submissionId: pending.submissionId,
@@ -185,7 +248,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..dc766e1ca31121f661d1aa80a5cf19d5
  		...pending.record.outcome === "completed" || pending.record.error === void 0 ? {} : { error: pending.record.error }
  	});
 diff --git a/dist/dispatch-DTmMreLV.mjs b/dist/dispatch-DTmMreLV.mjs
-index 4af08391f41d94893ede44aede6614283528b44a..037ce2bac6d1887a4da26b2ff218a2ff5cfd71fd 100644
+index 4af08391f41d94893ede44aede6614283528b44a..185ff7d6e0311d4ce8fcbc692feea3b3cd8f4422 100644
 --- a/dist/dispatch-DTmMreLV.mjs
 +++ b/dist/dispatch-DTmMreLV.mjs
 @@ -354,9 +354,10 @@ function isPlainObject(value) {
@@ -224,7 +287,7 @@ index 4af08391f41d94893ede44aede6614283528b44a..037ce2bac6d1887a4da26b2ff218a2ff
 +		if (message.role === "assistant" && message.stopReason !== "aborted" && message.stopReason !== "error") {
 +			completed.add(entry.submissionId);
 +		} else if (message.role === "signal" && message.attributes?.contextLifetime === "response") {
-+			const origin = message.attributes.contextSubmissionId ?? entry.submissionId;
++			const origin = message.attributes.contextSubmissionId ?? options.joinedResponseOwners?.get(entry.submissionId) ?? entry.submissionId;
 +			if (origin !== options.activeSubmissionId && !completed.has(origin)) skipped.add(entry.id);
 +		}
 +	}
@@ -249,6 +312,12 @@ index 4af08391f41d94893ede44aede6614283528b44a..037ce2bac6d1887a4da26b2ff218a2ff
  				sourceEntry: entry
  			});
  			index += 1;
+@@ -4243,4 +4260,4 @@ function validateDispatchRequest(request, agent) {
+ 	return parseDeliveredMessage(request.message);
+ }
+ //#endregion
+-export { MAX_READ_LIMIT as $, replyFromSnapshot as A, DEFAULT_COMPACTION_SETTINGS as B, DeliveredMessageSchema as C, prepareDocumentRequest as Ct, assertThinkingLevel as D, generateConversationEntryId as Dt, assertDurability as E, encodeCanonicalId as Et, getActiveConversationPathSince as F, prepareCompaction as G, compact as H, getLatestConversationCompaction as I, emptyUsage as J, shouldCompact as K, countConsecutiveRetryableModelErrors as L, throwIfAborted as M, aggregateConversationUsageSince as N, observeSubmissionSettlement as O, generateConversationRecordId as Ot, classifyConversationSubmission as P, DEFAULT_READ_LIMIT as Q, findTrailingPartialToolBatch as R, handleAgentRequest as S, mergeOperationAttachments as St, assertCompaction as T, RESERVED_SIGNAL_TYPES as Tt, deriveCompactionDefaults as U, calculateContextTokens as V, isAssistantContextOverflow as W, getConversationFoldHost as X, fromProviderUsage as Y, writeFoldCheckpoint as Z, normalizeMessageInput as _, assertAppendMessage as _t, getRegisteredAgentIdentity as a, conversationScopeKey as at, handleAgentConversationRead as b, fnv1a64 as bt, resetFlueAgentRegistrationForTests as c, toolOutcomeKey as ct, resolveAgentInitialDataSchema as d, createActionScopeName as dt, agentStreamPath as et, configureFlueRuntime as f, createSessionStorageKey as ft, resetFlueRuntimeForTests as g, renderSignalMessage as gt, getFlueRuntime as h, createUserContextMessage as ht, createAgentRouter as i, buildConversationContextEntries as it, settlementFromChunk as j, readSubmissionReply as k, toolStepRecordId as kt, resolveAgentDurability as l, toolResultEntryId as lt, getAgentInstance as m, parseSessionStorageKey as mt, AGENT_IDENTITY_PATTERN as n, parseOffset as nt, getRegisteredFlueAgents as o, getActiveConversationPath as ot, dispatch as p, createTaskSessionName as pt, addUsage as q, __flueBindAgentModule as r, buildConversationContext as rt, registerFlueAgents as s, reduceConversationRecords as st, enqueueDispatch as t, formatOffset as tt, resolveAgentIdentity as u, assertPublicSessionName as ut, handleAgentAttachmentRead as v, createAgentOutputChannel as vt, MAX_IMAGE_DATA_LENGTH as w, toPublicAttachment as wt, assertAgentDispatchAdmissionInput as x, isDocumentMimeType as xt, handleAgentConversationHead as y, runResponseMetadataHooks as yt, isRetryableModelError as z };
++export { MAX_READ_LIMIT as $, replyFromSnapshot as A, DEFAULT_COMPACTION_SETTINGS as B, projectSettlements as Bt, DeliveredMessageSchema as C, prepareDocumentRequest as Ct, assertThinkingLevel as D, generateConversationEntryId as Dt, assertDurability as E, encodeCanonicalId as Et, getActiveConversationPathSince as F, prepareCompaction as G, compact as H, getLatestConversationCompaction as I, emptyUsage as J, shouldCompact as K, countConsecutiveRetryableModelErrors as L, throwIfAborted as M, aggregateConversationUsageSince as N, observeSubmissionSettlement as O, generateConversationRecordId as Ot, classifyConversationSubmission as P, DEFAULT_READ_LIMIT as Q, findTrailingPartialToolBatch as R, handleAgentRequest as S, mergeOperationAttachments as St, assertCompaction as T, RESERVED_SIGNAL_TYPES as Tt, deriveCompactionDefaults as U, calculateContextTokens as V, isAssistantContextOverflow as W, getConversationFoldHost as X, fromProviderUsage as Y, writeFoldCheckpoint as Z, normalizeMessageInput as _, assertAppendMessage as _t, getRegisteredAgentIdentity as a, conversationScopeKey as at, handleAgentConversationRead as b, fnv1a64 as bt, resetFlueAgentRegistrationForTests as c, toolOutcomeKey as ct, resolveAgentInitialDataSchema as d, createActionScopeName as dt, agentStreamPath as et, configureFlueRuntime as f, createSessionStorageKey as ft, resetFlueRuntimeForTests as g, renderSignalMessage as gt, getFlueRuntime as h, createUserContextMessage as ht, createAgentRouter as i, buildConversationContextEntries as it, settlementFromChunk as j, readSubmissionReply as k, toolStepRecordId as kt, resolveAgentDurability as l, toolResultEntryId as lt, getAgentInstance as m, parseSessionStorageKey as mt, AGENT_IDENTITY_PATTERN as n, parseOffset as nt, getRegisteredFlueAgents as o, getActiveConversationPath as ot, dispatch as p, createTaskSessionName as pt, addUsage as q, __flueBindAgentModule as r, buildConversationContext as rt, registerFlueAgents as s, reduceConversationRecords as st, enqueueDispatch as t, formatOffset as tt, resolveAgentIdentity as u, assertPublicSessionName as ut, handleAgentAttachmentRead as v, createAgentOutputChannel as vt, MAX_IMAGE_DATA_LENGTH as w, toPublicAttachment as wt, assertAgentDispatchAdmissionInput as x, isDocumentMimeType as xt, handleAgentConversationHead as y, runResponseMetadataHooks as yt, isRetryableModelError as z };
 diff --git a/dist/index.d.mts b/dist/index.d.mts
 index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..7f81c109fe447682433bb634b0675a1060b7824a 100644
 --- a/dist/index.d.mts

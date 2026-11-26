@@ -1,7 +1,9 @@
-import { mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
+import { unlinkSync } from 'node:fs';
+import { chmod, mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
-import { instrument } from '@flue/runtime';
+import { instrument, useDispatchMessage } from '@flue/runtime';
 import {
   AGENT_SKILLS_PATH,
   agentSkillsCapabilityId,
@@ -10,8 +12,16 @@ import {
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
 import { expect, test, vi } from 'vitest';
+import type { AgentCapability } from '../src/agent-capabilities/host.js';
+import { fileReadCapability } from '../src/agent-capabilities/file/read/host.js';
 import { linkDirectory, origin, readTrajectory, setupHarness } from './fixtures/harness.js';
 import { fixtureProvider } from './fixtures/model-provider.js';
+
+declare module '@workspace/runtime' {
+  interface Services {
+    fixtureJoinedSkill: AgentCapability;
+  }
+}
 
 async function writeSkill(root: string, name: string, marker: string, flags = '') {
   const folder = join(root, name);
@@ -340,7 +350,49 @@ test('reuses a complete discovery for the slash words in a submission', async (c
   const rootChecks = warnings.mock.calls.filter(([message]) =>
     String(message).includes('outside the project boundary'),
   );
-  expect(rootChecks).toHaveLength(1);
+  expect(rootChecks).toHaveLength(2);
+});
+
+test('rechecks a known slash skill after its catalog source disappears', async (context) => {
+  const harness = await setupHarness(context);
+  const projectRoot = join(harness.project, '.agents', 'skills');
+  const projectFile = join(await writeSkill(projectRoot, 'review', 'PROJECT_BODY'), 'SKILL.md');
+  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', 'FALLBACK_BODY');
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset([agentSkillsCapabilityId]);
+  const { id } = await harness.create(workspace.id, preset.id);
+  const warnings = vi.spyOn(console, 'warn').mockImplementation((message: unknown) => {
+    if (String(message).includes(`uses ${projectFile}; shadowed`)) {
+      unlinkSync(projectFile);
+    }
+  });
+  context.onTestFinished(() => warnings.mockRestore());
+
+  const [request] = await submit(harness, id, '/review this change');
+  expect(request.skillInstructions).toContain('FALLBACK_BODY');
+});
+
+test.skipIf(process.platform === 'win32' || process.getuid?.() === 0).for([
+  { policy: 'allows', flags: '', invocable: true },
+  { policy: 'denies', flags: 'user-invocable: false\n', invocable: false },
+])('honors a search-only project skill that $policy slash invocation', async (entry, context) => {
+  const harness = await setupHarness(context);
+  const projectRoot = join(harness.project, '.agents', 'skills');
+  await writeSkill(projectRoot, 'review', 'PROJECT_BODY', entry.flags);
+  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', 'HOST_BODY');
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset([agentSkillsCapabilityId]);
+  const { id } = await harness.create(workspace.id, preset.id);
+  await chmod(projectRoot, 0o111);
+  try {
+    const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+    expect(skillListingSchema.parse(await response.json())).toMatchObject({ incomplete: true });
+    const [request] = await submit(harness, id, '/review this change');
+    expect(request.skillInstructions).not.toContain('HOST_BODY');
+    expect(request.skillInstructions.includes('PROJECT_BODY')).toBe(entry.invocable);
+  } finally {
+    await chmod(projectRoot, 0o700);
+  }
 });
 
 test('reports mismatched metadata and keeps discovery inside the approved roots', async (context) => {
@@ -499,6 +551,77 @@ test.for([
     expect(retry.skillInstructions).not.toContain('ABANDONED_REVIEW_BODY');
   },
 );
+
+test('keeps a joined skill on the receiving response, including before the owner was stored', async (context) => {
+  const marker = 'LEGACY_JOINED_SKILL_BODY';
+  const fixture = {
+    id: 'fixture-joined-skill',
+    name: 'Joined skill fixture',
+    description: 'Dispatches a scoped skill after a file read.',
+  };
+  const harness = await setupHarness(context, [
+    fileReadCapability,
+    {
+      service: 'fixtureJoinedSkill',
+      plugin: {
+        id: fixture.id,
+        requires: [],
+        provides: ['fixtureJoinedSkill'],
+        setup(context) {
+          context.provide('fixtureJoinedSkill', {
+            metadata: fixture,
+            useContext() {
+              const dispatch = useDispatchMessage();
+              return {
+                async onFiles() {
+                  await dispatch({
+                    kind: 'signal',
+                    type: 'skill-invocation',
+                    tagName: 'system-reminder',
+                    body: marker,
+                    attributes: { contextLifetime: 'response' },
+                  });
+                },
+              };
+            },
+          });
+        },
+      },
+    },
+  ]);
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset(['file.read', fixture.id]);
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+  const host = await client.send({ message: { kind: 'user', body: '{"path":"README.md"}' } });
+  await client.wait(host, { signal: context.signal });
+  expect(harness.observed.at(-1)?.skillInstructions).toContain(marker);
+
+  await harness.getRuntime().dispose();
+  {
+    using database = new DatabaseSync(harness.databasePath);
+    const rows = database
+      .prepare(`
+      SELECT batch.path, batch.seq, '$[' || item.key || '].attributes.contextSubmissionId' AS field
+      FROM flue_conversation_stream_batches AS batch, json_each(batch.data) AS item
+      WHERE json_extract(item.value, '$.content') = ?
+        AND json_extract(item.value, '$.attributes.contextSubmissionId') = ?
+        AND json_extract(item.value, '$.submissionId') != ?
+    `)
+      .all(marker, host.submissionId, host.submissionId);
+    expect(rows).toHaveLength(1);
+    const [{ path, seq, field }] = rows;
+    database
+      .prepare(`
+      UPDATE flue_conversation_stream_batches SET data = json_remove(data, ?)
+      WHERE path = ? AND seq = ?
+    `)
+      .run(field, path, seq);
+  }
+  await harness.restart();
+  const [request] = await submit(harness, id, 'Follow up on the read');
+  expect(request.skillInstructions).toContain(marker);
+});
 
 test('sends a long skill body in full and records it in Trajectory', async (context) => {
   const harness = await setupHarness(context);

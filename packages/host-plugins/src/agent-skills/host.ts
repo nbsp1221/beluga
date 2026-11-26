@@ -101,13 +101,12 @@ export function agentSkillsCapability(
                   return;
                 }
                 const { sources, incomplete } = await refreshCatalog(signal);
-                const byName = new Map(sources.map((source) => [source.name, source]));
+                const knownNames = new Set(sources.map((source) => source.name));
                 for (const name of explicitSkillNames(delivery.body)) {
-                  const source =
-                    byName.get(name) ??
-                    (incomplete
-                      ? (await discoverSkills(cwd, signal, name)).sources.at(0)
-                      : undefined);
+                  if (!incomplete && !knownNames.has(name)) {
+                    continue;
+                  }
+                  const source = (await discoverSkills(cwd, signal, name)).sources.at(0);
                   if (!source?.userInvocable) {
                     continue;
                   }
