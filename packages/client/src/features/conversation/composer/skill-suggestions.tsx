@@ -1,4 +1,8 @@
-import { type SkillSummary, explicitSkillName } from '@workspace/protocol/host';
+import {
+  type SkillListing,
+  type SkillSelection,
+  explicitSkillName,
+} from '@workspace/protocol/host';
 import { Button } from '@workspace/ui/components/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@workspace/ui/components/popover';
 import { type KeyboardEvent, useEffect, useId, useState } from 'react';
@@ -13,8 +17,8 @@ export function useSkillSuggestions(
   const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [index, setIndex] = useState(0);
-  const [selected, setSelected] = useState<string>();
-  const [result, setResult] = useState<{ key: string; items: readonly SkillSummary[] }>();
+  const [selected, setSelected] = useState<SkillSelection>();
+  const [result, setResult] = useState<{ key: string; listing: SkillListing | null }>();
   const query = /^\/([a-z0-9-]*)$/.exec(session.draft)?.[1];
   const open = enabled && focused && !dismissed && query !== undefined;
   const { id, workspaceId, agentPresetId, agentPresetVersion, isDraft } = session;
@@ -28,25 +32,34 @@ export function useSkillSuggestions(
     const scope = { id, workspaceId, agentPresetId, agentPresetVersion, isDraft };
     void client
       .listSkills(scope, abort.signal)
-      .then((items) => {
+      .then((listing) => {
         if (!abort.signal.aborted) {
-          setResult({ key, items });
+          setResult({ key, listing });
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!abort.signal.aborted) {
+          setResult({ key, listing: null });
+        }
+      });
     return () => abort.abort();
   }, [client, open, key, id, workspaceId, agentPresetId, agentPresetVersion, isDraft]);
 
-  const items =
-    open && result?.key === key
-      ? result.items
-          .filter(
-            ({ name, description }) =>
-              name.includes(query) || description.toLowerCase().includes(query),
-          )
-          .slice(0, 30)
-      : [];
+  const listing = open && result?.key === key ? result.listing : undefined;
+  const items = listing ? matchingSkills(listing.items, query ?? '') : [];
   const current = Math.min(index, items.length - 1);
+  const notice =
+    listing === null
+      ? 'Skills could not be loaded.'
+      : listing?.incomplete
+        ? 'Some skills could not be listed.'
+        : '';
+  const announcement = [
+    notice,
+    listing && (items.length ? `${items.length} skill suggestions.` : 'No matching skills.'),
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   useEffect(() => {
     if (current < 0) {
@@ -60,22 +73,22 @@ export function useSkillSuggestions(
     setResult(undefined);
   }
 
-  function select(name: string) {
+  function select({ id: skillId, name }: SkillSelection) {
     client.setDraft(id, `/${name} `);
-    setSelected(name);
+    setSelected({ id: skillId, name });
     dismiss();
   }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (!items.length || event.nativeEvent.isComposing) {
+    if ((!items.length && !notice) || event.nativeEvent.isComposing) {
       return false;
     }
     if (event.key === 'Escape') {
       dismiss();
-    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    } else if (items.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       setIndex((current + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length);
-    } else if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
-      select(items[current].name);
+    } else if (items.length && (event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
+      select(items[current]);
     } else {
       return false;
     }
@@ -88,7 +101,9 @@ export function useSkillSuggestions(
     listId,
     items,
     current,
-    selected: explicitSkillName(session.draft) === selected ? selected : undefined,
+    notice,
+    announcement,
+    selected: explicitSkillName(session.draft) === selected?.name ? selected : undefined,
     select,
     setFocused(focused: boolean) {
       setFocused(focused);
@@ -103,7 +118,7 @@ export function useSkillSuggestions(
       if (!/^\/[a-z0-9-]*$/.test(text)) {
         setResult(undefined);
       }
-      if (explicitSkillName(text) !== selected) {
+      if (explicitSkillName(text) !== selected?.name) {
         setSelected(undefined);
       }
     },
@@ -111,46 +126,89 @@ export function useSkillSuggestions(
   };
 }
 
+function matchingSkills(items: SkillListing['items'], query: string) {
+  if (!query) {
+    return items.slice(0, 30);
+  }
+  const matches = items.flatMap((item) => {
+    const { name, description } = item;
+    if (name === query) {
+      return [{ item, rank: 0 }];
+    }
+    if (name.startsWith(query)) {
+      return [{ item, rank: 1 }];
+    }
+    if (name.includes(query)) {
+      return [{ item, rank: 2 }];
+    }
+    if (description.toLowerCase().includes(query)) {
+      return [{ item, rank: 3 }];
+    }
+    return [];
+  });
+  return matches
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, 30)
+    .map(({ item }) => item);
+}
+
 export function SkillSuggestions({
   suggestions,
 }: {
   suggestions: ReturnType<typeof useSkillSuggestions>;
 }) {
-  const { items, current, listId, select } = suggestions;
+  const { items, current, listId, select, notice, announcement } = suggestions;
   return (
-    <Popover
-      open={items.length > 0}
-      onOpenChange={(open) => {
-        if (!open) {
-          suggestions.dismiss();
-        }
-      }}
-    >
-      <PopoverTrigger type="button" tabIndex={-1} aria-hidden="true" className="sr-only" />
-      <PopoverContent side="top" align="start" initialFocus={false} finalFocus={false}>
-        <div id={listId} role="listbox" aria-label="Skills" className="max-h-48 overflow-y-auto">
-          {items.map(({ name, description, userOnly }, index) => (
-            <Button
-              id={`${listId}-${index}`}
-              key={name}
-              type="button"
-              role="option"
-              aria-selected={index === current}
-              tabIndex={-1}
-              variant={index === current ? 'secondary' : 'ghost'}
-              className="h-auto w-full flex-col items-start gap-0.5 text-left whitespace-normal"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => select(name)}
+    <>
+      <span role="status" className="sr-only">
+        {announcement}
+      </span>
+      <Popover
+        open={items.length > 0 || Boolean(notice)}
+        onOpenChange={(open) => {
+          if (!open) {
+            suggestions.dismiss();
+          }
+        }}
+      >
+        <PopoverTrigger type="button" tabIndex={-1} aria-hidden="true" className="sr-only" />
+        <PopoverContent side="top" align="start" initialFocus={false} finalFocus={false}>
+          {notice && (
+            <p aria-hidden="true" className="px-2 py-1 text-sm text-muted-foreground">
+              {notice}
+            </p>
+          )}
+          {items.length > 0 && (
+            <div
+              id={listId}
+              role="listbox"
+              aria-label="Skills"
+              className="max-h-48 overflow-y-auto"
             >
-              <span>
-                {name}
-                {userOnly && ' · Manual only'}
-              </span>
-              <span className="text-muted-foreground">{description}</span>
-            </Button>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
+              {items.map((item, index) => (
+                <Button
+                  id={`${listId}-${index}`}
+                  key={item.id}
+                  type="button"
+                  role="option"
+                  aria-selected={index === current}
+                  tabIndex={-1}
+                  variant={index === current ? 'secondary' : 'ghost'}
+                  className="h-auto w-full flex-col items-start gap-0.5 text-left whitespace-normal"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => select(item)}
+                >
+                  <span>
+                    {item.name}
+                    {item.userOnly && ' · Manual only'}
+                  </span>
+                  <span className="text-muted-foreground">{item.description}</span>
+                </Button>
+              ))}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </>
   );
 }

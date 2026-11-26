@@ -1,10 +1,11 @@
+import { unlinkSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   AGENT_SKILLS_PATH,
   agentSkillsCapabilityId,
   productRoutes,
-  skillSummarySchema,
+  skillListingSchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
 import { expect, test, vi } from 'vitest';
@@ -133,7 +134,9 @@ test('filters invocation policy after resolving names and leaves disabled preset
   const preset = await harness.createPreset([agentSkillsCapabilityId]);
   const session = await harness.create(workspace.id, preset.id);
   const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${session.id}`);
-  expect(skillSummarySchema.array().parse(await response.json())).toEqual([
+  const listing = skillListingSchema.parse(await response.json());
+  expect(listing.incomplete).toBe(false);
+  expect(listing.items.map(({ id: _id, ...skill }) => skill)).toEqual([
     { name: 'manual', description: 'Find manual', userOnly: true },
   ]);
   const manual = (await submit(harness, session.id, '/manual use this'))[0];
@@ -157,6 +160,139 @@ test('filters invocation policy after resolving names and leaves disabled preset
   const [empty] = await submit(harness, noSkills.id, '/manual is ordinary text here');
   expect(empty.instructions).not.toContain('<available_skills>');
   expect(empty.toolNames).not.toContain('skill');
+});
+
+test(
+  'keeps other roots visible and resolves exact manual names beyond the browsing limit',
+  { timeout: 45_000 },
+  async (context) => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    context.onTestFinished(() => warnings.mockRestore());
+    const harness = await setupHarness(context);
+    const catalog = join(harness.project, '.agents', 'skills');
+    for (let index = 0; index < 2000; index += 32) {
+      await Promise.all(
+        Array.from({ length: Math.min(32, 2000 - index) }, (_, offset) =>
+          mkdir(join(catalog, `candidate-${String(index + offset).padStart(4, '0')}`), {
+            recursive: true,
+          }),
+        ),
+      );
+    }
+    await writeSkill(catalog, 'z-local', 'EXACT_BODY');
+    await writeSkill(join(dirname(harness.databasePath), 'skills'), 'global-skill', 'GLOBAL_BODY');
+    await writeSkill(join(dirname(harness.databasePath), 'skills'), 'z-local', 'GLOBAL_SHADOWED');
+    const workspace = await harness.prepareWorkspace();
+    const { id } = await harness.create(
+      workspace.id,
+      (await harness.createPreset([agentSkillsCapabilityId])).id,
+    );
+    const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+    expect(skillListingSchema.parse(await response.json())).toMatchObject({
+      incomplete: true,
+      items: [{ name: 'global-skill' }, { name: 'z-local' }],
+    });
+    expect((await submit(harness, id, '/z-local Use this rule'))[0].skillInstructions).toContain(
+      'EXACT_BODY',
+    );
+  },
+);
+
+test('rejects an explicit selection when only a same-named fallback remains', async (context) => {
+  const harness = await setupHarness(context);
+  const project = await writeSkill(
+    join(harness.project, '.agents', 'skills'),
+    'review',
+    'PROJECT_BODY',
+  );
+  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', 'FALLBACK_BODY');
+  const workspace = await harness.prepareWorkspace();
+  const { id } = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+  const [{ id: skillId, name }] = skillListingSchema.parse(await response.json()).items;
+  await rm(join(project, 'SKILL.md'));
+  const rejected = await harness.post(`/api/conversations/${id}`, {
+    kind: 'user',
+    body: '/review Use the project skill',
+    selectedSkill: { id: skillId, name },
+  });
+  expect(rejected.status).toBe(409);
+  expect(harness.observed).toHaveLength(0);
+  expect(
+    (await submit(harness, id, '/review Use the current skill'))[0].skillInstructions,
+  ).toContain('FALLBACK_BODY');
+});
+
+test('preserves the selected source after the request is accepted', async (context) => {
+  const harness = await setupHarness(context);
+  const project = await writeSkill(
+    join(harness.project, '.agents', 'skills'),
+    'review',
+    'PROJECT_BODY',
+  );
+  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', 'FALLBACK_BODY');
+  const workspace = await harness.prepareWorkspace();
+  const { id } = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+  const [{ id: skillId, name }] = skillListingSchema.parse(await response.json()).items;
+  const sessions = harness.getRuntime().get('workspaceToolSessions');
+  const resolveWorkspace = sessions.workspaceRootForSession.bind(sessions);
+  const removeSelected = vi
+    .spyOn(sessions, 'workspaceRootForSession')
+    .mockImplementationOnce((sessionId) => {
+      unlinkSync(join(project, 'SKILL.md'));
+      return resolveWorkspace(sessionId);
+    });
+  context.onTestFinished(() => removeSelected.mockRestore());
+  const client = harness.sdk(id);
+  const message = {
+    kind: 'user' as const,
+    body: '/review Use the project skill',
+    selectedSkill: { id: skillId, name },
+  };
+  const receipt = await client.send({ message });
+  await expect(client.wait(receipt, { signal: AbortSignal.timeout(5000) })).rejects.toMatchObject({
+    failure: 'failed',
+  });
+  expect(harness.observed).toHaveLength(0);
+  const [turn] = await readTrajectory(
+    harness.fetch(`${origin}/api/conversations/${id}/trajectory`),
+  );
+  expect(turn).toMatchObject({
+    status: 'failed',
+    error: 'The selected skill is no longer available.',
+  });
+});
+
+test('reports mismatched metadata and keeps discovery inside the approved roots', async (context) => {
+  const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  context.onTestFinished(() => warnings.mockRestore());
+  const harness = await setupHarness(context);
+  const catalog = join(harness.project, '.agents', 'skills');
+  const invalid = await writeSkill(catalog, 'mismatched', 'INVALID_BODY');
+  await writeFile(
+    join(invalid, 'SKILL.md'),
+    '---\nname: different\ndescription: Mismatch\n---\n\nINVALID_BODY',
+  );
+  await writeSkill(catalog, 'dot.name', 'NONSTANDARD_NAME');
+  const other = await writeSkill(join(harness.other, 'skills'), 'linked', 'BOUNDARY_BODY');
+  await linkDirectory(other, join(catalog, 'linked'));
+  const workspace = await harness.prepareWorkspace();
+  const { id } = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+  expect(skillListingSchema.parse(await response.json())).toEqual({ items: [], incomplete: true });
+  for (const name of ['mismatched', 'different', 'dot.name', 'linked']) {
+    expect((await submit(harness, id, `/${name}`))[0].skillInstructions).toBe('');
+  }
 });
 
 test('does not apply an interrupted skill invocation on the next request', async (context) => {
@@ -234,12 +370,34 @@ test.for(['user', 'model'] as const)(
   },
 );
 
-test('records a selected skill body failure without sending a model request', async (context) => {
+test('sends a long skill body in full and records it in Trajectory', async (context) => {
+  const harness = await setupHarness(context);
+  const body = 'START_OF_SKILL ' + 'a'.repeat(24_000) + ' END_OF_SKILL';
+  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'long-skill', body);
+  const workspace = await harness.prepareWorkspace();
+  const { id } = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  const requests = await submit(harness, id, '/long-skill Try it');
+  expect(requests[0]?.skillInstructions).toContain(body);
+  const path = `${origin}/api/conversations/${id}/trajectory`;
+  const turn = (await readTrajectory(harness.fetch(path))).at(0);
+  const model = turn?.records.find((record) => record.kind === 'assistant');
+  if (!turn || !model) {
+    throw new Error('Missing model request.');
+  }
+  const response = await harness.fetch(`${path}/${turn.id}/${model.id}`);
+  const input = trajectoryModelInputResponseSchema.parse(await response.json());
+  expect(JSON.stringify(input.messages)).toContain(body);
+});
+
+test('records a selected skill source failure without sending a model request', async (context) => {
   const harness = await setupHarness(context);
   await writeSkill(
     join(dirname(harness.databasePath), 'skills'),
     'oversized',
-    'LARGE_SKILL ' + 'a'.repeat(24_000),
+    'LARGE_SKILL ' + 'a'.repeat(1024 * 1024),
   );
   const workspace = await harness.prepareWorkspace();
   const { id } = await harness.create(
@@ -247,7 +405,13 @@ test('records a selected skill body failure without sending a model request', as
     (await harness.createPreset([agentSkillsCapabilityId])).id,
   );
   const client = harness.sdk(id);
-  const message = { kind: 'user' as const, body: '/oversized Try it', selectedSkill: 'oversized' };
+  const listing = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+  const [selectedSkill] = skillListingSchema.parse(await listing.json()).items;
+  const message = {
+    kind: 'user' as const,
+    body: '/oversized Try it',
+    selectedSkill: { id: selectedSkill.id, name: selectedSkill.name },
+  };
   const receipt = await client.send({ message });
   await expect(client.wait(receipt, { signal: AbortSignal.timeout(5_000) })).rejects.toMatchObject({
     failure: 'failed',
@@ -257,7 +421,7 @@ test('records a selected skill body failure without sending a model request', as
     harness.fetch(`${origin}/api/conversations/${id}/trajectory`),
   );
   expect(turn.status).toBe('failed');
-  const error = 'Skill oversized exceeds the 5000-token estimated instruction limit.';
+  const error = 'Skill oversized exceeds the 1 MiB source file limit.';
   expect(turn.error).toBe(error);
   expect((await client.history()).settlements.at(-1)?.error).toMatchObject({ message: error });
 });

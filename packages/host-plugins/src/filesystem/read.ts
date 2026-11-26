@@ -17,7 +17,7 @@ export class FileReadError extends Error {
 
 export async function* read(
   target: FileTarget,
-  { signal }: { signal?: AbortSignal } = {},
+  { signal, end }: { signal?: AbortSignal; end?: number } = {},
 ): AsyncGenerator<Uint8Array> {
   try {
     signal?.throwIfAborted();
@@ -31,7 +31,7 @@ export async function* read(
       if (!(await file.stat()).isFile()) {
         throw new FileReadError('NOT_A_FILE');
       }
-      yield* file.createReadStream({ autoClose: false, signal });
+      yield* file.createReadStream({ autoClose: false, signal, end });
     } finally {
       await file.close();
     }

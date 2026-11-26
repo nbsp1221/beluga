@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import {
   type AssistantMessage,
   type Provider,
   createAssistantMessageEventStream,
 } from '@earendil-works/pi-ai';
+import { instrument } from '@flue/runtime';
 import {
   agentSkillsCapabilityId,
   conversationUsageSchema,
@@ -251,7 +253,7 @@ test(
   },
 );
 
-test.for(['threshold', 'overflow'] as const)(
+test.for(['threshold', 'overflow', 'trajectory write failure'] as const)(
   'restores an activated skill once after %s compaction',
   async (reason, context) => {
     const harness = await setupHarness(context, [], undefined, () => compactionProvider());
@@ -272,11 +274,29 @@ test.for(['threshold', 'overflow'] as const)(
         signal: AbortSignal.timeout(5_000),
       });
 
-    await submit('/compact remember the decision');
+    if (reason === 'trajectory write failure') {
+      using db = new DatabaseSync(`${harness.databasePath}.trajectory`);
+      db.exec(`CREATE TRIGGER fail_context_write BEFORE INSERT ON trajectory_record
+        WHEN NEW.record_id LIKE 'context:%' BEGIN SELECT RAISE(ABORT, 'fixture write error'); END`);
+      try {
+        await submit('/compact remember the decision');
+      } finally {
+        db.exec('DROP TRIGGER fail_context_write');
+      }
+    } else {
+      await submit('/compact remember the decision');
+    }
+    const [first] = await readTrajectory(
+      harness.fetch(`${origin}/api/conversations/${id}/trajectory`),
+    );
+    expect(first.records.some(({ kind }) => kind === 'context')).toBe(
+      reason !== 'trajectory write failure',
+    );
     for (let index = 0; index < 4; index++) {
       await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
     }
-    await submit(reason === 'threshold' ? 'Trigger threshold' : 'Trigger overflow');
+    const compactionReason = reason === 'threshold' ? reason : 'overflow';
+    await submit(compactionReason === 'threshold' ? 'Trigger threshold' : 'Trigger overflow');
     if (reason === 'threshold') {
       await harness.restart();
       await submit('Continue after restart.');
@@ -285,7 +305,7 @@ test.for(['threshold', 'overflow'] as const)(
     const turns = await readTrajectory(harness.fetch(path));
     const compaction = turns
       .flatMap(({ records }) => records)
-      .find((record) => record.kind === 'compaction' && record.reason === reason);
+      .find((record) => record.kind === 'compaction' && record.reason === compactionReason);
     assert(compaction?.kind === 'compaction');
     expect(compaction.status).toBe('completed');
     const turn = turns.at(-1);
@@ -299,6 +319,81 @@ test.for(['threshold', 'overflow'] as const)(
     expect(JSON.stringify(input.messages)).toContain(checkpoint);
   },
 );
+
+test('an activation cancelled before the model request cannot displace an applied skill', async (context) => {
+  const harness = await setupHarness(context, [], undefined, () => compactionProvider());
+  for (const name of ['applied', 'cancelled']) {
+    const directory = join(dirname(harness.databasePath), 'skills', name);
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: Keep a decision\n---\n\nRULE_${name} ${'a'.repeat(18_000)}\n`,
+    );
+  }
+  const workspace = await harness.prepareWorkspace();
+  const { id } = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  const client = harness.sdk(id);
+
+  const submit = async (body: string) =>
+    client.wait(await client.send({ message: { kind: 'user', body } }), {
+      signal: AbortSignal.timeout(5000),
+    });
+
+  await submit('/applied Keep the first instructions');
+  for (let index = 0; index < 4; index++) {
+    await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
+  }
+
+  const reachedProvider = deferred();
+  const release = deferred();
+  const removeInstrumentation = instrument({
+    observe() {},
+    dispose() {},
+    async interceptor(operation, _, next) {
+      if (operation.type !== 'model') {
+        return next();
+      }
+      reachedProvider.resolve();
+      await release.promise;
+      throw new DOMException('Interrupted before provider request', 'AbortError');
+    },
+  });
+  try {
+    const receipt = await client.send({
+      message: { kind: 'user', body: '/cancelled Do not apply' },
+    });
+    const result = client.wait(receipt, { signal: AbortSignal.timeout(5000) }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await Promise.race([reachedProvider.promise, result]);
+    try {
+      expect((await client.abort()).aborted).toBe(true);
+    } finally {
+      release.resolve();
+    }
+    expect(await result).toMatchObject({ failure: 'aborted' });
+  } finally {
+    await removeInstrumentation();
+  }
+
+  await submit('Trigger overflow');
+  const path = `${origin}/api/conversations/${id}/trajectory`;
+  const turn = (await readTrajectory(harness.fetch(path))).at(-1);
+  const model = turn?.records.findLast(
+    (record) => record.kind === 'assistant' && record.purpose === 'agent',
+  );
+  assert(turn && model);
+  const input = trajectoryModelInputResponseSchema.parse(
+    await (await harness.fetch(`${path}/${turn.id}/${model.id}`)).json(),
+  );
+  expect(JSON.stringify(input.messages)).toContain(checkpoint);
+  expect(JSON.stringify(input.messages)).toContain('RULE_applied');
+  expect(JSON.stringify(input.messages)).not.toContain('RULE_cancelled');
+});
 
 test('restores the most recently reused skill when older bodies exceed the budget', async (context) => {
   let providerInput = '';
@@ -354,6 +449,56 @@ test('restores the most recently reused skill when older bodies exceed the budge
     expect(prompt.match(/RULE_third/g)).toHaveLength(1);
     expect(prompt).not.toContain('RULE_second');
   }
+});
+
+test('does not restore older instructions after a larger version of the same skill was used', async (context) => {
+  const harness = await setupHarness(context, [], undefined, () => compactionProvider());
+  const directory = join(dirname(harness.databasePath), 'skills', 'review');
+  await mkdir(directory, { recursive: true });
+
+  const skillFile = join(directory, 'SKILL.md');
+  const header = '---\nname: review\ndescription: Review a change\n---\n\n';
+  await writeFile(skillFile, header + 'ORIGINAL_REVIEW_RULE');
+
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset([agentSkillsCapabilityId]);
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+
+  const submit = async (body: string) =>
+    client.wait(await client.send({ message: { kind: 'user', body } }), {
+      signal: AbortSignal.timeout(5_000),
+    });
+
+  await submit('/review Use the original instructions');
+  await writeFile(skillFile, header + 'UPDATED_REVIEW_RULE ' + 'a'.repeat(34_000));
+  await submit('/review Use the updated instructions');
+  for (let index = 0; index < 4; index++) {
+    await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
+  }
+  await submit('Trigger overflow');
+
+  const path = `${origin}/api/conversations/${id}/trajectory`;
+  const turns = await readTrajectory(harness.fetch(path));
+  const updatedTurn = turns[1];
+  const applied = updatedTurn.records.find(
+    (record) => record.kind === 'context' && record.skill?.name === 'review',
+  );
+  assert(applied?.kind === 'context');
+  expect(applied.body).toContain('UPDATED_REVIEW_RULE');
+
+  const compacted = turns.at(-1);
+  const final = compacted?.records.findLast(
+    (record) => record.kind === 'assistant' && record.purpose === 'agent',
+  );
+  assert(compacted && final);
+  const input = trajectoryModelInputResponseSchema.parse(
+    await (await harness.fetch(`${path}/${compacted.id}/${final.id}`)).json(),
+  );
+  const messages = JSON.stringify(input.messages);
+  expect(messages).toContain(checkpoint);
+  expect(messages.includes('ORIGINAL_REVIEW_RULE')).toBe(false);
+  expect(messages.includes('UPDATED_REVIEW_RULE')).toBe(false);
 });
 
 test('reports context usage for the selected model after it responds', async (context) => {

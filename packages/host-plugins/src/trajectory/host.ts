@@ -32,7 +32,6 @@ export function createTrajectoryHost(databasePath: string): Plugin {
       );
 
       context.provide('trajectory', {
-        hasAppliedContext: store.hasAppliedContext,
         bindModelContext(lookup) {
           contextWindow = lookup;
         },

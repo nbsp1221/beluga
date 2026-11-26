@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { FlueError } from '@flue/runtime';
@@ -8,6 +9,7 @@ import { loadPi } from '../pi/tool.js';
 import { resolveProjectRoot } from '../workspace/project-root.js';
 
 const maxCandidates = 2000;
+const maxCachedHeaders = maxCandidates * 2;
 const maxHeaderBytes = 16 * 1024;
 const maxSourceBytes = 1024 * 1024;
 const frontmatterEnd = /^\uFEFF?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/;
@@ -27,6 +29,25 @@ export interface SkillSource {
   scope: 'project' | 'global';
   modelInvocable: boolean;
   userInvocable: boolean;
+}
+
+type SkillMetadata = v.InferOutput<typeof metadataSchema>;
+
+type SkillHeader = (
+  path: string,
+  name: string,
+  signal?: AbortSignal,
+) => Promise<SkillMetadata | undefined>;
+
+interface CachedHeader {
+  revision: string;
+  parsed: ReturnType<typeof parseSkill>;
+}
+
+export function selectionId(source: SkillSource) {
+  return createHash('sha256')
+    .update(JSON.stringify([source.scope, source.root, source.name, source.path]))
+    .digest('hex');
 }
 
 export class SkillLoadError extends FlueError {
@@ -54,7 +75,8 @@ async function readSkill(path: string, header: boolean, signal?: AbortSignal) {
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let count = 0;
   let text = '';
-  for await (const chunk of read({ absolutePath: path }, { signal })) {
+  // A byte beyond the limit distinguishes a complete file from a truncated read.
+  for await (const chunk of read({ absolutePath: path }, { signal, end: limit })) {
     const part = chunk.subarray(0, limit - count);
     text += decoder.decode(part, { stream: true });
     count += part.byteLength;
@@ -69,17 +91,13 @@ async function readSkill(path: string, header: boolean, signal?: AbortSignal) {
   return text + decoder.decode();
 }
 
-function parseSkill(text: string | undefined, name: string) {
+function parseSkill(text: string | undefined) {
   if (!text || !frontmatterEnd.test(text)) {
     return;
   }
   const { frontmatter, body } = loadPi().parseFrontmatter(text);
   const parsed = v.safeParse(metadataSchema, frontmatter);
-  if (
-    !parsed.success ||
-    parsed.output.name !== name ||
-    Array.from(parsed.output.description).length > 1024
-  ) {
+  if (!parsed.success || Array.from(parsed.output.description).length > 1024) {
     return;
   }
   return { metadata: parsed.output, body };
@@ -90,8 +108,9 @@ async function inspectSkill(
   name: string,
   scope: SkillSource['scope'],
   boundary: string,
+  header: SkillHeader,
   signal?: AbortSignal,
-): Promise<SkillSource | undefined> {
+): Promise<SkillSource | 'incomplete' | undefined> {
   try {
     signal?.throwIfAborted();
     const entry = join(root, name);
@@ -107,35 +126,64 @@ async function inspectSkill(
       );
       return;
     }
-    const parsed = parseSkill(await readSkill(path, true, signal), name);
-    if (!parsed) {
+    const metadata = await header(path, name, signal);
+    if (!metadata) {
       console.warn(`Skipped invalid skill metadata at ${path}.`);
-      return;
+      return 'incomplete';
     }
     return {
       name,
-      description: parsed.metadata.description,
+      description: metadata.description,
       directory,
       path,
       root,
       scope,
-      modelInvocable: parsed.metadata['disable-model-invocation'] !== true,
-      userInvocable: parsed.metadata['user-invocable'] !== false,
+      modelInvocable: metadata['disable-model-invocation'] !== true,
+      userInvocable: metadata['user-invocable'] !== false,
     };
   } catch (error) {
     signal?.throwIfAborted();
     if (!missing(error)) {
       console.warn(`Could not read skill ${name} at ${join(root, name, 'SKILL.md')}.`);
+      return 'incomplete';
     }
   }
 }
 
-export async function discoverSkills(
+export function createSkillDiscovery(globals: readonly string[]) {
+  const headers = new Map<string, CachedHeader>();
+
+  async function header(path: string, name: string, signal?: AbortSignal) {
+    const details = await stat(path, { bigint: true });
+    const revision = `${details.dev}:${details.ino}:${details.size}:${details.mtimeNs}:${details.ctimeNs}`;
+    const cached = headers.get(path);
+    if (cached?.revision === revision) {
+      return cached.parsed?.metadata.name === name ? cached.parsed.metadata : undefined;
+    }
+    // Cache the parsed file by its identity. Validate the directory name on lookup.
+    const parsed = parseSkill(await readSkill(path, true, signal));
+    if (!headers.has(path) && headers.size >= maxCachedHeaders) {
+      const oldest = headers.keys().next();
+      if (!oldest.done) {
+        headers.delete(oldest.value);
+      }
+    }
+    headers.set(path, { revision, parsed });
+    return parsed?.metadata.name === name ? parsed.metadata : undefined;
+  }
+
+  return (cwd: string | undefined, signal?: AbortSignal, onlyName?: string) =>
+    discoverSkills(cwd, globals, header, signal, onlyName);
+}
+
+async function discoverSkills(
   cwd: string | undefined,
   globals: readonly string[],
+  header: SkillHeader,
   signal?: AbortSignal,
   onlyName?: string,
 ) {
+  let incomplete = false;
   const roots: { path: string; boundary?: string; scope: SkillSource['scope'] }[] = [];
   if (cwd) {
     try {
@@ -152,18 +200,43 @@ export async function discoverSkills(
         'Could not inspect the project skill roots.',
         error instanceof Error && error.name,
       );
+      incomplete = true;
     }
   }
   roots.push(...globals.map((path) => ({ path, scope: 'global' as const })));
 
   const skills = new Map<string, SkillSource>();
-  let candidates = 0;
+  const overflowed: {
+    root: string;
+    boundary: string;
+    scope: SkillSource['scope'];
+    names: Set<string>;
+  }[] = [];
   for (const { path: root, boundary, scope } of roots) {
     signal?.throwIfAborted();
     try {
       const canonical = await realpath(root);
       if (boundary && !within(boundary, canonical)) {
         console.warn(`Skipped skill directory ${root}: outside the ${scope} boundary.`);
+        continue;
+      }
+      if (onlyName !== undefined) {
+        if (!skillNameSchema.safeParse(onlyName).success) {
+          break;
+        }
+        const skill = await inspectSkill(
+          canonical,
+          onlyName,
+          scope,
+          boundary ?? canonical,
+          header,
+          signal,
+        );
+        if (skill === 'incomplete') {
+          incomplete = true;
+        } else if (skill) {
+          return { sources: [skill], incomplete };
+        }
         continue;
       }
       const entries = (await readdir(canonical, { withFileTypes: true }))
@@ -173,24 +246,50 @@ export async function discoverSkills(
             skillNameSchema.safeParse(entry.name).success,
         )
         .sort((a, b) => (a.name < b.name ? -1 : Number(a.name > b.name)));
-      const selected = entries.slice(0, maxCandidates - candidates);
-      const requested =
-        onlyName === undefined ? selected : selected.filter(({ name }) => name === onlyName);
+      const selected = entries.slice(0, maxCandidates);
+      if (entries.length > selected.length) {
+        incomplete = true;
+        console.warn(`Stopped scanning ${root} after ${maxCandidates} skill candidates.`);
+      }
       const batchSize = 16;
-      for (let offset = 0; offset < requested.length; offset += batchSize) {
+      for (let offset = 0; offset < selected.length; offset += batchSize) {
         const batch = await Promise.all(
-          requested
+          selected
             .slice(offset, offset + batchSize)
-            .map(({ name }) => inspectSkill(canonical, name, scope, boundary ?? canonical, signal)),
+            .map(({ name }) =>
+              inspectSkill(canonical, name, scope, boundary ?? canonical, header, signal),
+            ),
         );
         for (const skill of batch) {
+          if (skill === 'incomplete') {
+            incomplete = true;
+            continue;
+          }
           if (!skill) {
             continue;
           }
-          if (onlyName !== undefined) {
-            return [skill];
+          let winner = skills.get(skill.name);
+          if (!winner) {
+            // An omitted name can still shadow the same name in a later root.
+            for (const previous of overflowed) {
+              if (!previous.names.has(skill.name)) {
+                continue;
+              }
+              const earlier = await inspectSkill(
+                previous.root,
+                skill.name,
+                previous.scope,
+                previous.boundary,
+                header,
+                signal,
+              );
+              if (earlier && earlier !== 'incomplete') {
+                skills.set(earlier.name, earlier);
+                winner = earlier;
+                break;
+              }
+            }
           }
-          const winner = skills.get(skill.name);
           if (winner) {
             console.warn(`Skill ${skill.name} uses ${winner.path}; shadowed ${skill.path}.`);
           } else {
@@ -198,19 +297,23 @@ export async function discoverSkills(
           }
         }
       }
-      candidates += selected.length;
-      if (entries.length > selected.length) {
-        console.warn(`Stopped scanning after ${maxCandidates} skill candidates.`);
-        break;
+      if (selected.length < entries.length) {
+        overflowed.push({
+          root: canonical,
+          boundary: boundary ?? canonical,
+          scope,
+          names: new Set(entries.slice(maxCandidates).map(({ name }) => name)),
+        });
       }
     } catch (error) {
       signal?.throwIfAborted();
       if (!missing(error)) {
+        incomplete = true;
         console.warn(`Could not scan a ${scope} skill directory.`);
       }
     }
   }
-  return [...skills.values()];
+  return { sources: [...skills.values()], incomplete };
 }
 
 export async function loadSkill(
@@ -224,10 +327,13 @@ export async function loadSkill(
   if (directory !== source.directory || path !== source.path) {
     throw new SkillLoadError(`Skill ${source.name} is no longer available.`);
   }
-  const text = await readSkill(path, false, signal).catch(() => undefined);
+  const text = await readSkill(path, false, signal).catch(() => '');
   signal?.throwIfAborted();
-  const parsed = parseSkill(text, source.name);
-  if (!parsed?.body) {
+  if (text === undefined) {
+    throw new SkillLoadError(`Skill ${source.name} exceeds the 1 MiB source file limit.`);
+  }
+  const parsed = parseSkill(text);
+  if (!parsed?.body || parsed.metadata.name !== source.name) {
     throw new SkillLoadError(`Could not load skill ${source.name}. Check SKILL.md.`);
   }
   if (

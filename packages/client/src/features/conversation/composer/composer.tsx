@@ -236,6 +236,7 @@ export function Composer({
           <Textarea
             ref={editorRef}
             aria-label="Message"
+            aria-autocomplete={client.listSkills ? 'list' : undefined}
             aria-controls={skills.items.length ? skills.listId : undefined}
             aria-activedescendant={
               skills.current < 0 ? undefined : `${skills.listId}-${skills.current}`

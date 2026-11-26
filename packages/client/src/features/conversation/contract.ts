@@ -6,7 +6,8 @@ import type {
   ConversationUsage,
   RunSettings,
   SkillContext,
-  SkillSummary,
+  SkillListing,
+  SkillSelection,
   WorkspaceInstructionChanges,
 } from '@workspace/protocol/host';
 import type { ComponentType } from 'react';
@@ -77,7 +78,7 @@ export interface ConversationSnapshot {
 export interface SendOptions {
   mode: string;
   attachments: readonly string[];
-  selectedSkill?: string;
+  selectedSkill?: SkillSelection;
 }
 
 // Client projection contract. A future transport can publish Host snapshots here.
@@ -109,7 +110,7 @@ export interface ConversationClient {
       'id' | 'workspaceId' | 'agentPresetId' | 'agentPresetVersion' | 'isDraft'
     >,
     signal: AbortSignal,
-  ): Promise<readonly SkillSummary[]>;
+  ): Promise<SkillListing>;
   send(this: void, sessionId: string, options: SendOptions): Promise<void>;
   stop?(this: void, sessionId: string, submissionId: string): Promise<void>;
 }

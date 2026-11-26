@@ -55,11 +55,11 @@ export function skillCatalog(skills: readonly SkillSource[], contextWindow: numb
   return { text, entries: entries.map(({ source }) => source) };
 }
 
-export function skillBodyLimit(contextWindow: number | undefined, restoring = false) {
+export function skillRestoreLimit(contextWindow: number | undefined) {
   if (!contextWindow || contextWindow <= 0) {
     return 5000;
   }
-  return Math.min(restoring ? 25_000 : 5000, Math.floor(contextWindow / 4));
+  return Math.min(25_000, Math.floor(contextWindow / 4));
 }
 
 export function skillBodyTokens(body: string, name: string) {

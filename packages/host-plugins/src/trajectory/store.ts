@@ -271,8 +271,6 @@ export function createTrajectoryStore(db: DatabaseSync) {
   }
 
   return {
-    hasAppliedContext: (sessionId: string, id: string) =>
-      Boolean(existingContext.get(sessionId, `context:${id}`)),
     revision(sessionId: string) {
       return `${generation}:${revisions.get(sessionId) ?? 0}`;
     },

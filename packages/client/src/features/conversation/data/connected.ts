@@ -9,10 +9,11 @@ import {
   conversationFailureMessage,
   conversationUsageSchema,
   explicitSkillName,
+  isSkillLoadFailure,
   runSettingsSchema,
   selectedSkillUnavailableSchema,
   sessionSummarySchema,
-  skillSummarySchema,
+  skillListingSchema,
 } from '@workspace/protocol/host';
 import { readPreference, writePreference } from '@workspace/ui/lib/browser-storage';
 import { v4 as uuid } from 'uuid';
@@ -169,7 +170,7 @@ export function createConnectedConversation({
         const id = session.agentPresetId ?? state.defaultPresetId;
         const preset = state.presets.find((item) => item.id === id);
         if (!session.workspaceId || !preset) {
-          return [];
+          return { items: [], incomplete: false };
         }
         params.set('workspaceId', session.workspaceId);
         params.set('presetId', preset.id);
@@ -177,9 +178,9 @@ export function createConnectedConversation({
       } else {
         params.set('sessionId', session.id);
       }
-      return skillSummarySchema
-        .array()
-        .parse(await request(`${AGENT_SKILLS_PATH}?${params}`, undefined, 'GET', signal));
+      return skillListingSchema.parse(
+        await request(`${AGENT_SKILLS_PATH}?${params}`, undefined, 'GET', signal),
+      );
     },
     createSession(workspaceId) {
       const session = draftSession(workspaceId ?? preferredWorkspace(getSnapshot().sessions));
@@ -458,7 +459,9 @@ function createSubmissionClient({
         kind: 'user' as const,
         body: text,
         selectedSkill:
-          explicitSkillName(text) === options.selectedSkill ? options.selectedSkill : undefined,
+          explicitSkillName(text) === options.selectedSkill?.name
+            ? options.selectedSkill
+            : undefined,
       };
       const receipt = await client
         .send({
@@ -486,6 +489,13 @@ function createSubmissionClient({
       try {
         await client.wait(receipt, { signal });
       } catch (error) {
+        if (
+          message.selectedSkill &&
+          error instanceof FlueExecutionError &&
+          isSkillLoadFailure(error.error)
+        ) {
+          update(id, (session) => ({ ...session, draft: session.draft || text }));
+        }
         if (
           !(
             error instanceof FlueExecutionError &&

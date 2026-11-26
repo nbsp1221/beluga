@@ -3,7 +3,6 @@ import type { Hono } from 'hono';
 export const primaryAgentName = 'BelugaPresetAgent';
 
 export interface TrajectoryService {
-  hasAppliedContext(sessionId: string, id: string): boolean;
   bindModelContext(
     contextWindow: (providerId: string, modelId: string) => number | undefined,
   ): void;

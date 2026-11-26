@@ -7,6 +7,12 @@ export const workspaceInstructionsRootError = {
 };
 export const skillLoadFailureType = 'skill_load_failed';
 
+export function isSkillLoadFailure(error: unknown) {
+  return Boolean(
+    error && typeof error === 'object' && 'type' in error && error.type === skillLoadFailureType,
+  );
+}
+
 export function conversationFailureMessage(error: unknown) {
   if (!error || typeof error !== 'object' || !('type' in error)) {
     return;
@@ -14,11 +20,7 @@ export function conversationFailureMessage(error: unknown) {
   if (error.type === workspaceInstructionsRootError.type) {
     return workspaceInstructionsRootError.message;
   }
-  if (
-    error.type === skillLoadFailureType &&
-    'message' in error &&
-    typeof error.message === 'string'
-  ) {
+  if (isSkillLoadFailure(error) && 'message' in error && typeof error.message === 'string') {
     return error.message;
   }
 }
@@ -46,12 +48,24 @@ export const skillNameSchema = z
   .max(64)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 export const skillSummarySchema = z.object({
+  id: z.string().regex(/^[a-f0-9]{64}$/),
   name: skillNameSchema,
   description: z.string(),
   userOnly: z.boolean(),
 });
 
 export type SkillSummary = z.infer<typeof skillSummarySchema>;
+
+export const skillSelectionSchema = skillSummarySchema.pick({ id: true, name: true });
+
+export type SkillSelection = z.infer<typeof skillSelectionSchema>;
+
+export const skillListingSchema = z.object({
+  items: z.array(skillSummarySchema),
+  incomplete: z.boolean(),
+});
+
+export type SkillListing = z.infer<typeof skillListingSchema>;
 
 export const skillInvocationAttributesSchema = z.object({
   id: z.string(),

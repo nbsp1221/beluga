@@ -1,8 +1,8 @@
 diff --git a/dist/agent-execution-store-HWARCScI.d.mts b/dist/agent-execution-store-HWARCScI.d.mts
-index c9814eee223d3e933e0f2affa778160245f86184..4bf2f48fb5f723b57e02e0e3eff778155fbc0b5b 100644
+index c9814eee223d3e933e0f2affa778160245f86184..17bbee64db51d93be03fdb47b3f3aaa86409573c 100644
 --- a/dist/agent-execution-store-HWARCScI.d.mts
 +++ b/dist/agent-execution-store-HWARCScI.d.mts
-@@ -644,6 +644,7 @@ interface AgentAppendMessage extends AgentSignalAppend {
+@@ -644,11 +644,13 @@ interface AgentAppendMessage extends AgentSignalAppend {
   * Prefer dispatching; reach for `append` only when a delivery is wrong.
   */
  interface AgentStartContext {
@@ -10,16 +10,23 @@ index c9814eee223d3e933e0f2affa778160245f86184..4bf2f48fb5f723b57e02e0e3eff77815
    readonly append: (message: AgentAppendMessage) => void;
    readonly harness: FlueHarness;
    readonly log: FlueLogger;
-@@ -685,6 +686,7 @@ interface AgentFinishContext {
+   readonly signal: AbortSignal;
+ }
++type ModelInputHook = (contextSignals: AgentStartContext['contextSignals']) => void;
+ /** One tool call the current response has made, from the durable record log. */
+ interface AgentResponseToolCall {
+   /** The tool's name as the model called it. */
+@@ -685,6 +687,8 @@ interface AgentFinishContext {
  /** One `useAgentStart` declaration; identity is the declaration index. */
  interface AgentStartDeclaration {
    run: (ctx: AgentStartContext) => void | Promise<void>;
 +  restoreContext?: (ctx: AgentStartContext) => void | Promise<void>;
++  onModelInput?: ModelInputHook;
  }
  /** One `useAgentFinish` declaration; identity is the declaration index. */
  interface AgentFinishDeclaration {
 diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
-index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b11faf75c 100644
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..7f21eb8bc8f44d7d3f63e9dbc134809ec6e2a802 100644
 --- a/dist/conversation-stream-store-BJbg7IHa.mjs
 +++ b/dist/conversation-stream-store-BJbg7IHa.mjs
 @@ -964,6 +964,7 @@ function toTurnMessage(message) {
@@ -30,7 +37,28 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  		content: typeof message.content === "string" ? message.content : message.content.map(toTurnContent)
  	};
  	if (message.role === "assistant") return {
-@@ -1550,14 +1551,15 @@ var Session = class {
+@@ -1209,7 +1210,6 @@ var Session = class {
+ 		if (this.activeTurnId === void 0) this.activeTurnId = generateTurnId();
+ 		const turnId = this.activeTurnId;
+ 		const operationId = this.activeOperationId ?? generateOperationId();
+-		this.emitTurnRequest(turnId, "agent", model, context, options);
+ 		const operation = {
+ 			type: "model",
+ 			turnId
+@@ -1218,7 +1218,11 @@ var Session = class {
+ 			operationId,
+ 			turnId
+ 		});
+-		return interceptExecution(operation, executionContext, async () => wrapProviderStream(getRuntimeModels().streamSimple(model, context, options), operation, executionContext));
++		return interceptExecution(operation, executionContext, async () => {
++			options?.signal?.throwIfAborted();
++			this.emitTurnRequest(turnId, "agent", model, context, options);
++			return wrapProviderStream(getRuntimeModels().streamSimple(model, context, options), operation, executionContext);
++		});
+ 	};
+ 	canonicalEnvelope(type, id = generateConversationRecordId()) {
+ 		return {
+@@ -1550,14 +1554,15 @@ var Session = class {
  			content: signal.body,
  			...signal.attributes ? { attributes: signal.attributes } : {}
  		});
@@ -48,7 +76,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  		if (options?.advance === false) return;
  		this.advanceDelivery?.({
  			kind: "signal",
-@@ -1622,26 +1624,37 @@ var Session = class {
+@@ -1622,26 +1627,37 @@ var Session = class {
  		if (!options?.joined && this.responseHasCompletedStep) return;
  		if (await this.hasAgentStartRun(submissionId)) return;
  		if (options?.joined) await this.prepareRerenderTurn();
@@ -97,12 +125,12 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  	}
  	/**
  	* All durable records of one type for this conversation and submission, in
-@@ -1675,6 +1688,12 @@ var Session = class {
+@@ -1675,6 +1691,12 @@ var Session = class {
  	* the finish-context writer: append is legal only while the callback
  	* runs.
  	*/
-+	contextSignals(type) {
-+		return [...this.agentLoop.state.messages, ...this.agentLoop.peekQueuedMessages()].flatMap((message) => {
++	contextSignals(type, messages = [...this.agentLoop.state.messages, ...this.agentLoop.peekQueuedMessages()]) {
++		return messages.flatMap((message) => {
 +			const source = message[Symbol.for("flue.contextSignal")];
 +			return source?.type === type ? [{ content: source.content, attributes: source.attributes }] : [];
 +		});
@@ -110,7 +138,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  	async executeAgentStartHook(index, hook, signal) {
  		let harness;
  		let appendWindowOpen = true;
-@@ -1686,6 +1705,7 @@ var Session = class {
+@@ -1686,6 +1708,7 @@ var Session = class {
  				appends.push(assertAppendMessage(message));
  			},
  			log: this.createHookLogger("useAgentStart", index),
@@ -118,7 +146,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  			signal,
  			get harness() {
  				harness ??= session.createInvocationHarness(generateInvocationId(), signal);
-@@ -1695,6 +1715,7 @@ var Session = class {
+@@ -1695,6 +1718,7 @@ var Session = class {
  		try {
  			await hook.run(ctx);
  		} catch (error) {
@@ -126,7 +154,41 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  			throw new Error(`[flue] A useAgentStart callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
  		} finally {
  			appendWindowOpen = false;
-@@ -3489,10 +3510,11 @@ var Session = class {
+@@ -1861,7 +1885,7 @@ var Session = class {
+ 	async steerJoinedEntry(entryId) {
+ 		const conversation = await this.requireConversation();
+ 		const resolved = await this.resolveCanonicalContextAttachments(conversation);
+-		const entry = buildConversationContextEntries(conversation, { resolveAttachment: (attachment) => {
++		const entry = buildConversationContextEntries(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
+ 			const image = resolved.get(attachment.id);
+ 			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+ 			return image;
+@@ -2125,7 +2149,8 @@ var Session = class {
+ 		const request = this.modelRequestInfo(model, purpose, options);
+ 		this.modelRequests.set(turnId, {
+ 			info: request,
+-			startedAt: Date.now()
++			startedAt: Date.now(),
++			messages: context.messages
+ 		});
+ 		this.emit({
+ 			type: "turn_request",
+@@ -2408,7 +2433,13 @@ var Session = class {
+ 								}]);
+ 								block.completed = true;
+ 							}
+-							await this.appendCanonical([{
++							const modelInput = this.modelRequests.get(turnId)?.messages;
++							if (modelInput && !signal?.aborted && event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
++								for (const hook of this.outputChannel?.agentStarts ?? []) {
++									hook.onModelInput?.((type) => this.contextSignals(type, modelInput));
++								}
++							}
++							await this.appendCanonical([...this.drainHookStateRecords(), {
+ 								...this.canonicalEnvelope("assistant_message_completed"),
+ 								type: "assistant_message_completed",
+ 								messageId: canonical.messageId,
+@@ -3489,10 +3520,11 @@ var Session = class {
  						const invocationId = toolDef.harness ? generateInvocationId() : void 0;
  						const harness = invocationId ? this.createInvocationHarness(invocationId, mergedSignal, toolDef) : void 0;
  						try {
@@ -141,7 +203,25 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  							const resolved = resolveToolRun(toolDef, await raceToolWithDeadline(() => toolDef.run(context), mergedSignal, toolDef.timeoutMs, toolDef.name));
  							const output = resolved.output;
  							return {
-@@ -4133,6 +4155,7 @@ var Session = class {
+@@ -3898,7 +3930,7 @@ var Session = class {
+ 	}
+ 	visibleCanonicalAttachments(conversation) {
+ 		const available = /* @__PURE__ */ new Map();
+-		for (const contextEntry of buildConversationContextEntries(conversation, { resolveAttachment: (attachment) => ({
++		for (const contextEntry of buildConversationContextEntries(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => ({
+ 			data: attachment.id,
+ 			mimeType: attachment.mimeType
+ 		}) })) {
+@@ -4042,7 +4074,7 @@ var Session = class {
+ 	async rebuildCanonicalContext() {
+ 		const conversation = await this.requireConversation();
+ 		const resolved = await this.resolveCanonicalContextAttachments(conversation);
+-		const messages = buildConversationContext(conversation, { resolveAttachment: (attachment) => {
++		const messages = buildConversationContext(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
+ 			const image = resolved.get(attachment.id);
+ 			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+ 			return image;
+@@ -4133,6 +4165,7 @@ var Session = class {
  			}
  			if (overflow || retryable) throwIfHalted();
  			try {
@@ -149,7 +229,28 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  				await start();
  				await this.agentLoop.waitForIdle();
  			} catch (error) {
-@@ -5118,6 +5141,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
+@@ -4201,7 +4234,7 @@ var Session = class {
+ 			const summarizationModel = compactionConfig?.model ? this.resolveModelForCall(compactionConfig.model) : sessionModel;
+ 			const canonicalConversation = await this.requireConversation();
+ 			const resolvedAttachments = await this.resolveCanonicalContextAttachments(canonicalConversation);
+-			const contextEntries = buildConversationContextEntries(canonicalConversation, { resolveAttachment: (attachment) => {
++			const contextEntries = buildConversationContextEntries(canonicalConversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
+ 				const image = resolvedAttachments.get(attachment.id);
+ 				if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+ 				return image;
+@@ -4464,7 +4497,10 @@ var Session = class {
+ 			signalType: message.type,
+ 			...message.tagName ? { tagName: message.tagName } : {},
+ 			content: message.body,
+-			...message.attributes ? { attributes: message.attributes } : {}
++			...message.attributes ? { attributes: message.attributes } : {},
++			...options?.asJoinedDelivery && message.attributes?.contextLifetime === "response" ? {
++				attributes: { ...message.attributes, contextSubmissionId: this.activeSubmissionId }
++			} : {}
+ 		};
+ 	}
+ 	/**
+@@ -5118,6 +5154,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
  	emitCoordinatorEvent({
  		type: "submission_settled",
  		submissionId: submission.submissionId,
@@ -157,7 +258,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  		outcome,
  		error: serializeSubmissionError(error)
  	}, errorInfo);
-@@ -5310,6 +5334,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
+@@ -5310,6 +5347,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
  	const event = ctx.createEvent({
  		type: "submission_settled",
  		submissionId: attempt.submissionId,
@@ -165,7 +266,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  		outcome,
  		...outcome === "completed" ? {} : { error: serializeSubmissionError(error) }
  	});
-@@ -5419,6 +5444,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
+@@ -5419,6 +5457,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
  	emitCoordinatorEvent?.({
  		type: "submission_settled",
  		submissionId: pending.submissionId,
@@ -174,7 +275,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..9fe6a3714b7149da302139ca036e941b
  		...pending.record.outcome === "completed" || pending.record.error === void 0 ? {} : { error: pending.record.error }
  	});
 diff --git a/dist/dispatch-DTmMreLV.mjs b/dist/dispatch-DTmMreLV.mjs
-index 4af08391f41d94893ede44aede6614283528b44a..b27bc97da1d6947d26425a6be4e51469474af487 100644
+index 4af08391f41d94893ede44aede6614283528b44a..31ccef676a9daa15da2bc596d3e5d6da6ba876db 100644
 --- a/dist/dispatch-DTmMreLV.mjs
 +++ b/dist/dispatch-DTmMreLV.mjs
 @@ -354,9 +354,10 @@ function isPlainObject(value) {
@@ -189,7 +290,48 @@ index 4af08391f41d94893ede44aede6614283528b44a..b27bc97da1d6947d26425a6be4e51469
  		content: [{
  			type: "text",
  			text
-@@ -945,7 +946,7 @@ function pathToContextEntries(path, options) {
+@@ -380,7 +381,8 @@ function toolResultText(content) {
+ }
+ function renderSignalMessage(message) {
+ 	const tagName = message.tagName ?? "signal";
+-	return `<${tagName}${[["type", message.type], ...Object.entries(message.attributes ?? {})].map(([name, value]) => ` ${escapeXmlAttribute(name ?? "")}="${escapeXmlAttribute(value ?? "")}"`).join("")}>\n${escapeXmlText(message.content)}\n</${tagName}>`;
++	const { contextLifetime: _, contextSubmissionId: __, ...attributes } = message.attributes ?? {};
++	return `<${tagName}${[["type", message.type], ...Object.entries(attributes)].map(([name, value]) => ` ${escapeXmlAttribute(name ?? "")}="${escapeXmlAttribute(value ?? "")}"`).join("")}>\n${escapeXmlText(message.content)}\n</${tagName}>`;
+ }
+ function escapeXmlText(value) {
+ 	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+@@ -910,6 +912,22 @@ function getActiveConversationPath(conversation) {
+ }
+ function buildConversationContextEntries(conversation, options = {}) {
+ 	const path = getActiveConversationPath(conversation);
++	const completed = new Set();
++	const skipped = new Set();
++	// An opt-in context signal survives its originating submission only if a
++	// successful model response followed it.
++	for (let index = path.length - 1; index >= 0; index--) {
++		const entry = path[index];
++		if (entry.type !== "message" || !entry.submissionId) continue;
++		const message = entry.message;
++		if (message.role === "assistant" && message.stopReason !== "aborted" && message.stopReason !== "error") {
++			completed.add(entry.submissionId);
++		} else if (message.role === "signal" && message.attributes?.contextLifetime === "response") {
++			const responseSubmissionId = message.attributes.contextSubmissionId ?? entry.submissionId;
++			if (responseSubmissionId !== options.activeSubmissionId && !completed.has(responseSubmissionId)) skipped.add(entry.id);
++		}
++	}
++	options = { ...options, skipped };
+ 	const latestCompactionIndex = path.findLastIndex((entry) => entry.type === "compaction");
+ 	if (latestCompactionIndex === -1) return pathToContextEntries(path, options);
+ 	const compaction = path[latestCompactionIndex];
+@@ -938,14 +956,14 @@ function pathToContextEntries(path, options) {
+ 	let index = 0;
+ 	while (index < path.length) {
+ 		const entry = path[index];
+-		if (entry?.type !== "message") {
++		if (entry?.type !== "message" || options.skipped?.has(entry.id)) {
+ 			index += 1;
+ 			continue;
+ 		}
  		const message = resolveMessageAttachments(entry, options);
  		if (message.role === "signal") {
  			messages.push({
@@ -198,23 +340,32 @@ index 4af08391f41d94893ede44aede6614283528b44a..b27bc97da1d6947d26425a6be4e51469
  				sourceEntry: entry
  			});
  			index += 1;
+@@ -3226,6 +3244,7 @@ const DeliveredAttachmentSchema = v.variant("type", [DeliveredImageAttachmentSch
+ const DeliveredUserMessageSchema = v.object({
+ 	kind: v.literal("user"),
+ 	body: v.string(),
++	attributes: v.optional(v.record(v.string(), v.string())),
+ 	attachments: v.optional(v.array(DeliveredAttachmentSchema))
+ });
+ const DeliveredSignalMessageSchema = v.object({
 diff --git a/dist/index.d.mts b/dist/index.d.mts
-index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..7f81c109fe447682433bb634b0675a1060b7824a 100644
+index 342ae0894af96a9f65ba85d432d8d40ec9feb6f7..c113edd5f50b1dd0ed136af9bed7e10889f80a54 100644
 --- a/dist/index.d.mts
 +++ b/dist/index.d.mts
-@@ -333,7 +333,9 @@ declare function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise
+@@ -333,7 +333,10 @@ declare function useAgentFinish(run: (ctx: AgentFinishContext) => void | Promise
   *   eat it — durable state and disk. A signal is the announcement, not the
   *   storage.
   */
 -declare function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>): void;
 +declare function useAgentStart(run: (ctx: AgentStartContext) => void | Promise<void>, options?: {
 +  restoreContext?: (ctx: AgentStartContext) => void | Promise<void>;
++  onModelInput?: (contextSignals: AgentStartContext['contextSignals']) => void;
 +}): void;
  //#endregion
  //#region src/hooks/use-data-writer.d.ts
  /**
 diff --git a/dist/index.mjs b/dist/index.mjs
-index ce5ad79e75c6e9820e7e213bb79c981445580fe2..a3017563f5dcc85fab64bf3ab306cc613fb2b34e 100644
+index ce5ad79e75c6e9820e7e213bb79c981445580fe2..bedcc0cba033971b5fff86b6e0d59a0ce0c08d8d 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -386,11 +386,11 @@ function useAgentFinish(run) {
@@ -222,18 +373,18 @@ index ce5ad79e75c6e9820e7e213bb79c981445580fe2..a3017563f5dcc85fab64bf3ab306cc61
  *   storage.
  */
 -function useAgentStart(run) {
-+function useAgentStart(run, { restoreContext } = {}) {
++function useAgentStart(run, { restoreContext, onModelInput } = {}) {
  	const frame = requireRenderFrame("useAgentStart");
  	if (frame.kind === "subagent") throw new Error("[flue] useAgentStart() is not available in a subagent render. Lifecycle hooks run against the root agent's durable record log; a delegate runs a detached task — do its up-front work in the task itself.");
 -	if (typeof run !== "function") throw new Error("[flue] useAgentStart(run) takes a callback as its only argument.");
 -	frame.agentStarts.push({ run });
 +	if (typeof run !== "function") throw new Error("[flue] useAgentStart(run) requires a callback.");
-+	frame.agentStarts.push({ run, restoreContext });
++	frame.agentStarts.push({ run, restoreContext, onModelInput });
  }
  //#endregion
  //#region src/hooks/use-data-writer.ts
 diff --git a/dist/types-BBdvLv_l.d.mts b/dist/types-BBdvLv_l.d.mts
-index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..db91388080bfb1321a11bcfa181c45cbf56a8965 100644
+index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..e0f42b6a15bf5d307b739e236589d56943e644ea 100644
 --- a/dist/types-BBdvLv_l.d.mts
 +++ b/dist/types-BBdvLv_l.d.mts
 @@ -133,6 +133,7 @@ type ToolContext<S extends ToolInputSchema | undefined, H extends boolean | unde
@@ -244,7 +395,15 @@ index 4fbd0a4f2dd28452b0d1bf8d8d4160b86cf3ecfb..db91388080bfb1321a11bcfa181c45cb
    readonly signal?: AbortSignal;
    /**
     * Progress logging for long-running tools. Lines are emitted into the
-@@ -1437,6 +1438,7 @@ type FlueEventVariant = {
+@@ -268,6 +269,7 @@ type DeliveredAttachment = (PromptImage | PromptDocument) & {
+ type DeliveredMessage = {
+   kind: 'user';
+   body: string;
++  attributes?: Record<string, string>;
+   attachments?: DeliveredAttachment[];
+ } | {
+   kind: 'signal';
+@@ -1437,6 +1439,7 @@ type FlueEventVariant = {
  } | {
    type: 'submission_settled';
    submissionId: string;

@@ -18,10 +18,10 @@ export function mountSkillSuggestions(
       : presetId &&
         catalog.presets.get(presetId, presetVersion ? Number(presetVersion) : undefined);
     if ((sessionId && !session) || !workspace || !preset) {
-      return c.json([]);
+      return c.json({ items: [], incomplete: false });
     }
     if (!preset.capabilities.includes(agentSkillsCapabilityId)) {
-      return c.json([]);
+      return c.json({ items: [], incomplete: false });
     }
     return c.json(await listSkills(workspace.path, c.req.raw.signal));
   });
