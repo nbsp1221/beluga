@@ -4,7 +4,11 @@ function escapeXml(text: string) {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-export function skillCatalog(skills: readonly SkillSource[], contextWindow: number | undefined) {
+export function skillCatalog(
+  skills: readonly SkillSource[],
+  contextWindow: number | undefined,
+  incomplete = false,
+) {
   const eligible = skills.filter(({ modelInvocable }) => modelInvocable);
   const byteLimit =
     contextWindow && contextWindow > 0
@@ -16,7 +20,7 @@ export function skillCatalog(skills: readonly SkillSource[], contextWindow: numb
   }));
 
   function render(descriptionLength: number) {
-    if (!entries.length) {
+    if (!entries.length && !incomplete) {
       return '';
     }
     const lines = entries.map(({ source, description }) =>
@@ -29,6 +33,7 @@ export function skillCatalog(skills: readonly SkillSource[], contextWindow: numb
       '<available_skills>',
       'Use skill({name}) to load relevant instructions by listed name.',
       ...lines,
+      ...(incomplete ? ['Skill discovery is incomplete. Some skills could not be checked.'] : []),
       ...(omitted ? [`${omitted} skills omitted from this list.`] : []),
       '</available_skills>',
     ].join('\n');
@@ -36,7 +41,7 @@ export function skillCatalog(skills: readonly SkillSource[], contextWindow: numb
 
   let text = render(500);
   if (Buffer.byteLength(text) > byteLimit) {
-    while (Buffer.byteLength(render(0)) > byteLimit) {
+    while (entries.length && Buffer.byteLength(render(0)) > byteLimit) {
       entries = entries.slice(0, -1);
     }
     let low = 0;
@@ -52,21 +57,5 @@ export function skillCatalog(skills: readonly SkillSource[], contextWindow: numb
     text = render(low);
   }
 
-  return { text, entries: entries.map(({ source }) => source) };
-}
-
-export function skillRestoreLimit(contextWindow: number | undefined) {
-  if (!contextWindow || contextWindow <= 0) {
-    return 5000;
-  }
-  return Math.min(25_000, Math.floor(contextWindow / 4));
-}
-
-export function skillBodyTokens(body: string, name: string) {
-  return Math.ceil(
-    Buffer.byteLength(
-      escapeXml(body) +
-        `<system-reminder type="skill-invocation" name="${name}"></system-reminder>`,
-    ) / 4,
-  );
+  return { text: Buffer.byteLength(text) <= byteLimit ? text : '' };
 }

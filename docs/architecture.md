@@ -103,9 +103,9 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 
 [프로젝트 지침 플러그인](../packages/host-plugins/src/agent-instructions/host.ts)은 프리셋에 포함된 세션에서만 전역·프로젝트 지침을 읽는다. 첫 요청에서 초기 지침을, 성공한 파일 작업 뒤에는 변경된 지침을 출처가 붙은 Flue 신호로 추가한다. 파일 작업은 병렬로 실행하고, 같은 대화의 지침 탐색·상태 반영·신호 발행은 순서대로 처리한다. 모델은 신호를 사용자 역할의 컨텍스트로 받고, SDK 이력의 신호는 Chat에 표시한다. [Flue 2.3.1 패치](../patches/@flue__runtime@2.3.1.patch)는 시작 훅의 상태 반영과 요청에 포함되는 지침 신호 관찰을 지원한다. 압축 뒤에는 현재 이력과 전송 대기열에 남은 지침을 범위와 본문으로 비교해, 컨텍스트 초과 재시도를 포함한 다음 요청에 필요한 변경만 보낸다. Trajectory는 해당 요청의 출처를 기록하고 파일명과 본문을 기존 서버 검색에 포함한다. 파일 위치와 사용 규칙은 [Host 운영](hosting.md#project-instructions)에 둔다.
 
-[Agent Skills 플러그인](../packages/host-plugins/src/agent-skills/host.ts)은 제출 시작 시 파일 변경을 확인하고 읽어 둔 메타데이터를 재사용한다. 모델용 목록과 `skill({name})`의 허용 목록은 같은 [문맥 예산 계산](../packages/host-plugins/src/agent-skills/prompt.ts)을 사용한다. Flue의 `useInstruction`이 시스템 프롬프트에 현재 목록을 넣고, 호출 시 읽은 본문은 출처가 붙은 신호로 전달한다. 명시 선택은 선택한 출처를 제출에 함께 기록하며 정확한 이름 조회는 탐색 목록 상한과 독립적이다.
+[Agent Skills 플러그인](../packages/host-plugins/src/agent-skills/host.ts)은 사용자 제출 시작과 컨텍스트 초과 후 재시도에서 현재 목록을 갱신한다. Flue의 `useInstruction`이 [문맥 예산](../packages/host-plugins/src/agent-skills/prompt.ts)에 맞춘 목록을 다음 요청에 넣고 불완전한 탐색을 알린다. 메뉴 선택과 직접 입력은 같은 `/이름` 텍스트를 보내며 Host는 호출 시 현재 출처와 호출 정책을 확인한다. 정확한 이름 조회는 탐색 목록 상한과 독립적이다.
 
-모델 호출이 성공하면 실제 요청에 포함된 스킬을 사용 순서대로 적용 상태에 반영한다. 도구가 추가한 본문은 원래 응답과 도구 호출을 식별한다. 같은 응답에서는 출처가 일시적으로 바뀌어도 기존 호출 위치를 보존하고, 이전 응답에서 이월된 사용은 새 사용보다 먼저 반영한다. 스킬 사용을 반영할 때 각 이름의 최신 본문을 결정하고 복원 예산을 한 번 적용한다. 반영할 사용이 없으면 현재 모델의 예산으로 저장 목록을 줄이지 않는다. 압축에서 빠진 본문은 이 목록에서 다시 첨부한다. Trajectory는 실제 요청을 별도로 기록한다. 사용 경로와 호출 플래그는 [Host 운영](hosting.md#agent-skills)에 둔다.
+모델 호출은 본문을 일반 도구 결과로 받고, 사용자 호출은 출처가 붙은 컨텍스트로 받는다. 이미 읽은 본문은 일반 대화 이력과 함께 압축된다. 압축 후에는 현재 목록으로 스킬을 다시 호출할 수 있다. Trajectory는 실제 요청과 도구 결과를 기록한다. [DSH 스킬 동작](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/docs/subsystems/skills.md#L198-L204) · [Host 운영](hosting.md#agent-skills)
 
 모든 세션은 같은 Flue 라우터를 사용한다. 웹의 새 대화 목록은 카탈로그의 최신 프리셋을 표시한다. 새 세션의 기본 권한은 Read only다. [세션 카탈로그](../packages/host-plugins/src/workspace/catalog.ts)는 고정된 프리셋 버전과 선택한 실행 권한을 세션별로 SQLite에 저장한다. 웹에서 Full access를 선택할 때는 명시적 확인이 필요하다. 저장된 권한은 브라우저를 닫거나 같은 데이터 디렉터리로 Host를 재시작해도 유지되며, 낮은 권한으로 변경하면 그 값이 저장된다. Host는 프리셋과 실행 모드의 교집합을 모델에 노출하고, 변경·셸 호출 직전에도 권한을 확인한다.
 

@@ -131,7 +131,7 @@ Agent presets에서 새 대화의 기본 프리셋을 선택한다. Providers에
 
 Composer 색만 바꾸려고 전역 input을 변경하면 일반 폼의 경계·다크 배경까지 바뀐다. 기존 card 역할을 사용하며, 별도 색 토큰은 card와 독립적으로 달라져야 하는 실제 요구가 있을 때만 재검토한다.
 
-메시지 처음의 `/`는 Composer 위 Popover에 스킬 제안을 표시한다. 정확한 이름, 이름 접두, 이름 부분 일치, 설명 일치 순이다. 입력 초점을 유지한 채 방향키로 이동하고 Enter·Tab으로 선택한다. 선택 후 같은 입력창에서 작업 내용을 작성한다. 불완전한 목록과 요청 실패는 Popover에 표시하고, 제안과 상태는 여러 줄 입력에서 보조 기술에 알린다. Chat의 본문은 접힌 상태로 시작하고 Trajectory에서는 적용된 모델 요청과 함께 연다. [DSH 스킬 사용](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/docs/subsystems/skills.md) · [Base UI 자동완성 상태](https://base-ui.com/react/components/autocomplete)
+메시지 처음의 `/`는 Composer 위 Popover에 스킬 제안을 표시한다. 정확한 이름, 이름 접두, 이름 부분 일치, 설명 일치 순이다. 입력 초점을 유지한 채 방향키로 이동하고 Enter·Tab으로 선택한다. 선택은 직접 입력과 같은 `/이름` 텍스트를 삽입한다. 불완전한 목록과 요청 실패는 Popover에 표시하고, 제안과 상태는 여러 줄 입력에서 보조 기술에 알린다. Chat의 본문은 접힌 상태로 시작한다. Trajectory는 사용자 호출을 컨텍스트로, 모델 호출을 도구 결과로 표시한다. [DSH 스킬 사용](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/client/ui-skill/README.md) · [Base UI 자동완성 상태](https://base-ui.com/react/components/autocomplete)
 
 응답 중에도 Composer의 표면과 입력 상태를 유지한다. Host에서 실행 중인 제출이 확인되면 전송 버튼 자리에 사각형 중단 버튼을 표시한다. 전송 요청을 보내거나 중단 확정을 기다릴 때는 같은 자리에 진행 표시를 두고 [Base UI의 `focusableWhenDisabled`](https://base-ui.com/react/components/button#loading-states)로 키보드 포커스를 유지한다. [DSH InputBar](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-conversation/src/client/skeleton/InputBar.tsx#L355-L382), [shadcn Prompt Input](https://ui.shadcn.com/docs/ai-elements/base/prompt-input#migrating-from-ai-sdk-elements).
 

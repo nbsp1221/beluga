@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { FlueError } from '@flue/runtime';
 import { skillLoadFailureType, skillNameSchema } from '@workspace/protocol/host';
 import * as v from 'valibot';
@@ -188,12 +188,7 @@ async function discoverSkills(
   if (cwd) {
     try {
       const root = await resolveProjectRoot({ realpath, stat }, cwd, undefined, signal);
-      for (let path = cwd; ; path = dirname(path)) {
-        roots.push({ path: join(path, '.agents', 'skills'), boundary: root, scope: 'project' });
-        if (path === root) {
-          break;
-        }
-      }
+      roots.push({ path: join(root, '.agents', 'skills'), boundary: root, scope: 'project' });
     } catch (error) {
       signal?.throwIfAborted();
       console.warn(

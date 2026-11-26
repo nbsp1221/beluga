@@ -10,11 +10,8 @@ import {
   agentSkillsCapabilityId,
   availableAccessModes,
   createSessionSchema,
-  explicitSkillName,
   productRoutes,
   runSettingsSchema,
-  selectedSkillUnavailable,
-  skillSelectionSchema,
 } from '@workspace/protocol/host';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -333,27 +330,8 @@ export function createHarnessHost(
           if (!message) {
             return c.json({ error: 'Send a text message.' }, 400);
           }
-          let selectedSkillId: string | undefined;
-          if (message.selectedSkill !== undefined) {
-            const selection = skillSelectionSchema.safeParse(message.selectedSkill);
-            const selected = explicitSkillName(message.body);
-            const workspace = catalog.find(session.workspaceId);
-            const available =
-              selected &&
-              selection.success &&
-              selected === selection.data.name &&
-              workspace &&
-              session.agentPresetCapabilities.includes(agentSkillsCapabilityId) &&
-              (await listSkills?.(workspace.path, c.req.raw.signal, selected))?.items.some(
-                ({ id }) => id === selection.data.id,
-              );
-            if (!available) {
-              return c.json({ error: selectedSkillUnavailable }, 409);
-            }
-            selectedSkillId = selection.data.id;
-          }
           const response = await presetRouter.fetch(
-            bindSession(c.req.raw, options.origin, id, message, selectedSkillId),
+            bindSession(c.req.raw, options.origin, id, message),
           );
           if (response.status === 202) {
             catalog.setFirstTitle(id, message.body.trim().slice(0, 60));
@@ -501,7 +479,6 @@ async function parseTextMessage(request: Request) {
   }
   return {
     body: value.body,
-    selectedSkill: 'selectedSkill' in value ? value.selectedSkill : undefined,
     uid: 'uid' in value ? value.uid : undefined,
     idempotencyKey: 'idempotencyKey' in value ? value.idempotencyKey : undefined,
   };
@@ -531,7 +508,6 @@ function bindSession(
   origin: string,
   id: string,
   message: NonNullable<Awaited<ReturnType<typeof parseTextMessage>>>,
-  selectedSkillId?: string,
 ) {
   const headers = new Headers(request.headers);
   headers.delete('Content-Length');
@@ -547,7 +523,6 @@ function bindSession(
     body: JSON.stringify({
       kind: 'user',
       body: message.body,
-      attributes: selectedSkillId ? { selectedSkillId } : undefined,
       uid: message.uid,
       idempotencyKey: message.idempotencyKey,
       // Flue accepts creation data only when the request can create an instance.

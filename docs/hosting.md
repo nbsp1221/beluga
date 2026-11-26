@@ -145,17 +145,17 @@ Put an [Agent Skill](https://agentskills.io/specification) in a folder named aft
 
 Beluga looks for the skill in this order:
 
-1. `.agents/skills/<name>/SKILL.md` in the workspace and its parent folders through the nearest Git root. Outside a Git checkout it searches only the workspace folder.
+1. `.agents/skills/<name>/SKILL.md` at the nearest Git root, or in the workspace folder outside a Git checkout.
 2. `skills/<name>/SKILL.md` under the Host's Beluga data directory.
 3. `.agents/skills/<name>/SKILL.md` in the Host account's home directory.
 
-The closest valid definition wins. Skill folders and files reached through links must resolve inside their project or global search root. Host logs identify invalid metadata, links that cross a search boundary, and which definition wins when two skills share a name. All paths are on the Host, including when you connect from another computer.
+The first valid definition in that order wins. Skill folders and files reached through links must resolve inside their project or global search root. Host logs identify invalid metadata, links that cross a search boundary, and which definition wins when two skills share a name. All paths are on the Host, including when you connect from another computer.
 
-Type `/` in the composer to find a skill or start a message with `/<name>` followed by the task. Reopen the suggestions to refresh their list. If the file you chose disappears, Beluga reports the failure and keeps your draft. You can type the exact name of a skill that is omitted from a partial list. Set `disable-model-invocation: true` for manual use only or `user-invocable: false` to hide a skill from direct selection. A skill supplies instructions within the conversation's existing file and shell permissions.
+Type `/` at the start of the composer to find a skill, or type `/<name>` as a word in your message. Both use the definition available when the Host handles the message. An unknown name stays ordinary text. Reopen suggestions to refresh the list or type an exact name omitted from a partial list. Set `disable-model-invocation: true` for manual use only or `user-invocable: false` to hide a skill from direct selection. A skill supplies instructions within the conversation's existing file and shell permissions.
 
-Beluga loads the full `SKILL.md` body on first use. The source file can be up to 1 MiB, and the full request is subject to the model's context window. Keep longer reference material in separate files. After context compaction, Beluga restores the most recently used eligible skills within a combined budget of up to 25,000 estimated tokens or a quarter of the context window. With an unknown context window the restore budget is 5,000 estimated tokens.
+Beluga loads the full `SKILL.md` body on invocation. The source file can be up to 1 MiB, and the full request is subject to the model's context window. Keep longer reference material in separate files. After compaction, the current catalog is available for another invocation. Earlier skill bodies follow the conversation's normal compaction behavior.
 
-Expand a skill in Chat to read the loaded instructions. In Trajectory, **System Prompt** shows the list offered to the model, and a **Context** row shows the instructions sent with a specific request. You can search Trajectory by skill name.
+Expand a skill in Chat to read the loaded instructions. In Trajectory, **System Prompt** shows the list offered to the model. A manual invocation appears in a **Context** row, and a model invocation appears in the **skill** tool result. You can search Trajectory by skill name.
 
 ## Diagnose connection problems
 

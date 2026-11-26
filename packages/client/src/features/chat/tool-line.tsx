@@ -75,7 +75,10 @@ export function ToolLine({
       <TraceCollapsibleContent className="flex flex-col gap-2">
         {input && <ToolDetails title={shell ? 'Command' : 'Input'} value={input} />}
         {output && (
-          <ToolDetails title={part.skillInstructions ? 'Instructions' : 'Output'} value={output} />
+          <ToolDetails
+            title={typeof skill === 'string' && !failed ? 'Instructions' : 'Output'}
+            value={output}
+          />
         )}
         {part.error && <ToolDetails title="Error" value={part.error} />}
       </TraceCollapsibleContent>

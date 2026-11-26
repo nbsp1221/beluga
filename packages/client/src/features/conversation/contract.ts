@@ -7,7 +7,6 @@ import type {
   RunSettings,
   SkillContext,
   SkillListing,
-  SkillSelection,
   WorkspaceInstructionChanges,
 } from '@workspace/protocol/host';
 import type { ComponentType } from 'react';
@@ -78,7 +77,6 @@ export interface ConversationSnapshot {
 export interface SendOptions {
   mode: string;
   attachments: readonly string[];
-  selectedSkill?: SkillSelection;
 }
 
 // Client projection contract. A future transport can publish Host snapshots here.

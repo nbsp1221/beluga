@@ -1,8 +1,4 @@
-import {
-  type SkillListing,
-  type SkillSelection,
-  explicitSkillName,
-} from '@workspace/protocol/host';
+import type { SkillListing } from '@workspace/protocol/host';
 import { Button } from '@workspace/ui/components/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@workspace/ui/components/popover';
 import { type KeyboardEvent, useEffect, useId, useState } from 'react';
@@ -17,7 +13,6 @@ export function useSkillSuggestions(
   const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [index, setIndex] = useState(0);
-  const [selected, setSelected] = useState<SkillSelection>();
   const [result, setResult] = useState<{ key: string; listing: SkillListing | null }>();
   const query = /^\/([a-z0-9-]*)$/.exec(session.draft)?.[1];
   const open = enabled && focused && !dismissed && query !== undefined;
@@ -73,9 +68,8 @@ export function useSkillSuggestions(
     setResult(undefined);
   }
 
-  function select({ id: skillId, name }: SkillSelection) {
+  function select({ name }: SkillListing['items'][number]) {
     client.setDraft(id, `/${name} `);
-    setSelected({ id: skillId, name });
     dismiss();
   }
 
@@ -103,7 +97,6 @@ export function useSkillSuggestions(
     current,
     notice,
     announcement,
-    selected: explicitSkillName(session.draft) === selected?.name ? selected : undefined,
     select,
     setFocused(focused: boolean) {
       setFocused(focused);
@@ -117,9 +110,6 @@ export function useSkillSuggestions(
       setDismissed(false);
       if (!/^\/[a-z0-9-]*$/.test(text)) {
         setResult(undefined);
-      }
-      if (explicitSkillName(text) !== selected?.name) {
-        setSelected(undefined);
       }
     },
     keyDown,

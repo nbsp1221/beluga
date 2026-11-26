@@ -1,4 +1,4 @@
-import { FlueApiError, FlueExecutionError } from '@flue/sdk';
+import { FlueExecutionError } from '@flue/sdk';
 import {
   AGENT_SKILLS_PATH,
   CONVERSATION_PATH,
@@ -8,10 +8,8 @@ import {
   conversationCatalogSchema,
   conversationFailureMessage,
   conversationUsageSchema,
-  explicitSkillName,
   isSkillLoadFailure,
   runSettingsSchema,
-  selectedSkillUnavailableSchema,
   sessionSummarySchema,
   skillListingSchema,
 } from '@workspace/protocol/host';
@@ -455,29 +453,11 @@ function createSubmissionClient({
       const delivery = existing?.text === text ? existing : { text, key: uuid() };
       pendingDeliveries.set(id, delivery);
       const client = connect(id);
-      const message = {
-        kind: 'user' as const,
-        body: text,
-        selectedSkill:
-          explicitSkillName(text) === options.selectedSkill?.name
-            ? options.selectedSkill
-            : undefined,
-      };
-      const receipt = await client
-        .send({
-          message,
-          idempotencyKey: delivery.key,
-          signal,
-        })
-        .catch((error: unknown) => {
-          if (error instanceof FlueApiError) {
-            const parsed = selectedSkillUnavailableSchema.safeParse(error.body);
-            if (parsed.success) {
-              throw new Error(parsed.data.error.message, { cause: error });
-            }
-          }
-          throw error;
-        });
+      const receipt = await client.send({
+        message: { kind: 'user', body: text },
+        idempotencyKey: delivery.key,
+        signal,
+      });
 
       pendingDeliveries.delete(id);
       update(id, (session) => ({
@@ -489,11 +469,7 @@ function createSubmissionClient({
       try {
         await client.wait(receipt, { signal });
       } catch (error) {
-        if (
-          message.selectedSkill &&
-          error instanceof FlueExecutionError &&
-          isSkillLoadFailure(error.error)
-        ) {
+        if (error instanceof FlueExecutionError && isSkillLoadFailure(error.error)) {
           update(id, (session) => ({ ...session, draft: session.draft || text }));
         }
         if (

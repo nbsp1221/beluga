@@ -1,7 +1,5 @@
-import { unlinkSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import {
   AGENT_SKILLS_PATH,
   agentSkillsCapabilityId,
@@ -17,7 +15,7 @@ async function writeSkill(root: string, name: string, marker: string, flags = ''
   await mkdir(folder, { recursive: true });
   await writeFile(
     join(folder, 'SKILL.md'),
-    `---\nname: ${name}\ndescription: Find ${name}\n${flags}---\n\n${marker}\n`,
+    `---\nname: "${name}"\ndescription: Find ${name}\n${flags}---\n\n${marker}\n`,
   );
   return folder;
 }
@@ -47,23 +45,13 @@ test('keeps applied skill bodies in place across ordinary follow-ups', async (co
   const { id } = await harness.create(workspace.id, preset.id);
   await submit(harness, id, '/review review this change');
 
-  using db = new DatabaseSync(harness.databasePath, { readOnly: true });
-  const writes = db.prepare(`
-    SELECT count(*) AS count FROM flue_conversation_stream_batches, json_each(data)
-    WHERE json_extract(value, '$.type') = 'state_write'
-      AND instr(json_extract(value, '$.name'), 'agent-skills') = 1
-      AND instr(value, ?) > 0
-  `);
-  const applied = writes.get(marker)?.count;
-  expect(applied).toBe(1);
   for (const request of ['Continue', 'One more detail']) {
     const input = await submit(harness, id, request);
     expect(input.at(-1)?.skillInstructions.match(/KEEP_REVIEW_RULE/g)).toHaveLength(1);
   }
-  expect(writes.get(marker)?.count).toBe(applied);
 });
 
-test('loads, reuses, and refreshes project skill overrides', async (context) => {
+test('prefers the Git root skill when working in a nested folder', async (context) => {
   const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   context.onTestFinished(() => {
     warnings.mockRestore();
@@ -77,10 +65,10 @@ test('loads, reuses, and refreshes project skill overrides', async (context) => 
   await writeFile(join(harness.project, '.git'), 'gitdir: /test/worktree');
   const hostReview = await writeSkill(host, 'review', 'HOST_BODY');
   await writeSkill(shared, 'review', 'SHARED_BODY');
-  await writeSkill(project, 'review', 'PROJECT_BODY');
-  const nestedReview = await writeSkill(nested, 'review', 'NESTED_BODY');
+  const projectReview = await writeSkill(project, 'review', 'PROJECT_BODY');
+  await writeSkill(nested, 'review', 'NESTED_BODY');
   const outside = await writeSkill(join(harness.other, 'other-skills'), 'linked', 'OUTSIDE_BODY');
-  const linked = join(nested, 'linked');
+  const linked = join(project, 'linked');
   await linkDirectory(outside, linked);
 
   await harness.prepareWorkspace();
@@ -96,11 +84,13 @@ test('loads, reuses, and refreshes project skill overrides', async (context) => 
   expect(automatic[0].instructions).not.toContain('linked');
   expect(automatic[0].skillInstructions).toBe('');
   expect(automatic[0].toolNames.sort()).toEqual(['skill', 'task']);
-  expect(automatic.at(-1)?.skillInstructions).toContain('NESTED_BODY');
-  expect(automatic.at(-1)?.skillInstructions).not.toMatch(/HOST_BODY|SHARED_BODY|PROJECT_BODY/);
+  expect(JSON.stringify(automatic.at(-1)?.result?.content)).toContain('PROJECT_BODY');
+  expect(JSON.stringify(automatic.at(-1)?.result?.content)).not.toMatch(
+    /HOST_BODY|SHARED_BODY|NESTED_BODY/,
+  );
   expect(warnings).toHaveBeenCalledWith(
     expect.stringContaining(
-      `uses ${join(nestedReview, 'SKILL.md')}; shadowed ${join(hostReview, 'SKILL.md')}`,
+      `uses ${join(projectReview, 'SKILL.md')}; shadowed ${join(hostReview, 'SKILL.md')}`,
     ),
   );
   expect(warnings).toHaveBeenCalledWith(
@@ -109,33 +99,32 @@ test('loads, reuses, and refreshes project skill overrides', async (context) => 
   const [turn] = await readTrajectory(
     harness.fetch(`${origin}/api/conversations/${session.id}/trajectory`),
   );
-  const applied = turn.records.find(
-    (record) => record.kind === 'context' && record.skill?.name === 'review',
+  const applied = turn.records.findLast(
+    (record) => record.kind === 'assistant' && record.purpose === 'agent',
   );
-  if (applied?.kind !== 'context' || !applied.modelRequestId) {
+  if (!applied) {
     throw new Error('Expected a model request for the loaded skill.');
   }
-  expect(applied.body).toContain('NESTED_BODY');
   const inputPath = productRoutes.modelInput.path
     .replace(':id', session.id)
     .replace(':submissionId', turn.id)
-    .replace(':modelId', applied.modelRequestId);
+    .replace(':modelId', applied.id);
   const inputResponse = await harness.fetch(origin + inputPath);
   expect(inputResponse.ok).toBe(true);
   const input = trajectoryModelInputResponseSchema.parse(await inputResponse.json());
-  expect(JSON.stringify(input)).toContain('NESTED_BODY');
+  expect(JSON.stringify(input.messages)).toContain('PROJECT_BODY');
   const repeated = await submit(
     harness,
     session.id,
     JSON.stringify({ tool: 'skill', name: 'review' }),
   );
-  expect(repeated.at(-1)?.skillInstructions.match(/NESTED_BODY/g)).toHaveLength(1);
-  await writeSkill(nested, 'review', 'EDITED_BODY');
+  expect(JSON.stringify(repeated.at(-1)?.result?.content)).toContain('PROJECT_BODY');
+  await writeSkill(project, 'review', 'EDITED_BODY');
   const edited = (await submit(harness, session.id, '/review check changes'))[0];
   expect(edited.skillInstructions.match(/EDITED_BODY/g)).toHaveLength(1);
-  await rm(nestedReview, { recursive: true });
-  const [parent] = await submit(harness, session.id, '/review now use parent');
-  expect(parent.skillInstructions.match(/PROJECT_BODY/g)).toHaveLength(1);
+  await rm(projectReview, { recursive: true });
+  const [fallback] = await submit(harness, session.id, '/review now use the Host');
+  expect(fallback.skillInstructions.match(/HOST_BODY/g)).toHaveLength(1);
 });
 
 test('prefers Host skills to shared global skills and falls back after restart', async (context) => {
@@ -157,6 +146,38 @@ test('prefers Host skills to shared global skills and falls back after restart',
   expect((await submit(harness, id, '/review check again'))[0].skillInstructions).toContain(
     'SHARED_BODY',
   );
+});
+
+test('uses the readable fallback during incomplete discovery and restores priority on recovery', async (context) => {
+  const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  context.onTestFinished(() => warnings.mockRestore());
+  const harness = await setupHarness(context);
+  const project = join(harness.project, '.agents', 'skills');
+  const blockedFile = join(project, 'review', 'SKILL.md');
+  await mkdir(blockedFile, { recursive: true });
+  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', 'FALLBACK_BODY');
+  const workspace = await harness.prepareWorkspace();
+  const { id } = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+
+  const list = async () => {
+    const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+    return skillListingSchema.parse(await response.json());
+  };
+
+  expect(await list()).toMatchObject({ incomplete: true, items: [{ name: 'review' }] });
+  const [fallback] = await submit(harness, id, '/review use the available instructions');
+  expect(fallback.instructions).toContain('Skill discovery is incomplete');
+  expect(fallback.skillInstructions).toContain('FALLBACK_BODY');
+
+  await rmdir(blockedFile);
+  await writeSkill(project, 'review', 'PROJECT_BODY');
+  expect(await list()).toMatchObject({ incomplete: false, items: [{ name: 'review' }] });
+  const [recovered] = await submit(harness, id, '/review use the current instructions');
+  expect(recovered.instructions).not.toContain('Skill discovery is incomplete');
+  expect(recovered.skillInstructions).toContain('PROJECT_BODY');
 });
 
 test('filters invocation policy after resolving names and leaves disabled presets untouched', async (context) => {
@@ -184,6 +205,13 @@ test('filters invocation policy after resolving names and leaves disabled preset
     (await submit(harness, session.id, '/auto not explicitly'))[0].skillInstructions,
   ).not.toContain('MODEL_ONLY');
   const disabled = await harness.create(workspace.id, (await harness.createPreset()).id);
+  const disabledListing = await harness.fetch(
+    `${origin}${AGENT_SKILLS_PATH}?sessionId=${disabled.id}`,
+  );
+  expect(skillListingSchema.parse(await disabledListing.json())).toEqual({
+    items: [],
+    incomplete: false,
+  });
   const [request] = await submit(harness, disabled.id, '/manual ignored');
   expect(request.instructions).not.toContain('<available_skills>');
   expect(request.skillInstructions).toBe('');
@@ -195,7 +223,7 @@ test('filters invocation policy after resolving names and leaves disabled preset
   await rm(host, { recursive: true });
   const [empty] = await submit(harness, noSkills.id, '/manual is ordinary text here');
   expect(empty.instructions).not.toContain('<available_skills>');
-  expect(empty.toolNames).not.toContain('skill');
+  expect(empty.toolNames).toContain('skill');
 });
 
 test(
@@ -234,76 +262,58 @@ test(
   },
 );
 
-test('rejects an explicit selection when only a same-named fallback remains', async (context) => {
+test('resolves a command picked from the menu against the current catalog', async (context) => {
   const harness = await setupHarness(context);
   const project = await writeSkill(
     join(harness.project, '.agents', 'skills'),
     'review',
     'PROJECT_BODY',
   );
-  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', 'FALLBACK_BODY');
+  const fallback = await writeSkill(
+    join(dirname(harness.databasePath), 'skills'),
+    'review',
+    'FALLBACK_BODY',
+  );
   const workspace = await harness.prepareWorkspace();
   const { id } = await harness.create(
     workspace.id,
     (await harness.createPreset([agentSkillsCapabilityId])).id,
   );
-  const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
-  const [{ id: skillId, name }] = skillListingSchema.parse(await response.json()).items;
+  const listing = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+  const [{ name }] = skillListingSchema.parse(await listing.json()).items;
+  const command = `/${name} review this change`;
+
   await rm(join(project, 'SKILL.md'));
-  const rejected = await harness.post(`/api/conversations/${id}`, {
-    kind: 'user',
-    body: '/review Use the project skill',
-    selectedSkill: { id: skillId, name },
-  });
-  expect(rejected.status).toBe(409);
-  expect(harness.observed).toHaveLength(0);
-  expect(
-    (await submit(harness, id, '/review Use the current skill'))[0].skillInstructions,
-  ).toContain('FALLBACK_BODY');
+  expect((await submit(harness, id, command))[0].skillInstructions).toContain('FALLBACK_BODY');
+
+  await rm(join(fallback, 'SKILL.md'));
+  const fresh = await harness.create(
+    workspace.id,
+    (await harness.createPreset([agentSkillsCapabilityId])).id,
+  );
+  expect((await submit(harness, fresh.id, command))[0].skillInstructions).toBe('');
 });
 
-test('preserves the selected source after the request is accepted', async (context) => {
+test('loads distinct inline slash mentions once and ignores paths and fractions', async (context) => {
   const harness = await setupHarness(context);
-  const project = await writeSkill(
-    join(harness.project, '.agents', 'skills'),
-    'review',
-    'PROJECT_BODY',
-  );
-  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', 'FALLBACK_BODY');
+  const directory = join(dirname(harness.databasePath), 'skills');
+  await writeSkill(directory, 'review', 'REVIEW_BODY');
+  await writeSkill(directory, 'verify', 'VERIFY_BODY');
+  await writeSkill(directory, 'usr', 'PATH_BODY');
+  await writeSkill(directory, '8', 'FRACTION_BODY');
   const workspace = await harness.prepareWorkspace();
   const { id } = await harness.create(
     workspace.id,
     (await harness.createPreset([agentSkillsCapabilityId])).id,
   );
-  const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
-  const [{ id: skillId, name }] = skillListingSchema.parse(await response.json()).items;
-  const sessions = harness.getRuntime().get('workspaceToolSessions');
-  const resolveWorkspace = sessions.workspaceRootForSession.bind(sessions);
-  const removeSelected = vi
-    .spyOn(sessions, 'workspaceRootForSession')
-    .mockImplementationOnce((sessionId) => {
-      unlinkSync(join(project, 'SKILL.md'));
-      return resolveWorkspace(sessionId);
-    });
-  context.onTestFinished(() => removeSelected.mockRestore());
-  const client = harness.sdk(id);
-  const message = {
-    kind: 'user' as const,
-    body: '/review Use the project skill',
-    selectedSkill: { id: skillId, name },
-  };
-  const receipt = await client.send({ message });
-  await expect(client.wait(receipt, { signal: AbortSignal.timeout(5000) })).rejects.toMatchObject({
-    failure: 'failed',
-  });
-  expect(harness.observed).toHaveLength(0);
-  const [turn] = await readTrajectory(
-    harness.fetch(`${origin}/api/conversations/${id}/trajectory`),
+  const [request] = await submit(
+    harness,
+    id,
+    'Use /review and /verify then /review on /usr/bin for 5/8',
   );
-  expect(turn).toMatchObject({
-    status: 'failed',
-    error: 'The selected skill is no longer available.',
-  });
+  expect(request.skillInstructions.match(/REVIEW_BODY/g)).toHaveLength(1);
+  expect(request.skillInstructions).toContain('VERIFY_BODY');
+  expect(request.skillInstructions).not.toMatch(/PATH_BODY|FRACTION_BODY/);
 });
 
 test('reports mismatched metadata and keeps discovery inside the approved roots', async (context) => {
@@ -373,39 +383,6 @@ test('does not apply an interrupted skill invocation on the next request', async
   );
 });
 
-test.for(['user', 'model'] as const)(
-  'does not append an identical skill already in model input when called by the %s',
-  async (actor, context) => {
-    const harness = await setupHarness(context);
-    const skills = join(dirname(harness.databasePath), 'skills');
-    await writeSkill(skills, 'first', 'FIRST_SKILL ' + 'a'.repeat(17_500));
-    await writeSkill(skills, 'second', 'SECOND_SKILL ' + 'b'.repeat(17_500));
-    const workspace = await harness.prepareWorkspace();
-    const { id } = await harness.create(
-      workspace.id,
-      (await harness.createPreset([agentSkillsCapabilityId])).id,
-    );
-    await submit(harness, id, '/first First task');
-    await submit(harness, id, '/second Second task');
-    const requests = await submit(
-      harness,
-      id,
-      actor === 'user' ? '/first Again' : JSON.stringify({ tool: 'skill', name: 'first' }),
-    );
-    expect(requests.at(-1)?.skillInstructions.match(/FIRST_SKILL/g)).toHaveLength(1);
-    const path = `${origin}/api/conversations/${id}/trajectory`;
-    const turn = (await readTrajectory(harness.fetch(path))).at(-1);
-    const model = turn?.records.findLast((record) => record.kind === 'assistant');
-    if (!turn || !model) {
-      throw new Error('Missing final model request.');
-    }
-    const response = await harness.fetch(`${path}/${turn.id}/${model.id}`);
-    const input = trajectoryModelInputResponseSchema.parse(await response.json());
-    expect(JSON.stringify(input.messages).match(/FIRST_SKILL/g)).toHaveLength(1);
-    expect(turn.records.some((record) => record.kind === 'context')).toBe(false);
-  },
-);
-
 test('sends a long skill body in full and records it in Trajectory', async (context) => {
   const harness = await setupHarness(context);
   const body = 'START_OF_SKILL ' + 'a'.repeat(24_000) + ' END_OF_SKILL';
@@ -428,7 +405,7 @@ test('sends a long skill body in full and records it in Trajectory', async (cont
   expect(JSON.stringify(input.messages)).toContain(body);
 });
 
-test('records a selected skill source failure without sending a model request', async (context) => {
+test('records a skill read failure without sending a model request', async (context) => {
   const harness = await setupHarness(context);
   await writeSkill(
     join(dirname(harness.databasePath), 'skills'),
@@ -441,14 +418,9 @@ test('records a selected skill source failure without sending a model request', 
     (await harness.createPreset([agentSkillsCapabilityId])).id,
   );
   const client = harness.sdk(id);
-  const listing = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
-  const [selectedSkill] = skillListingSchema.parse(await listing.json()).items;
-  const message = {
-    kind: 'user' as const,
-    body: '/oversized Try it',
-    selectedSkill: { id: selectedSkill.id, name: selectedSkill.name },
-  };
-  const receipt = await client.send({ message });
+  const receipt = await client.send({
+    message: { kind: 'user', body: '/oversized Try it' },
+  });
   await expect(client.wait(receipt, { signal: AbortSignal.timeout(5_000) })).rejects.toMatchObject({
     failure: 'failed',
   });

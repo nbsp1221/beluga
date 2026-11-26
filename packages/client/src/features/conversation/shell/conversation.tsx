@@ -1,4 +1,4 @@
-import { availableAccessModes } from '@workspace/protocol/host';
+import { agentSkillsCapabilityId, availableAccessModes } from '@workspace/protocol/host';
 import { Dialog } from '@workspace/ui/components/dialog';
 import { PaneTabsList } from '@workspace/ui/components/pane-tabs-list';
 import { ShellButton } from '@workspace/ui/components/shell-button';
@@ -348,6 +348,7 @@ export function Conversation({
                 client={client}
                 session={session}
                 mode={mode}
+                skillsEnabled={activeCapabilities.includes(agentSkillsCapabilityId)}
                 blocked={
                   Boolean(presetError) ||
                   needsFolder ||

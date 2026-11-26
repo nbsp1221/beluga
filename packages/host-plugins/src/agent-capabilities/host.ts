@@ -15,12 +15,7 @@ interface AgentToolCapability {
 
 export interface AgentContextCapability {
   metadata: AgentCapabilityMetadata;
-  listSkills?(
-    this: void,
-    cwd: string | undefined,
-    signal?: AbortSignal,
-    onlyName?: string,
-  ): Promise<SkillListing>;
+  listSkills?(this: void, cwd: string | undefined, signal?: AbortSignal): Promise<SkillListing>;
   useContext(
     cwd: string | undefined,
     sessionId: string,

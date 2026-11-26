@@ -46,6 +46,7 @@ export function Composer({
   client,
   session,
   mode,
+  skillsEnabled,
   blocked,
   workspacePicker,
   accessModes,
@@ -56,6 +57,7 @@ export function Composer({
   client: ConversationClient;
   session: Session;
   mode: string;
+  skillsEnabled: boolean;
   blocked: boolean;
   workspacePicker?: {
     open: boolean;
@@ -69,7 +71,8 @@ export function Composer({
   const { mobile, viewportHeight } = useLayout();
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const skills = useSkillSuggestions(client, session, !workspacePicker);
+  const showSkillSuggestions = skillsEnabled && !workspacePicker;
+  const skills = useSkillSuggestions(client, session, showSkillSuggestions);
   const [attachments, setAttachments] = useState<readonly string[]>([]);
 
   const savedSettings = session.runSettings;
@@ -182,11 +185,11 @@ export function Composer({
     setSubmitting(true);
     setError('');
     try {
-      await client.send(session.id, { mode, attachments, selectedSkill: skills.selected });
+      await client.send(session.id, { mode, attachments });
       setAttachments([]);
     } catch (error) {
       setError(
-        error instanceof Error && (session.isDraft || skills.selected)
+        error instanceof Error && session.isDraft
           ? error.message
           : 'Unable to send this message. Try again.',
       );
@@ -236,7 +239,7 @@ export function Composer({
           <Textarea
             ref={editorRef}
             aria-label="Message"
-            aria-autocomplete={client.listSkills ? 'list' : undefined}
+            aria-autocomplete={showSkillSuggestions ? 'list' : undefined}
             aria-controls={skills.items.length ? skills.listId : undefined}
             aria-activedescendant={
               skills.current < 0 ? undefined : `${skills.listId}-${skills.current}`

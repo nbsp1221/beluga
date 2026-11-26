@@ -36,13 +36,6 @@ export const WORKSPACE_FOLDERS_PATH = `${WORKSPACES_PATH}/folders`;
 export const AGENT_SKILLS_PATH = '/api/agent-skills';
 export const agentSkillsCapabilityId = 'agent-skills';
 export const skillInvocationSignal = 'skill-invocation';
-export const selectedSkillUnavailable = {
-  type: 'selected_skill_unavailable',
-  message: 'The selected skill is no longer available.',
-} as const;
-export const selectedSkillUnavailableSchema = z.object({
-  error: z.object({ type: z.literal(selectedSkillUnavailable.type), message: z.string() }),
-});
 export const skillNameSchema = z
   .string()
   .max(64)
@@ -55,10 +48,6 @@ export const skillSummarySchema = z.object({
 });
 
 export type SkillSummary = z.infer<typeof skillSummarySchema>;
-
-export const skillSelectionSchema = skillSummarySchema.pick({ id: true, name: true });
-
-export type SkillSelection = z.infer<typeof skillSelectionSchema>;
 
 export const skillListingSchema = z.object({
   items: z.array(skillSummarySchema),
@@ -78,9 +67,14 @@ export const skillContextSchema = skillInvocationAttributesSchema.pick({ name: t
 
 export type SkillContext = z.infer<typeof skillContextSchema>;
 
-export function explicitSkillName(text: string) {
-  const name = /^\/([a-z0-9-]+)(?=\s|$)/.exec(text)?.[1];
-  return skillNameSchema.safeParse(name).data;
+export function explicitSkillNames(text: string) {
+  const names = new Set<string>();
+  for (const match of text.matchAll(/(?:^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g)) {
+    if (skillNameSchema.safeParse(match[1]).success) {
+      names.add(match[1]);
+    }
+  }
+  return names;
 }
 
 // The explicitly supported product routes are shared by Host registration and Desktop forwarding.
