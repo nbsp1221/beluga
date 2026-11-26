@@ -19,7 +19,7 @@ index c9814eee223d3e933e0f2affa778160245f86184..4bf2f48fb5f723b57e02e0e3eff77815
  /** One `useAgentFinish` declaration; identity is the declaration index. */
  interface AgentFinishDeclaration {
 diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
-index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..685917daa28943e7e9b6dd4f48842440d41dcdff 100644
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..d8b3ba4e079867101b44a729b3d9d82992cd97fe 100644
 --- a/dist/conversation-stream-store-BJbg7IHa.mjs
 +++ b/dist/conversation-stream-store-BJbg7IHa.mjs
 @@ -1,7 +1,7 @@
@@ -195,7 +195,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..685917daa28943e7e9b6dd4f48842440
  				await start();
  				await this.agentLoop.waitForIdle();
  			} catch (error) {
-@@ -4200,19 +4241,17 @@ var Session = class {
+@@ -4200,12 +4241,8 @@ var Session = class {
  			const compactionConfig = this.config.compaction === false ? void 0 : this.config.compaction;
  			const summarizationModel = compactionConfig?.model ? this.resolveModelForCall(compactionConfig.model) : sessionModel;
  			const canonicalConversation = await this.requireConversation();
@@ -207,20 +207,26 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..685917daa28943e7e9b6dd4f48842440
 -			} });
 +			const options = await this.canonicalContextOptions(canonicalConversation);
 +			const contextEntries = buildConversationContextEntries(canonicalConversation, options);
-+			// Keep unconsumed signals in the live tail, outside the durable summary.
-+			const firstPendingSignal = contextEntries.findIndex((entry) => entry.pendingResponseSignal);
  			const messages = contextEntries.map((entry) => entry.message);
  			const latestCompaction = getLatestConversationCompaction(canonicalConversation);
  			const preparation = prepareCompaction(messages, settings, latestCompaction ? {
- 				summary: latestCompaction.summary,
- 				firstKeptIndex: 1,
- 				details: latestCompaction.details
--			} : void 0);
-+			} : void 0, firstPendingSignal < 0 ? void 0 : firstPendingSignal);
- 			if (!preparation) {
- 				this.internalLog("info", "[flue:compaction] Nothing to compact (no valid cut point found)");
- 				return false;
-@@ -4464,7 +4503,10 @@ var Session = class {
+@@ -4230,7 +4267,14 @@ var Session = class {
+ 				estimatedTokens
+ 			});
+ 			terminalPending = true;
+-			const result = await compact(preparation, summarizationModel, this.compactionAbortController.signal, {
++			// Pending response signals contribute to Flue's cutoff, but not to a durable summary.
++			const pendingSignals = new Set(contextEntries.filter((entry) => entry.pendingResponseSignal).map((entry) => entry.message));
++			const summaryInput = {
++				...preparation,
++				messagesToSummarize: preparation.messagesToSummarize.filter((message) => !pendingSignals.has(message)),
++				turnPrefixMessages: preparation.turnPrefixMessages.filter((message) => !pendingSignals.has(message))
++			};
++			const result = await compact(summaryInput, summarizationModel, this.compactionAbortController.signal, {
+ 				start: (purpose, model, context, options) => {
+ 					const handle = { turnId: generateTurnId() };
+ 					this.emitTurnRequest(handle.turnId, purpose, model, context, options);
+@@ -4464,7 +4508,10 @@ var Session = class {
  			signalType: message.type,
  			...message.tagName ? { tagName: message.tagName } : {},
  			content: message.body,
@@ -232,7 +238,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..685917daa28943e7e9b6dd4f48842440
  		};
  	}
  	/**
-@@ -5118,6 +5160,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
+@@ -5118,6 +5165,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
  	emitCoordinatorEvent({
  		type: "submission_settled",
  		submissionId: submission.submissionId,
@@ -240,7 +246,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..685917daa28943e7e9b6dd4f48842440
  		outcome,
  		error: serializeSubmissionError(error)
  	}, errorInfo);
-@@ -5310,6 +5353,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
+@@ -5310,6 +5358,7 @@ async function settleSubmissionWithRecord(submissions, kind, attempt, ctx, outco
  	const event = ctx.createEvent({
  		type: "submission_settled",
  		submissionId: attempt.submissionId,
@@ -248,7 +254,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..685917daa28943e7e9b6dd4f48842440
  		outcome,
  		...outcome === "completed" ? {} : { error: serializeSubmissionError(error) }
  	});
-@@ -5419,6 +5463,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
+@@ -5419,6 +5468,7 @@ async function finalizePendingSettlement(submissions, writer, pending, emitCoord
  	emitCoordinatorEvent?.({
  		type: "submission_settled",
  		submissionId: pending.submissionId,
@@ -257,7 +263,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..685917daa28943e7e9b6dd4f48842440
  		...pending.record.outcome === "completed" || pending.record.error === void 0 ? {} : { error: pending.record.error }
  	});
 diff --git a/dist/dispatch-DTmMreLV.mjs b/dist/dispatch-DTmMreLV.mjs
-index 4af08391f41d94893ede44aede6614283528b44a..4645ba0c7655c84cc20af51194fcfc1befb00baf 100644
+index 4af08391f41d94893ede44aede6614283528b44a..bf76038515fafdbe072fb2d158d6c6c6c069eec8 100644
 --- a/dist/dispatch-DTmMreLV.mjs
 +++ b/dist/dispatch-DTmMreLV.mjs
 @@ -354,9 +354,10 @@ function isPlainObject(value) {
@@ -328,39 +334,7 @@ index 4af08391f41d94893ede44aede6614283528b44a..4645ba0c7655c84cc20af51194fcfc1b
  			});
  			index += 1;
  			continue;
-@@ -1943,7 +1965,7 @@ function findTurnStartIndex(messages, index, start) {
- 	for (let i = index; i >= start; i--) if (messages[i]?.role === "user") return i;
- 	return -1;
- }
--function findCutPoint(messages, start, end, keepRecentTokens) {
-+function findCutPoint(messages, start, end, keepRecentTokens, latestCutIndex = Infinity) {
- 	const cutPoints = findValidCutPoints(messages, start, end);
- 	if (cutPoints.length === 0) return {
- 		firstKeptIndex: start,
-@@ -1965,6 +1987,7 @@ function findCutPoint(messages, start, end, keepRecentTokens) {
- 			break;
- 		}
- 	}
-+	cutIndex = Math.min(cutIndex, latestCutIndex);
- 	const isUserMessage = messages[cutIndex]?.role === "user";
- 	const turnStartIndex = isUserMessage ? -1 : findTurnStartIndex(messages, cutIndex, start);
- 	return {
-@@ -1974,12 +1997,12 @@ function findCutPoint(messages, start, end, keepRecentTokens) {
- 	};
- }
- /** Pure function — no I/O. Finds cut point, extracts messages to summarize, tracks file ops. */
--function prepareCompaction(messages, settings, previousCompaction) {
-+function prepareCompaction(messages, settings, previousCompaction, latestCutIndex) {
- 	if (messages.length === 0) return void 0;
- 	const boundaryStart = previousCompaction ? previousCompaction.firstKeptIndex : 0;
- 	const boundaryEnd = messages.length;
- 	const tokensBefore = estimateContextTokens(messages);
--	const cutPoint = findCutPoint(messages, boundaryStart, boundaryEnd, settings.keepRecentTokens);
-+	const cutPoint = findCutPoint(messages, boundaryStart, boundaryEnd, settings.keepRecentTokens, latestCutIndex);
- 	if (cutPoint.firstKeptIndex <= boundaryStart) return void 0;
- 	const historyEnd = cutPoint.isSplitTurn ? cutPoint.turnStartIndex : cutPoint.firstKeptIndex;
- 	const messagesToSummarize = messages.slice(boundaryStart, historyEnd);
-@@ -4243,4 +4266,4 @@ function validateDispatchRequest(request, agent) {
+@@ -4243,4 +4265,4 @@ function validateDispatchRequest(request, agent) {
  	return parseDeliveredMessage(request.message);
  }
  //#endregion

@@ -105,7 +105,7 @@ runtime은 setup 전 중복 ID·중복 제공자·누락 의존성·순환을 �
 
 [Agent Skills 플러그인](../packages/host-plugins/src/agent-skills/host.ts)은 사용자 제출 시작과 컨텍스트 초과 후 재시도에서 현재 목록을 갱신한다. Flue의 `useInstruction`이 [문맥 예산](../packages/host-plugins/src/agent-skills/prompt.ts)에 맞춘 목록을 다음 요청에 넣고 불완전한 탐색을 알린다. 메뉴 선택과 직접 입력은 같은 `/이름` 텍스트를 보내며 Host는 호출 시 현재 출처와 호출 정책을 확인한다. 완전한 목록은 알려지지 않은 이름의 조회를 생략하는 데 사용한다. 실제 호출 후보는 정확한 이름으로 다시 조회하며 목록 상한과 독립적이다.
 
-모델 호출은 본문을 일반 도구 결과로 받고, 사용자 호출은 출처가 붙은 컨텍스트로 받는다. 사용자 호출의 본문은 해당 응답에서 사용하고, 이후 요청에는 같은 응답에서 본문 뒤에 정상 모델 단계가 기록된 경우에 포함한다. 정상 모델 단계가 사용한 본문은 일반 대화 이력과 함께 압축된다. 현재 응답에서 아직 사용되지 않은 본문은 압축 요약의 범위 밖에 두고, 그 응답의 재시도에서 사용할 수 있게 한다. 압축 후에는 현재 목록으로 스킬을 다시 호출할 수 있다. Trajectory는 실제 요청과 도구 결과를 기록한다. [DSH 스킬 동작](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/docs/subsystems/skills.md#L198-L204) · [Host 운영](hosting.md#agent-skills)
+모델 호출은 본문을 일반 도구 결과로 받고, 사용자 호출은 출처가 붙은 컨텍스트로 받는다. 사용자 호출의 본문은 해당 응답에서 사용하고, 이후 요청에는 같은 응답에서 본문 뒤에 정상 모델 단계가 기록된 경우에 포함한다. 정상 모델 단계가 사용한 본문은 일반 대화 이력과 함께 압축된다. 압축 경계는 Flue 기본 규칙으로 정한다. 아직 사용되지 않은 본문은 요약 입력에서 제외하고, 보존된 이력에 있으면 같은 응답의 재시도에서 사용한다. 압축 후에는 현재 목록으로 스킬을 다시 호출할 수 있다. Trajectory는 실제 요청과 도구 결과를 기록한다. [DSH 스킬 동작](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/docs/subsystems/skills.md#L198-L204) · [Host 운영](hosting.md#agent-skills)
 
 모든 세션은 같은 Flue 라우터를 사용한다. 웹의 새 대화 목록은 카탈로그의 최신 프리셋을 표시한다. 새 세션의 기본 권한은 Read only다. [세션 카탈로그](../packages/host-plugins/src/workspace/catalog.ts)는 고정된 프리셋 버전과 선택한 실행 권한을 세션별로 SQLite에 저장한다. 웹에서 Full access를 선택할 때는 명시적 확인이 필요하다. 저장된 권한은 브라우저를 닫거나 같은 데이터 디렉터리로 Host를 재시작해도 유지되며, 낮은 권한으로 변경하면 그 값이 저장된다. Host는 프리셋과 실행 모드의 교집합을 모델에 노출하고, 변경·셸 호출 직전에도 권한을 확인한다.
 

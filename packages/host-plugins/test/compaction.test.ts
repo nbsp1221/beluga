@@ -49,6 +49,7 @@ function compactionProvider(
   onSummary?: (signal?: AbortSignal) => Promise<void>,
   alternateWindow = 128_000,
   beforeReply?: () => Promise<void>,
+  maxInputCharacters?: number,
 ): Provider {
   const provider = fixtureProvider([]);
   const [model] = provider.getModels();
@@ -88,9 +89,11 @@ function compactionProvider(
 
     const send = () => {
       if (
-        !summary &&
-        userInput.includes('Trigger overflow') &&
-        !JSON.stringify(context.messages).includes(checkpoint)
+        (maxInputCharacters !== undefined &&
+          JSON.stringify(context.messages).length > maxInputCharacters) ||
+        (!summary &&
+          userInput.includes('Trigger overflow') &&
+          !JSON.stringify(context.messages).includes(checkpoint))
       ) {
         stream.push({
           type: 'error',
@@ -427,7 +430,7 @@ test.for([
   { history: 'short', turns: 1, skillWords: 7_500 },
   { history: 'long', turns: 4, skillWords: 3_500 },
 ])(
-  'keeps pending manual skill bodies in the retry with $history history',
+  'keeps pending manual skills only in the retained history with $history history',
   async (entry, context) => {
     const marker = 'MANUAL_SKILL_WAITING_FOR_RESPONSE';
     const summaries: string[] = [];
@@ -474,12 +477,83 @@ test.for([
     await submit('/review /long Trigger overflow');
     expect(overflowRequests).toHaveLength(2);
     expect(overflowRequests[0]).toContain(marker);
-    expect(overflowRequests[1]).toContain(marker);
+    expect(overflowRequests[1]).toContain('Long skill body');
+    expect(overflowRequests[1]).not.toContain(marker);
     expect(summaries).not.toHaveLength(0);
     expect(summaries.join('\n')).toContain('Earlier history');
     expect(summaries.join('\n')).not.toMatch(/MANUAL_SKILL_WAITING_FOR_RESPONSE|Long skill body/);
   },
 );
+
+test('compacts intervening joined messages after a pending skill', async (context) => {
+  const inputLimit = 128_000;
+  const pendingReview = 'PENDING_REVIEW_SKILL_BODY';
+  const responding = deferred();
+  const releaseReply = deferred();
+  const requests: { summary: boolean; input: string }[] = [];
+  const harness = await setupHarness(context, [], undefined, () => {
+    const provider = compactionProvider(
+      undefined,
+      undefined,
+      async () => {
+        responding.resolve();
+        await releaseReply.promise;
+      },
+      inputLimit,
+    );
+    return {
+      ...provider,
+      streamSimple(model, input, options) {
+        const serialized = JSON.stringify(input.messages);
+        requests.push({ summary: serialized.includes('<conversation>'), input: serialized });
+        return provider.streamSimple(model, input, options);
+      },
+    };
+  });
+  const skill = join(dirname(harness.databasePath), 'skills', 'review');
+  await mkdir(skill, { recursive: true });
+  await writeFile(
+    join(skill, 'SKILL.md'),
+    `---\nname: review\ndescription: Review a change\ndisable-model-invocation: true\n---\n\n${pendingReview}\n`,
+  );
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset([agentSkillsCapabilityId]);
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+
+  const send = (body: string) =>
+    client.send({ message: { kind: 'user', body }, signal: context.signal });
+
+  const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
+    client.wait(receipt, { signal: context.signal });
+
+  const receipt = await send('Hold model response');
+  const continued = wait(receipt);
+  try {
+    await Promise.race([responding.promise, continued]);
+    const deliveries = [
+      await send('/review'),
+      await send('First joined message '.padEnd(68_000, 'a')),
+      await send('Latest joined message '.padEnd(68_000, 'z')),
+    ];
+    releaseReply.resolve();
+    await Promise.all([continued, ...deliveries.map(wait)]);
+  } finally {
+    releaseReply.resolve();
+  }
+
+  const overflow = requests.find(({ summary, input }) => !summary && input.length > inputLimit);
+  const summary = requests.find((request) => request.summary);
+  const retry = requests.find(({ summary, input }) => !summary && input.includes(checkpoint));
+  expect(overflow?.input).toContain(pendingReview);
+  expect(overflow?.input).toContain('First joined message');
+  expect(overflow?.input).toContain('Latest joined message');
+  expect(summary?.input).toContain('First joined message');
+  expect(summary?.input).not.toContain(pendingReview);
+  expect(retry?.input).toContain('Latest joined message');
+  expect(retry?.input).not.toContain(pendingReview);
+  expect(retry?.input.length).toBeLessThanOrEqual(inputLimit);
+});
 
 test('restores workspace instructions in the model request that retries an overflow', async (context) => {
   const rule = 'FIXTURE_RULE_SURVIVES_OVERFLOW';
