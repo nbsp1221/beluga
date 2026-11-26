@@ -395,61 +395,81 @@ test('an activation cancelled before the model request cannot displace an applie
   expect(JSON.stringify(input.messages)).not.toContain('RULE_cancelled');
 });
 
-test('restores the most recently reused skill when older bodies exceed the budget', async (context) => {
-  let providerInput = '';
-  const harness = await setupHarness(context, [], undefined, () => {
-    const provider = compactionProvider();
-    return {
-      ...provider,
-      streamSimple(model, input, options) {
-        providerInput = JSON.stringify(input.messages);
-        return provider.streamSimple(model, input, options);
-      },
-    };
-  });
-  for (const name of ['first', 'second', 'third']) {
-    const directory = join(dirname(harness.databasePath), 'skills', name);
-    await mkdir(directory, { recursive: true });
-    await writeFile(
-      join(directory, 'SKILL.md'),
-      `---\nname: ${name}\ndescription: Keep a decision\n---\n\nRULE_${name} ${'a'.repeat(12_000)}\n`,
-    );
-  }
-  const workspace = await harness.prepareWorkspace();
-  const { id } = await harness.create(
-    workspace.id,
-    (await harness.createPreset([agentSkillsCapabilityId])).id,
-  );
-  const client = harness.sdk(id);
-
-  const submit = async (body: string) =>
-    client.wait(await client.send({ message: { kind: 'user', body } }), {
-      signal: AbortSignal.timeout(5_000),
+test.for(['user before eviction', 'user after eviction', 'model after eviction'] as const)(
+  'restores the most recently reused skill (%s)',
+  async (scenario, context) => {
+    let providerInput = '';
+    const toolPrompt = JSON.stringify({ tool: 'skill', name: 'first' });
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider();
+      const toolProvider = fixtureProvider([]);
+      return {
+        ...provider,
+        streamSimple(model, input, options) {
+          providerInput = JSON.stringify(input.messages);
+          const user = input.messages.findLast(({ role }) => role === 'user');
+          return user && JSON.stringify(user.content).includes(JSON.stringify(toolPrompt))
+            ? toolProvider.streamSimple(model, input, options)
+            : provider.streamSimple(model, input, options);
+        },
+      };
     });
+    for (const name of ['first', 'second', 'third']) {
+      const directory = join(dirname(harness.databasePath), 'skills', name);
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, 'SKILL.md'),
+        `---\nname: ${name}\ndescription: Keep a decision\n---\n\nRULE_${name} ${'a'.repeat(12_000)}\n`,
+      );
+    }
+    const workspace = await harness.prepareWorkspace();
+    const { id } = await harness.create(
+      workspace.id,
+      (await harness.createPreset([agentSkillsCapabilityId])).id,
+    );
+    const client = harness.sdk(id);
 
-  for (const name of ['first', 'second', 'first', 'third']) {
-    await submit(`/${name} keep this workflow`);
-  }
-  for (let index = 0; index < 4; index++) {
-    await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
-  }
-  await submit('Trigger overflow');
-  const path = `${origin}/api/conversations/${id}/trajectory`;
-  const turn = (await readTrajectory(harness.fetch(path))).at(-1);
-  const model = turn?.records.findLast(
-    (record) => record.kind === 'assistant' && record.purpose === 'agent',
-  );
-  assert(turn && model);
-  const input = trajectoryModelInputResponseSchema.parse(
-    await (await harness.fetch(`${path}/${turn.id}/${model.id}`)).json(),
-  );
-  for (const prompt of [providerInput, JSON.stringify(input.messages)]) {
-    expect(prompt).toContain(checkpoint);
-    expect(prompt.match(/RULE_first/g)).toHaveLength(1);
-    expect(prompt.match(/RULE_third/g)).toHaveLength(1);
-    expect(prompt).not.toContain('RULE_second');
-  }
-});
+    const submit = async (body: string) =>
+      client.wait(await client.send({ message: { kind: 'user', body } }), {
+        signal: AbortSignal.timeout(5_000),
+      });
+
+    const reuseBeforeEviction = scenario === 'user before eviction';
+    const toolReuse = scenario === 'model after eviction';
+    const order = reuseBeforeEviction
+      ? ['first', 'second', 'first', 'third']
+      : ['first', 'second', 'third'];
+    for (const name of order) {
+      await submit(`/${name} keep this workflow`);
+    }
+    if (!reuseBeforeEviction) {
+      await submit(toolReuse ? toolPrompt : '/first reuse this workflow');
+    }
+    expect(providerInput.match(/RULE_first/g)).toHaveLength(1);
+    if (toolReuse) {
+      assert(providerInput.includes('Loaded skill: first.'));
+    }
+    for (let index = 0; index < 4; index++) {
+      await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
+    }
+    await submit('Trigger overflow');
+    const path = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(path))).at(-1);
+    const model = turn?.records.findLast(
+      (record) => record.kind === 'assistant' && record.purpose === 'agent',
+    );
+    assert(turn && model);
+    const input = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${path}/${turn.id}/${model.id}`)).json(),
+    );
+    for (const prompt of [providerInput, JSON.stringify(input.messages)]) {
+      expect(prompt).toContain(checkpoint);
+      expect(prompt.match(/RULE_first/g)).toHaveLength(1);
+      expect(prompt.match(/RULE_third/g)).toHaveLength(1);
+      expect(prompt).not.toContain('RULE_second');
+    }
+  },
+);
 
 test('does not restore older instructions after a larger version of the same skill was used', async (context) => {
   const harness = await setupHarness(context, [], undefined, () => compactionProvider());

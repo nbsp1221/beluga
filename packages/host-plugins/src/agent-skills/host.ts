@@ -44,6 +44,7 @@ interface SkillState {
   catalog: ReturnType<typeof skillCatalog>;
   active: readonly Activation[];
   lastObservedId?: string;
+  pendingReuses?: readonly Pick<Activation, 'id' | 'actor'>[];
 }
 
 function activationSignal(activation: Activation, restored = false): AgentAppendMessage {
@@ -265,6 +266,7 @@ export function agentSkillsCapability(
                   ...state,
                   catalog: skillCatalog(sources, contextWindow),
                   active: eligible,
+                  pendingReuses: previous ? [{ id: previous.id, actor: previous.actor }] : [],
                 });
                 restore(start, eligible);
                 if (next && !previous) {
@@ -274,28 +276,26 @@ export function agentSkillsCapability(
               {
                 restoreContext: (start) => restore(start, state.active),
                 onModelInput(contextSignals) {
-                  const activations = contextSignals(skillInvocationSignal)
+                  const visible = contextSignals(skillInvocationSignal);
+                  const activations = visible
                     .filter(({ attributes }) => !attributes?.restored)
                     .flatMap((signal) => {
                       const activation = readActivation(signal);
                       return activation ? [activation] : [];
                     });
-                  if (!activations.length) {
-                    return;
-                  }
                   setState((current) => {
+                    if (!activations.length && !current.pendingReuses?.length) {
+                      return current;
+                    }
                     const lastIndex = activations.findLastIndex(
                       ({ id }) => id === current.lastObservedId,
                     );
                     const next = activations.slice(lastIndex + 1);
-                    const selected =
-                      delivery.kind === 'user' ? explicitSkillName(delivery.body) : undefined;
-                    const reused =
-                      selected && activations.findLast(({ name }) => name === selected);
-                    if (reused && !next.some(({ id }) => reused.id === id)) {
-                      const previous = current.active.find(({ id }) => reused.id === id);
-                      if (previous) {
-                        next.push(previous);
+                    for (const reuse of current.pendingReuses ?? []) {
+                      const signal = visible.find(({ attributes }) => attributes?.id === reuse.id);
+                      const activation = signal && readActivation(signal);
+                      if (activation) {
+                        next.push({ ...activation, actor: reuse.actor });
                       }
                     }
                     let active = current.active;
@@ -306,7 +306,8 @@ export function agentSkillsCapability(
                     return {
                       ...current,
                       active,
-                      lastObservedId: activations.at(-1)?.id,
+                      lastObservedId: activations.at(-1)?.id ?? current.lastObservedId,
+                      pendingReuses: [],
                     };
                   });
                 },
@@ -344,15 +345,13 @@ export function agentSkillsCapability(
                           await dispatch(activationSignal(next));
                           signal?.throwIfAborted();
                         } else {
-                          setState((current) => {
-                            const applied = current.active.find(({ id }) => id === previous.id);
-                            return applied
-                              ? {
-                                  ...current,
-                                  active: remember(current.active, applied, restoreLimit),
-                                }
-                              : current;
-                          });
+                          setState((current) => ({
+                            ...current,
+                            pendingReuses: [
+                              ...(current.pendingReuses ?? []),
+                              { id: previous.id, actor: previous.actor },
+                            ],
+                          }));
                         }
                         return `Loaded skill: ${next.name}.`;
                       })();
