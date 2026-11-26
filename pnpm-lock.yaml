@@ -53,7 +53,7 @@ overrides:
   '@vitest/eslint-plugin>@typescript-eslint/eslint-plugin': 8.71.0
 
 patchedDependencies:
-  '@flue/runtime@2.3.1': 73d52bb23a6bc9fd4131f83f4d90642e8d3f2aec986f74afc7854af644b39384
+  '@flue/runtime@2.3.1': 0090b9f4d81287d34edd7d8784d3784dd5d7c31cf4bd742c1e1550a76a349bdd
 
 importers:
 
@@ -386,7 +386,7 @@ importers:
         version: 1.6.0(@aws-sdk/credential-provider-node@3.972.93)(@smithy/signature-v4@5.7.5)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(ws@8.22.1)(zod@4.6.7)
       '@flue/runtime':
         specifier: 2.3.1
-        version: 2.3.1(patch_hash=73d52bb23a6bc9fd4131f83f4d90642e8d3f2aec986f74afc7854af644b39384)(@aws-sdk/credential-provider-node@3.972.93)(@smithy/signature-v4@5.7.5)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)(undici@8.12.4)(ws@8.22.1)(zod@4.6.7)
+        version: 2.3.1(patch_hash=0090b9f4d81287d34edd7d8784d3784dd5d7c31cf4bd742c1e1550a76a349bdd)(@aws-sdk/credential-provider-node@3.972.93)(@smithy/signature-v4@5.7.5)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)(undici@8.12.4)(ws@8.22.1)(zod@4.6.7)
       '@workspace/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -7632,7 +7632,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@flue/runtime@2.3.1(patch_hash=73d52bb23a6bc9fd4131f83f4d90642e8d3f2aec986f74afc7854af644b39384)(@aws-sdk/credential-provider-node@3.972.93)(@smithy/signature-v4@5.7.5)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)(undici@8.12.4)(ws@8.22.1)(zod@4.6.7)':
+  '@flue/runtime@2.3.1(patch_hash=0090b9f4d81287d34edd7d8784d3784dd5d7c31cf4bd742c1e1550a76a349bdd)(@aws-sdk/credential-provider-node@3.972.93)(@smithy/signature-v4@5.7.5)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)(undici@8.12.4)(ws@8.22.1)(zod@4.6.7)':
     dependencies:
       '@earendil-works/pi-agent-core': 1.6.0(@aws-sdk/credential-provider-node@3.972.93)(@smithy/signature-v4@5.7.5)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(undici@8.12.4)(ws@8.22.1)(zod@4.6.7)
       '@earendil-works/pi-ai': 1.6.0(@aws-sdk/credential-provider-node@3.972.93)(@smithy/signature-v4@5.7.5)(google-auth-library@10.9.1(supports-color@10.2.2))(supports-color@10.2.2)(undici@8.12.4)(ws@8.22.1)(zod@4.6.7)

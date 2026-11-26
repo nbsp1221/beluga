@@ -72,9 +72,12 @@ export function agentSkillsCapability(
             });
 
             async function refreshCatalog(signal: AbortSignal) {
-              const { sources, incomplete } = await discoverSkills(cwd, signal);
+              const discovery = await discoverSkills(cwd, signal);
               signal.throwIfAborted();
-              setState({ catalog: skillCatalog(sources, contextWindow, incomplete) });
+              setState({
+                catalog: skillCatalog(discovery.sources, contextWindow, discovery.incomplete),
+              });
+              return discovery;
             }
 
             async function instructions(
@@ -97,9 +100,14 @@ export function agentSkillsCapability(
                 if (delivery.kind !== 'user') {
                   return;
                 }
-                await refreshCatalog(signal);
+                const { sources, incomplete } = await refreshCatalog(signal);
+                const byName = new Map(sources.map((source) => [source.name, source]));
                 for (const name of explicitSkillNames(delivery.body)) {
-                  const source = (await discoverSkills(cwd, signal, name)).sources.at(0);
+                  const source =
+                    byName.get(name) ??
+                    (incomplete
+                      ? (await discoverSkills(cwd, signal, name)).sources.at(0)
+                      : undefined);
                   if (!source?.userInvocable) {
                     continue;
                   }
@@ -110,11 +118,20 @@ export function agentSkillsCapability(
                     type: skillInvocationSignal,
                     tagName: 'system-reminder',
                     body,
-                    attributes: { id: randomUUID(), name: source.name, scope: source.scope },
+                    attributes: {
+                      id: randomUUID(),
+                      name: source.name,
+                      scope: source.scope,
+                      contextLifetime: 'response',
+                    },
                   });
                 }
               },
-              { restoreContext: ({ signal }) => refreshCatalog(signal) },
+              {
+                async restoreContext({ signal }) {
+                  await refreshCatalog(signal);
+                },
+              },
             );
 
             const catalogs = catalog.text ? [catalog.text] : [];

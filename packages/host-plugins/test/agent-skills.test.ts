@@ -1,5 +1,7 @@
 import { mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { instrument } from '@flue/runtime';
 import {
   AGENT_SKILLS_PATH,
   agentSkillsCapabilityId,
@@ -9,6 +11,7 @@ import {
 } from '@workspace/protocol/host';
 import { expect, test, vi } from 'vitest';
 import { linkDirectory, origin, readTrajectory, setupHarness } from './fixtures/harness.js';
+import { fixtureProvider } from './fixtures/model-provider.js';
 
 async function writeSkill(root: string, name: string, marker: string, flags = '') {
   const folder = join(root, name);
@@ -316,6 +319,30 @@ test('loads distinct inline slash mentions once and ignores paths and fractions'
   expect(request.skillInstructions).not.toMatch(/PATH_BODY|FRACTION_BODY/);
 });
 
+test('reuses a complete discovery for the slash words in a submission', async (context) => {
+  const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  context.onTestFinished(() => warnings.mockRestore());
+  const harness = await setupHarness(context);
+  const root = join(harness.project, '.agents', 'skills');
+  await mkdir(dirname(root), { recursive: true });
+  await linkDirectory(harness.other, root);
+  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', 'REVIEW_BODY');
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset([agentSkillsCapabilityId]);
+  const { id } = await harness.create(workspace.id, preset.id);
+  const response = await harness.fetch(`${origin}${AGENT_SKILLS_PATH}?sessionId=${id}`);
+  expect(skillListingSchema.parse(await response.json())).toMatchObject({ incomplete: false });
+  warnings.mockClear();
+
+  const words = Array.from({ length: 50 }, (_, index) => `/unknown-${index}`).join(' ');
+  const [request] = await submit(harness, id, `Use /review for ${words}`);
+  expect(request.skillInstructions).toContain('REVIEW_BODY');
+  const rootChecks = warnings.mock.calls.filter(([message]) =>
+    String(message).includes('outside the project boundary'),
+  );
+  expect(rootChecks).toHaveLength(1);
+});
+
 test('reports mismatched metadata and keeps discovery inside the approved roots', async (context) => {
   const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   context.onTestFinished(() => warnings.mockRestore());
@@ -382,6 +409,96 @@ test('does not apply an interrupted skill invocation on the next request', async
     false,
   );
 });
+
+test.for([
+  { boundary: 'before the provider call', startProvider: false, restart: false },
+  { boundary: 'after the provider call', startProvider: true, restart: false },
+  { boundary: 'before the provider call with Host restart', startProvider: false, restart: true },
+] as const)(
+  'excludes a manual skill cancelled $boundary',
+  async ({ startProvider, restart }, context) => {
+    const reached = deferred();
+    const release = deferred();
+    let providerSignal: AbortSignal | undefined;
+    const harness = await setupHarness(context, [], undefined, (observed) => {
+      const provider = fixtureProvider(observed);
+      let first = startProvider;
+      return {
+        ...provider,
+        streamSimple(...args) {
+          const response = provider.streamSimple(...args);
+          if (!first) {
+            return response;
+          }
+          first = false;
+          providerSignal = args[2]?.signal;
+          const pending = createAssistantMessageEventStream();
+          reached.resolve();
+          void release.promise.then(async () => {
+            const error = await response.result();
+            pending.push({
+              type: 'error',
+              reason: 'aborted',
+              error: { ...error, content: [], stopReason: 'aborted' },
+            });
+          });
+          return pending;
+        },
+      };
+    });
+    const skills = join(dirname(harness.databasePath), 'skills');
+    await writeSkill(skills, 'review', 'ABANDONED_REVIEW_BODY', 'disable-model-invocation: true\n');
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset([agentSkillsCapabilityId]);
+    const { id } = await harness.create(workspace.id, preset.id);
+    const client = harness.sdk(id);
+    const dispose = startProvider
+      ? undefined
+      : instrument({
+          observe() {},
+          dispose() {},
+          async interceptor(operation, _context, next) {
+            if (operation.type !== 'model') {
+              return next();
+            }
+            reached.resolve();
+            await release.promise;
+            throw new DOMException('Cancelled fixture request', 'AbortError');
+          },
+        });
+
+    try {
+      const receipt = await client.send({ message: { kind: 'user', body: '/review review this' } });
+      const settled = client.wait(receipt, { signal: context.signal }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await Promise.race([reached.promise, settled]);
+      expect(harness.observed).toHaveLength(startProvider ? 1 : 0);
+      try {
+        expect((await client.abort()).aborted).toBe(true);
+      } finally {
+        release.resolve();
+      }
+      expect({ failure: await settled, providerAborted: providerSignal?.aborted }).toMatchObject(
+        startProvider ? { providerAborted: true } : { failure: { failure: 'aborted' } },
+      );
+    } finally {
+      release.resolve();
+      await dispose?.();
+    }
+
+    if (restart) {
+      await harness.restart();
+    }
+    const [followUp] = await submit(harness, id, 'Continue with a different task');
+    expect(followUp.skillInstructions).toBe('');
+    await writeSkill(skills, 'review', 'CURRENT_REVIEW_BODY', 'disable-model-invocation: true\n');
+    const [retry] = await submit(harness, id, '/review retry the review');
+    expect(retry.skillInstructions.match(/CURRENT_REVIEW_BODY/g)).toHaveLength(1);
+    expect(retry.skillInstructions).not.toContain('ABANDONED_REVIEW_BODY');
+  },
+);
 
 test('sends a long skill body in full and records it in Trajectory', async (context) => {
   const harness = await setupHarness(context);

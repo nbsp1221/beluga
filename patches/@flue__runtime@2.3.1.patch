@@ -1,5 +1,5 @@
 diff --git a/dist/agent-execution-store-HWARCScI.d.mts b/dist/agent-execution-store-HWARCScI.d.mts
-index c9814eee223d3e933e0f2affa778160245f86184..1b5c4f5120f6cf758a56beb390b18446e5011708 100644
+index c9814eee223d3e933e0f2affa778160245f86184..4bf2f48fb5f723b57e02e0e3eff778155fbc0b5b 100644
 --- a/dist/agent-execution-store-HWARCScI.d.mts
 +++ b/dist/agent-execution-store-HWARCScI.d.mts
 @@ -644,6 +644,7 @@ interface AgentAppendMessage extends AgentSignalAppend {
@@ -19,7 +19,7 @@ index c9814eee223d3e933e0f2affa778160245f86184..1b5c4f5120f6cf758a56beb390b18446
  /** One `useAgentFinish` declaration; identity is the declaration index. */
  interface AgentFinishDeclaration {
 diff --git a/dist/conversation-stream-store-BJbg7IHa.mjs b/dist/conversation-stream-store-BJbg7IHa.mjs
-index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705f02ff7e4 100644
+index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..dc766e1ca31121f661d1aa80a5cf19d54b67dfc3 100644
 --- a/dist/conversation-stream-store-BJbg7IHa.mjs
 +++ b/dist/conversation-stream-store-BJbg7IHa.mjs
 @@ -964,6 +964,7 @@ function toTurnMessage(message) {
@@ -116,6 +116,33 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705
  			throw new Error(`[flue] A useAgentStart callback (hook #${index} in declaration order) threw: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
  		} finally {
  			appendWindowOpen = false;
+@@ -1861,7 +1879,7 @@ var Session = class {
+ 	async steerJoinedEntry(entryId) {
+ 		const conversation = await this.requireConversation();
+ 		const resolved = await this.resolveCanonicalContextAttachments(conversation);
+-		const entry = buildConversationContextEntries(conversation, { resolveAttachment: (attachment) => {
++		const entry = buildConversationContextEntries(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
+ 			const image = resolved.get(attachment.id);
+ 			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+ 			return image;
+@@ -3898,7 +3916,7 @@ var Session = class {
+ 	}
+ 	visibleCanonicalAttachments(conversation) {
+ 		const available = /* @__PURE__ */ new Map();
+-		for (const contextEntry of buildConversationContextEntries(conversation, { resolveAttachment: (attachment) => ({
++		for (const contextEntry of buildConversationContextEntries(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => ({
+ 			data: attachment.id,
+ 			mimeType: attachment.mimeType
+ 		}) })) {
+@@ -4042,7 +4060,7 @@ var Session = class {
+ 	async rebuildCanonicalContext() {
+ 		const conversation = await this.requireConversation();
+ 		const resolved = await this.resolveCanonicalContextAttachments(conversation);
+-		const messages = buildConversationContext(conversation, { resolveAttachment: (attachment) => {
++		const messages = buildConversationContext(conversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
+ 			const image = resolved.get(attachment.id);
+ 			if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+ 			return image;
 @@ -4133,6 +4151,7 @@ var Session = class {
  			}
  			if (overflow || retryable) throwIfHalted();
@@ -124,6 +151,15 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705
  				await start();
  				await this.agentLoop.waitForIdle();
  			} catch (error) {
+@@ -4201,7 +4220,7 @@ var Session = class {
+ 			const summarizationModel = compactionConfig?.model ? this.resolveModelForCall(compactionConfig.model) : sessionModel;
+ 			const canonicalConversation = await this.requireConversation();
+ 			const resolvedAttachments = await this.resolveCanonicalContextAttachments(canonicalConversation);
+-			const contextEntries = buildConversationContextEntries(canonicalConversation, { resolveAttachment: (attachment) => {
++			const contextEntries = buildConversationContextEntries(canonicalConversation, { activeSubmissionId: this.activeSubmissionId, resolveAttachment: (attachment) => {
+ 				const image = resolvedAttachments.get(attachment.id);
+ 				if (!image) throw new AttachmentNotAvailableError({ attachmentId: attachment.id });
+ 				return image;
 @@ -5118,6 +5137,7 @@ async function settleUnclaimableSubmission(submissions, submission, outcome, err
  	emitCoordinatorEvent({
  		type: "submission_settled",
@@ -149,7 +185,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..4fdc57f4c58e4f42b6a4b2ca1885f705
  		...pending.record.outcome === "completed" || pending.record.error === void 0 ? {} : { error: pending.record.error }
  	});
 diff --git a/dist/dispatch-DTmMreLV.mjs b/dist/dispatch-DTmMreLV.mjs
-index 4af08391f41d94893ede44aede6614283528b44a..b27bc97da1d6947d26425a6be4e51469474af487 100644
+index 4af08391f41d94893ede44aede6614283528b44a..037ce2bac6d1887a4da26b2ff218a2ff5cfd71fd 100644
 --- a/dist/dispatch-DTmMreLV.mjs
 +++ b/dist/dispatch-DTmMreLV.mjs
 @@ -354,9 +354,10 @@ function isPlainObject(value) {
@@ -164,7 +200,47 @@ index 4af08391f41d94893ede44aede6614283528b44a..b27bc97da1d6947d26425a6be4e51469
  		content: [{
  			type: "text",
  			text
-@@ -945,7 +946,7 @@ function pathToContextEntries(path, options) {
+@@ -380,7 +381,8 @@ function toolResultText(content) {
+ }
+ function renderSignalMessage(message) {
+ 	const tagName = message.tagName ?? "signal";
+-	return `<${tagName}${[["type", message.type], ...Object.entries(message.attributes ?? {})].map(([name, value]) => ` ${escapeXmlAttribute(name ?? "")}="${escapeXmlAttribute(value ?? "")}"`).join("")}>\n${escapeXmlText(message.content)}\n</${tagName}>`;
++	const { contextLifetime: _, contextSubmissionId: __, ...attributes } = message.attributes ?? {};
++	return `<${tagName}${[["type", message.type], ...Object.entries(attributes)].map(([name, value]) => ` ${escapeXmlAttribute(name ?? "")}="${escapeXmlAttribute(value ?? "")}"`).join("")}>\n${escapeXmlText(message.content)}\n</${tagName}>`;
+ }
+ function escapeXmlText(value) {
+ 	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+@@ -910,6 +912,21 @@ function getActiveConversationPath(conversation) {
+ }
+ function buildConversationContextEntries(conversation, options = {}) {
+ 	const path = getActiveConversationPath(conversation);
++	const completed = new Set();
++	const skipped = new Set();
++	// Only an assistant step after this signal can carry it into later responses.
++	for (let index = path.length - 1; index >= 0; index--) {
++		const entry = path[index];
++		if (entry.type !== "message" || !entry.submissionId) continue;
++		const message = entry.message;
++		if (message.role === "assistant" && message.stopReason !== "aborted" && message.stopReason !== "error") {
++			completed.add(entry.submissionId);
++		} else if (message.role === "signal" && message.attributes?.contextLifetime === "response") {
++			const origin = message.attributes.contextSubmissionId ?? entry.submissionId;
++			if (origin !== options.activeSubmissionId && !completed.has(origin)) skipped.add(entry.id);
++		}
++	}
++	options = { ...options, skipped };
+ 	const latestCompactionIndex = path.findLastIndex((entry) => entry.type === "compaction");
+ 	if (latestCompactionIndex === -1) return pathToContextEntries(path, options);
+ 	const compaction = path[latestCompactionIndex];
+@@ -938,14 +955,14 @@ function pathToContextEntries(path, options) {
+ 	let index = 0;
+ 	while (index < path.length) {
+ 		const entry = path[index];
+-		if (entry?.type !== "message") {
++		if (entry?.type !== "message" || options.skipped?.has(entry.id)) {
+ 			index += 1;
+ 			continue;
+ 		}
  		const message = resolveMessageAttachments(entry, options);
  		if (message.role === "signal") {
  			messages.push({
