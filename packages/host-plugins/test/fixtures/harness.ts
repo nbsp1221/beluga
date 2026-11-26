@@ -33,18 +33,29 @@ export const origin = 'https://beluga.example';
 const accessCode = 'fixture-only-access-code';
 
 export async function setupHarness(
-  { onTestFinished }: TestContext,
+  { onTestFailed, onTestFinished, signal }: TestContext,
   initial = [fileReadCapability],
   beforeToolCall?: Parameters<typeof fixtureProvider>[1],
   makeProvider = fixtureProvider,
 ) {
+  const timings: string[] = [];
+  const setupStarted = performance.now();
+
+  const elapsed = (start: number) => Math.round(performance.now() - start);
+
+  onTestFailed(() => {
+    console.error('Host fixture timings (ms):', timings.join(', '));
+  });
+
   const temp = await mkdtemp(join(tmpdir(), 'beluga-read-'));
   let runtime: Runtime | undefined;
   onTestFinished(async () => {
+    const teardownStarted = performance.now();
     try {
       await runtime?.dispose();
     } finally {
       await rm(temp, { recursive: true, force: true });
+      timings.push(`cleanup ${elapsed(teardownStarted)}`);
     }
   });
   const root = await realpath(temp);
@@ -187,12 +198,19 @@ export async function setupHarness(
   ) {
     const client = sdk(id);
     const before = observed.length;
-    const receipt = await client.send({
-      message: { kind: 'user', body: JSON.stringify({ path, ...lineRange }) },
-      initialData,
-      idempotencyKey: crypto.randomUUID(),
-    });
-    await client.wait(receipt, { signal: AbortSignal.timeout(5_000) });
+    const admissionStarted = performance.now();
+    const receipt = await client
+      .send({
+        message: { kind: 'user', body: JSON.stringify({ path, ...lineRange }) },
+        initialData,
+        idempotencyKey: crypto.randomUUID(),
+        signal,
+      })
+      .finally(() => timings.push(`admit ${elapsed(admissionStarted)}`));
+    const settlementStarted = performance.now();
+    await client
+      .wait(receipt, { signal })
+      .finally(() => timings.push(`settle ${elapsed(settlementStarted)}`));
     return observed.slice(before);
   }
 
@@ -202,8 +220,10 @@ export async function setupHarness(
   }
 
   async function restart(capabilities = initial) {
+    const restartStarted = performance.now();
     await runtime?.dispose();
     runtime = await boot(capabilities);
+    timings.push(`start Host ${elapsed(restartStarted)}`);
   }
 
   async function registerWorkspace(path: string) {
@@ -224,6 +244,7 @@ export async function setupHarness(
   }
 
   await restart();
+  timings.push(`setup total ${elapsed(setupStarted)}`);
   return {
     project,
     other,

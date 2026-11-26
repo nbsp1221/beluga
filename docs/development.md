@@ -190,7 +190,8 @@ that need both the Host and the web client.
   data and cleanup through the fixture or the runner's lifecycle.
 - Wait for a response, event, or observable state. Use local fixtures for
   dependencies such as model calls. Keep production credentials and fixed
-  delays out of the setup.
+  delays out of the setup. Use the test context's signal for normal Host
+  waits. Add a separate deadline when the case verifies timeout behavior.
 - When a case times out, check which operation was slow and see whether
   unrelated behaviors share that case. Raising a timeout does not address
   those causes. Use a longer deadline only for an operation with a known

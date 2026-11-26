@@ -126,22 +126,31 @@ test(
   },
 );
 
-test('applies the requested line ranges to file reads', async (context) => {
+test.for([
+  {
+    scenario: 'reads a positive offset and limit',
+    path: 'line-range.txt',
+    range: { offset: 3, limit: 1 },
+    included: 'third',
+    excluded: 'second',
+  },
+  {
+    scenario: 'reads a Pi path alias with a negative limit',
+    path: '@line-range.txt',
+    range: { limit: -1 },
+    included: 'first\nsecond',
+    excluded: 'third',
+  },
+])('$scenario', async ({ path, range, included, excluded }, context) => {
   const { project, prepareWorkspace, create, createPreset, turn } = await setupHarness(context);
+  await writeFile(join(project, 'line-range.txt'), 'first\nsecond\nthird');
   const workspace = await prepareWorkspace();
   const preset = await createPreset(['file.read']);
   const reading = await create(workspace.id, preset.id);
-  const next = readToolResult(
-    await turn(reading.id, 'README.md', undefined, { offset: 3, limit: 1 }),
-  );
-  expect(JSON.parse(resultText(next))).toContain('third line');
-
-  const aliases = join(project, 'pi-path.txt');
-  await writeFile(aliases, 'first\nsecond\nthird');
-  const piRange = readToolResult(await turn(reading.id, '@pi-path.txt', undefined, { limit: -1 }));
-  const piRangeText: unknown = JSON.parse(resultText(piRange));
-  expect(piRangeText).toContain('first\nsecond');
-  expect(piRangeText).not.toContain('third');
+  const result = readToolResult(await turn(reading.id, path, undefined, range));
+  const text: unknown = JSON.parse(resultText(result));
+  expect(text).toContain(included);
+  expect(text).not.toContain(excluded);
 });
 
 test('bounds read output and returns a continuation offset when possible', async (context) => {
