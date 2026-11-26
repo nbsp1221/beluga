@@ -8,7 +8,7 @@ import {
   type ToolCall,
   createAssistantMessageEventStream,
 } from '@earendil-works/pi-ai';
-import { instrument, useDispatchMessage } from '@flue/runtime';
+import { instrument, useAgentStart, useDelivery, useDispatchMessage } from '@flue/runtime';
 import {
   agentSkillsCapabilityId,
   conversationUsageSchema,
@@ -29,6 +29,7 @@ declare module '@workspace/runtime' {
 
 function signalCapability(
   capture: (dispatch: ReturnType<typeof useDispatchMessage>) => void,
+  clearShadow?: () => Promise<void>,
 ): AgentCapabilityPlugin {
   return {
     service: 'fixtureSignal',
@@ -44,6 +45,12 @@ function signalCapability(
           },
           useContext() {
             capture(useDispatchMessage());
+            const delivery = useDelivery();
+            useAgentStart(async () => {
+              if (delivery.kind === 'signal' && delivery.type === 'clear-skill-shadow') {
+                await clearShadow?.();
+              }
+            });
             return {};
           },
         });
@@ -546,24 +553,32 @@ test.for([
   'newer skill in the same batch',
   'removed skill and a joined message',
   'joined message in a response started by a signal',
+  'temporarily shadowed skill in the same tool batch',
 ] as const)(
   'restores skills in last-use order with a %s',
   { timeout: 30_000 },
   async (scenario, context) => {
     const removed = scenario === 'removed skill and a joined message';
     const fromSignal = scenario === 'joined message in a response started by a signal';
+    const temporaryShadow = scenario === 'temporarily shadowed skill in the same tool batch';
     const joined = scenario !== 'newer skill in the same batch';
+    const useBoth = !joined || temporaryShadow;
     const runTools = 'Use the requested skills';
     const followUp = 'One more thing for this response';
     const inputs: string[] = [];
     let dispatchSignal: ReturnType<typeof useDispatchMessage> | undefined;
-    const capabilities = fromSignal
-      ? [
-          signalCapability((dispatch) => {
-            dispatchSignal = dispatch;
-          }),
-        ]
-      : [];
+    let shadowPath: string;
+    const capabilities =
+      fromSignal || temporaryShadow
+        ? [
+            signalCapability(
+              (dispatch) => {
+                dispatchSignal = dispatch;
+              },
+              temporaryShadow ? () => rm(shadowPath) : undefined,
+            ),
+          ]
+        : [];
     const harness = await setupHarness(context, capabilities, undefined, () => {
       const provider = compactionProvider();
       let called = false;
@@ -575,7 +590,7 @@ test.for([
           return provider.streamSimple(model, input, options);
         }
         called = true;
-        const calls: ToolCall[] = (joined ? ['first'] : ['first', 'second']).map((name) => ({
+        const calls: ToolCall[] = (useBoth ? ['first', 'second'] : ['first']).map((name) => ({
           type: 'toolCall',
           id: `load-${name}`,
           name: 'skill',
@@ -587,7 +602,7 @@ test.for([
       return { ...provider, stream: (model, input) => streamSimple(model, input), streamSimple };
     });
     const skills = join(dirname(harness.databasePath), 'skills');
-    const keepThird = joined && !removed;
+    const keepThird = joined && !removed && !temporaryShadow;
     for (const name of keepThird ? ['first', 'second', 'third'] : ['first', 'second']) {
       const directory = join(skills, name);
       await mkdir(directory, { recursive: true });
@@ -597,12 +612,13 @@ test.for([
       );
     }
     const workspace = await harness.prepareWorkspace();
+    shadowPath = join(harness.project, '.agents', 'skills', 'second', 'SKILL.md');
     const { id } = await harness.create(
       workspace.id,
       (
         await harness.createPreset([
           agentSkillsCapabilityId,
-          ...(fromSignal ? ['fixture-signal'] : []),
+          ...(capabilities.length ? ['fixture-signal'] : []),
         ])
       ).id,
     );
@@ -616,7 +632,7 @@ test.for([
     const submit = async (body: string) => wait(await send(body));
 
     await submit('/first Keep this workflow');
-    if (joined) {
+    if (joined && !temporaryShadow) {
       await submit('/second Keep this workflow');
     }
 
@@ -631,7 +647,18 @@ test.for([
         }
         if (operation.toolCallId === 'load-second') {
           await firstLoaded.promise;
-          return next();
+          if (temporaryShadow) {
+            await releaseFirst.promise;
+          }
+          const result = await next();
+          if (temporaryShadow) {
+            await mkdir(dirname(shadowPath), { recursive: true });
+            await writeFile(
+              shadowPath,
+              '---\nname: second\ndescription: Temporary override\n---\n\nShadow',
+            );
+          }
+          return result;
         }
         const result = await next();
         if (operation.toolCallId === 'load-first') {
@@ -661,6 +688,14 @@ test.for([
             await rm(join(skills, 'first'), { recursive: true });
           }
           const followUpReceipt = await send(followUp);
+          if (temporaryShadow) {
+            assert(dispatchSignal);
+            await dispatchSignal({
+              kind: 'signal',
+              type: 'clear-skill-shadow',
+              body: 'Remove the temporary override',
+            });
+          }
           releaseFirst.resolve();
           await wait(followUpReceipt);
         }
@@ -675,7 +710,13 @@ test.for([
     const afterTools = inputs.at(-1);
     assert(afterTools);
     expect(afterTools).toContain('Loaded skill: first.');
-    expect(afterTools).toContain(joined ? followUp : 'Loaded skill: second.');
+    const expectedMessages = [
+      ...(joined ? [followUp] : []),
+      ...(useBoth ? ['Loaded skill: second.'] : []),
+    ];
+    for (const message of expectedMessages) {
+      expect(afterTools).toContain(message);
+    }
 
     if (keepThird) {
       await submit('/third Keep this workflow');
@@ -988,10 +1029,15 @@ test.for([
     scenario: 'restores the updated selection over a delayed signal',
     replacement: 'UPDATED_SKILL_RULE',
   },
+  {
+    scenario: 'keeps unrelated bodies that fit alongside the updated selection',
+    replacement: 'UPDATED_SKILL_RULE',
+    preload: true,
+  },
 ])(
   '$scenario after a joined submission fails',
   { timeout: 30_000 },
-  async ({ replacement }, context) => {
+  async ({ replacement, preload }, context) => {
     const marker = 'DELAYED_SKILL_RULE';
     const trigger = 'Load the review skill';
     const inputs: string[] = [];
@@ -1019,9 +1065,11 @@ test.for([
     const skillFile = (name: string, body: string) =>
       `---\nname: ${name}\ndescription: Review a change\n---\n\n${body}\n`;
 
+    const previousSkills = preload ? ['alpha', 'beta'] : [];
     for (const [name, body] of [
-      ['review', marker],
+      ['review', preload ? `${marker} ${'a'.repeat(18_000)}` : marker],
       ['too-large', 'a'.repeat(1024 * 1024)],
+      ...previousSkills.map((name) => [name, `KEEP_${name} ${'a'.repeat(12_000)}`]),
     ]) {
       const directory = join(root, name);
       await mkdir(directory, { recursive: true });
@@ -1036,6 +1084,10 @@ test.for([
 
     const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
       client.wait(receipt, { signal: AbortSignal.timeout(10_000) });
+
+    for (const name of previousSkills) {
+      await wait(await send(`/${name} Keep these instructions`));
+    }
 
     const toolStarted = deferred();
     const allowTool = deferred();
@@ -1117,6 +1169,9 @@ test.for([
       assert(prompt);
       expect(prompt).toContain(checkpoint);
       expect(prompt.match(/(?:DELAYED|UPDATED)_SKILL_RULE/g)).toEqual([replacement ?? marker]);
+      expect(prompt.match(/KEEP_\w+/g)?.sort() ?? []).toEqual(
+        previousSkills.map((name) => `KEEP_${name}`),
+      );
     }
   },
 );

@@ -43,6 +43,7 @@ interface Activation {
 type SkillUse = Pick<Activation, 'id' | 'name' | 'sourceId' | 'actor'> & {
   tool?: { assistantMessageId: string; toolCallId: string };
   deferred?: true;
+  eligible?: boolean;
 };
 
 interface PendingSkillUses {
@@ -57,7 +58,7 @@ interface SkillState {
 
 function activationSignal(
   activation: Activation,
-  options: { restored?: boolean; assistantMessageId?: string } = {},
+  options: { restored?: boolean; origin?: { assistantMessageId: string; responseId: string } } = {},
 ): AgentAppendMessage {
   const { id, name, scope, sourceId, actor, toolCallId, body } = activation;
   return {
@@ -73,7 +74,10 @@ function activationSignal(
       actor,
       contextLifetime: 'response',
       ...(toolCallId && { toolCallId }),
-      ...(options.assistantMessageId && { assistantMessageId: options.assistantMessageId }),
+      ...(options.origin && {
+        assistantMessageId: options.origin.assistantMessageId,
+        originResponseId: options.origin.responseId,
+      }),
       ...(options.restored && { restored: 'true' }),
     },
   };
@@ -124,13 +128,6 @@ function withinRestoreBudget(active: readonly Activation[], limit: number) {
     used += tokens;
     return true;
   });
-}
-
-function remember(active: readonly Activation[], activation: Activation, limit: number) {
-  return withinRestoreBudget(
-    [activation, ...active.filter(({ name }) => name !== activation.name)],
-    limit,
-  );
 }
 
 function readActivation({
@@ -260,8 +257,15 @@ export function agentSkillsCapability(
             useAgentStart(
               async (start) => {
                 if (delivery.kind === 'signal') {
-                  const { id, name, sourceId, actor, assistantMessageId, toolCallId } =
-                    delivery.attributes ?? {};
+                  const {
+                    id,
+                    name,
+                    sourceId,
+                    actor,
+                    assistantMessageId,
+                    toolCallId,
+                    originResponseId,
+                  } = delivery.attributes ?? {};
                   if (
                     delivery.type !== skillInvocationSignal ||
                     actor !== 'model' ||
@@ -270,9 +274,18 @@ export function agentSkillsCapability(
                     !sourceId ||
                     !assistantMessageId ||
                     !toolCallId ||
-                    (pending?.responseId === start.responseId &&
-                      pending.uses.some((use) => use.id === id))
+                    !originResponseId
                   ) {
+                    return;
+                  }
+                  const uses = pending?.responseId === start.responseId ? pending.uses : [];
+                  const position = uses.findIndex(
+                    (use) =>
+                      use.id === id &&
+                      use.tool?.assistantMessageId === assistantMessageId &&
+                      use.tool.toolCallId === toolCallId,
+                  );
+                  if (position >= 0 && uses[position]?.eligible !== false) {
                     return;
                   }
                   const use: SkillUse = {
@@ -281,12 +294,15 @@ export function agentSkillsCapability(
                     sourceId,
                     actor,
                     tool: { assistantMessageId, toolCallId },
-                    deferred: true,
+                    deferred: originResponseId !== start.responseId ? true : undefined,
                   };
                   const { sources } = await discoverSkills(cwd, start.signal, name);
                   start.signal.throwIfAborted();
                   if (canRestore(use, sources)) {
-                    setPending((current) => recordUse(current, start.responseId, use));
+                    setPending({
+                      responseId: start.responseId,
+                      uses: position < 0 ? [...uses, use] : uses.toSpliced(position, 1, use),
+                    });
                   }
                   return;
                 }
@@ -324,10 +340,12 @@ export function agentSkillsCapability(
                 const eligible = (use: SkillUse) => canRestore(use, candidates.get(use.name) ?? []);
 
                 const active = state.active.filter(eligible);
-                const pendingUses = uses.filter(eligible);
+                // Keep call order while a source is shadowed. Its queued signal can
+                // revalidate the source before this response reaches the model.
+                const pendingUses = uses.map((use) => ({ ...use, eligible: eligible(use) }));
                 const used = previous ?? next;
                 if (used) {
-                  pendingUses.push(skillUse(used));
+                  pendingUses.push({ ...skillUse(used), eligible: true });
                 }
                 if (pending || pendingUses.length) {
                   setPending(
@@ -360,26 +378,25 @@ export function agentSkillsCapability(
                     let active = current.active;
                     for (const use of uses) {
                       if (
-                        use.tool &&
-                        !response.toolCallSucceeded(
-                          use.tool.assistantMessageId,
-                          use.tool.toolCallId,
-                        )
+                        use.eligible === false ||
+                        (use.tool &&
+                          !response.toolCallSucceeded(
+                            use.tool.assistantMessageId,
+                            use.tool.toolCallId,
+                          ))
                       ) {
                         continue;
                       }
                       const signal = visible.find(({ attributes }) => attributes?.id === use.id);
                       const activation = signal && readActivation(signal);
                       if (activation) {
-                        // A newer version supersedes the old one even when it cannot be restored.
-                        active = remember(
-                          active,
+                        active = [
                           { ...activation, actor: use.actor },
-                          restoreLimit,
-                        );
+                          ...active.filter(({ name }) => name !== activation.name),
+                        ];
                       }
                     }
-                    return { ...current, active };
+                    return { ...current, active: withinRestoreBudget(active, restoreLimit) };
                   });
                   setPending(null);
                 },
@@ -418,7 +435,9 @@ export function agentSkillsCapability(
                           contextSignals?.(skillInvocationSignal) ?? [],
                         );
                         if (!previous) {
-                          await dispatch(activationSignal(next, { assistantMessageId }));
+                          await dispatch(
+                            activationSignal(next, { origin: { assistantMessageId, responseId } }),
+                          );
                           signal?.throwIfAborted();
                         }
                         const used = previous ?? next;
