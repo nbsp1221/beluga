@@ -13,6 +13,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
+      "env": ["CI"],
       "passThroughEnv": ["SystemRoot"]
     },
     "dev": {

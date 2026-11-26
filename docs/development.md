@@ -160,6 +160,10 @@ Git checks out text files with LF on every platform. Editors that support
 
 ### Write and review tests
 
+`pnpm test` runs the package tests before the product integration suite.
+Windows CI runs up to two Host test files at a time to bound the number of
+live Host fixtures on the runner.
+
 Start from a working example that exercises the same boundary. The
 [workspace instructions suite](../packages/host-plugins/test/agent-instructions.test.ts)
 uses the [Host fixture](../packages/host-plugins/test/fixtures/harness.ts) for a
