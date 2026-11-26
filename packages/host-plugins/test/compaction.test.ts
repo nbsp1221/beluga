@@ -8,17 +8,49 @@ import {
   type ToolCall,
   createAssistantMessageEventStream,
 } from '@earendil-works/pi-ai';
-import { instrument } from '@flue/runtime';
+import { instrument, useDispatchMessage } from '@flue/runtime';
 import {
   agentSkillsCapabilityId,
   conversationUsageSchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
 import { expect, test, vi } from 'vitest';
+import type { AgentCapability, AgentCapabilityPlugin } from '../src/agent-capabilities/host.js';
 import { origin, readTrajectory, setupHarness } from './fixtures/harness.js';
 import { fixtureProvider } from './fixtures/model-provider.js';
 
 const checkpoint = 'Keep the original decision to use port 4173.';
+
+declare module '@workspace/runtime' {
+  interface Services {
+    fixtureSignal: AgentCapability;
+  }
+}
+
+function signalCapability(
+  capture: (dispatch: ReturnType<typeof useDispatchMessage>) => void,
+): AgentCapabilityPlugin {
+  return {
+    service: 'fixtureSignal',
+    plugin: {
+      id: 'fixture-signal',
+      provides: ['fixtureSignal'],
+      setup(context) {
+        context.provide('fixtureSignal', {
+          metadata: {
+            id: 'fixture-signal',
+            name: 'Fixture signal',
+            description: 'Send a test signal.',
+          },
+          useContext() {
+            capture(useDispatchMessage());
+            return {};
+          },
+        });
+      },
+    },
+  };
+}
 
 function toolResponse(model: Parameters<Provider['streamSimple']>[0], calls: ToolCall[]) {
   const message: AssistantMessage = {
@@ -513,16 +545,26 @@ test.for([
   'joined user message',
   'newer skill in the same batch',
   'removed skill and a joined message',
+  'joined message in a response started by a signal',
 ] as const)(
   'restores skills in last-use order with a %s',
   { timeout: 30_000 },
   async (scenario, context) => {
     const removed = scenario === 'removed skill and a joined message';
+    const fromSignal = scenario === 'joined message in a response started by a signal';
     const joined = scenario !== 'newer skill in the same batch';
     const runTools = 'Use the requested skills';
     const followUp = 'One more thing for this response';
     const inputs: string[] = [];
-    const harness = await setupHarness(context, [], undefined, () => {
+    let dispatchSignal: ReturnType<typeof useDispatchMessage> | undefined;
+    const capabilities = fromSignal
+      ? [
+          signalCapability((dispatch) => {
+            dispatchSignal = dispatch;
+          }),
+        ]
+      : [];
+    const harness = await setupHarness(context, capabilities, undefined, () => {
       const provider = compactionProvider();
       let called = false;
 
@@ -557,7 +599,12 @@ test.for([
     const workspace = await harness.prepareWorkspace();
     const { id } = await harness.create(
       workspace.id,
-      (await harness.createPreset([agentSkillsCapabilityId])).id,
+      (
+        await harness.createPreset([
+          agentSkillsCapabilityId,
+          ...(fromSignal ? ['fixture-signal'] : []),
+        ])
+      ).id,
     );
     const client = harness.sdk(id);
 
@@ -597,7 +644,16 @@ test.for([
       },
     });
     try {
-      const reply = wait(await send(runTools));
+      const run = async () => {
+        if (!fromSignal) {
+          return wait(await send(runTools));
+        }
+        assert(dispatchSignal);
+        const receipt = await dispatchSignal({ kind: 'signal', type: 'fixture', body: runTools });
+        await client.read(receipt.submissionId, { signal: AbortSignal.timeout(10_000) });
+      };
+
+      const reply = run();
       try {
         if (joined) {
           await Promise.race([firstLoaded.promise, reply]);
@@ -650,12 +706,17 @@ test.for([
 test.for([
   'selected skill before the first model call',
   'tool result before the batch commits',
+  'reused call ID with an interrupted result',
 ] as const)(
   'restores skills after resuming an interrupted response with a %s',
   { timeout: 30_000 },
   async (boundary, context) => {
-    const fromTool = boundary === 'tool result before the batch commits';
+    const reusedCallId = boundary === 'reused call ID with an interrupted result';
+    const fromTool = boundary !== 'selected skill before the first model call';
     const trigger = 'Apply the review skill';
+    const prime = 'Use the original review skill';
+    const skillOnResume = reusedCallId ? 'interrupted' : 'review';
+    const snapshotAfter = reusedCallId ? 'snapshot-sibling' : 'load-review';
     const inputs: string[] = [];
     const harness = await setupHarness(context, [], undefined, () => {
       const provider = compactionProvider();
@@ -663,17 +724,36 @@ test.for([
       const streamSimple: Provider['streamSimple'] = (model, input, options) => {
         const prompt = JSON.stringify(input.messages);
         inputs.push(prompt);
-        if (
-          fromTool &&
-          prompt.includes(trigger) &&
-          !prompt.includes('<conversation>') &&
-          !input.messages.some(({ role }) => role === 'assistant')
-        ) {
+        const requested = input.messages.findLast(
+          (message) =>
+            message.role === 'user' && JSON.stringify(message.content).includes(`"${trigger}"`),
+        );
+
+        const hasRequest = (name: string) =>
+          input.messages.some(
+            (message) =>
+              message.role === 'assistant' &&
+              message.content.some(
+                (part) => part.type === 'toolCall' && part.arguments.name === name,
+              ),
+          );
+
+        if (reusedCallId && prompt.includes(`"${prime}"`) && !hasRequest('review')) {
           return toolResponse(model, [
             { type: 'toolCall', id: 'load-review', name: 'skill', arguments: { name: 'review' } },
+          ]);
+        }
+        if (fromTool && requested && !hasRequest(skillOnResume)) {
+          return toolResponse(model, [
             {
               type: 'toolCall',
-              id: 'wait-for-snapshot',
+              id: 'load-review',
+              name: 'skill',
+              arguments: { name: skillOnResume },
+            },
+            {
+              type: 'toolCall',
+              id: 'snapshot-sibling',
               name: 'skill',
               arguments: { name: 'missing' },
             },
@@ -688,8 +768,16 @@ test.for([
     await mkdir(directory, { recursive: true });
     await writeFile(
       join(directory, 'SKILL.md'),
-      '---\nname: review\ndescription: Review a change\n---\n\nRECOVERED_SKILL_RULE\n',
+      `---\nname: review\ndescription: Review a change\n---\n\nRECOVERED_SKILL_RULE ${reusedCallId ? 'a'.repeat(18_000) : ''}\n`,
     );
+    if (reusedCallId) {
+      const interrupted = join(dirname(directory), 'interrupted');
+      await mkdir(interrupted);
+      await writeFile(
+        join(interrupted, 'SKILL.md'),
+        `---\nname: interrupted\ndescription: Keep a decision\n---\n\nINTERRUPTED_SKILL_RULE ${'a'.repeat(18_000)}\n`,
+      );
+    }
     const workspace = await harness.prepareWorkspace();
     const { id } = await harness.create(
       workspace.id,
@@ -702,6 +790,11 @@ test.for([
     const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
       client.wait(receipt, { signal: AbortSignal.timeout(10_000) });
 
+    if (reusedCallId) {
+      await wait(await send(prime));
+      assert(inputs.at(-1)?.includes('Loaded skill: review.'));
+    }
+
     const snapshot = `${harness.databasePath}.snapshot`;
     let captured = false;
 
@@ -712,12 +805,21 @@ test.for([
     };
 
     const releaseTool = deferred();
+    const interruptedLoaded = deferred();
     const dispose = instrument({
       observe() {},
       dispose() {},
       async interceptor(operation, _, next) {
-        if (fromTool && operation.type === 'tool' && operation.toolCallId === 'wait-for-snapshot') {
-          await releaseTool.promise;
+        if (fromTool && operation.type === 'tool') {
+          if (reusedCallId && operation.toolCallId === 'load-review') {
+            const outcome = await next();
+            interruptedLoaded.resolve();
+            await releaseTool.promise;
+            return outcome;
+          }
+          if (operation.toolCallId === 'snapshot-sibling') {
+            await (reusedCallId ? interruptedLoaded.promise : releaseTool.promise);
+          }
         }
         if (!fromTool && operation.type === 'model' && !captured) {
           capture();
@@ -734,12 +836,15 @@ test.for([
           using db = new DatabaseSync(harness.databasePath, { readOnly: true });
           const toolOutcome = db.prepare(`
             SELECT 1 FROM flue_conversation_stream_batches
-            WHERE instr(data, '"type":"tool_outcome"') AND instr(data, '"toolCallId":"load-review"')
+            WHERE instr(data, '"type":"tool_outcome"') AND instr(data, ?)
           `);
-          await vi.waitFor(() => assert(toolOutcome.get()), { timeout: 5_000 });
+          await vi.waitFor(() => assert(toolOutcome.get(`"toolCallId":"${snapshotAfter}"`)), {
+            timeout: 5_000,
+          });
           capture();
         }
       } finally {
+        interruptedLoaded.resolve();
         releaseTool.resolve();
         await original;
       }
@@ -772,6 +877,10 @@ test.for([
     if (fromTool) {
       assert(resumed.includes('Loaded skill: review.'));
     }
+    if (reusedCallId) {
+      assert(resumed.includes('INTERRUPTED_SKILL_RULE'));
+      assert(resumed.includes('Tool execution was interrupted before completion.'));
+    }
     for (let index = 0; index < 4; index++) {
       await wait(await send(`Seed ${index}: ${'work '.repeat(4_000)}`));
     }
@@ -789,7 +898,87 @@ test.for([
       assert(prompt);
       expect(prompt).toContain(checkpoint);
       expect(prompt.match(/RECOVERED_SKILL_RULE/g)).toHaveLength(1);
+      expect(prompt).not.toContain('INTERRUPTED_SKILL_RULE');
     }
+  },
+);
+
+test(
+  'remembers skills used after overflow summarizes their tool results',
+  { timeout: 30_000 },
+  async (context) => {
+    const inputs: string[] = [];
+    const names = ['first', 'second'];
+    const trigger = 'Trigger overflow after loading skills';
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider();
+      let called = false;
+
+      const streamSimple: Provider['streamSimple'] = (model, input, options) => {
+        const prompt = JSON.stringify(input.messages);
+        inputs.push(prompt);
+        if (!called && prompt.includes(trigger)) {
+          called = true;
+          return toolResponse(
+            model,
+            names.map((name) => ({
+              type: 'toolCall',
+              id: `load-${name}`,
+              name: 'skill',
+              arguments: { name },
+            })),
+          );
+        }
+        return provider.streamSimple(model, input, options);
+      };
+
+      return { ...provider, stream: (model, input) => streamSimple(model, input), streamSimple };
+    });
+    for (const name of names) {
+      const directory = join(dirname(harness.databasePath), 'skills', name);
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, 'SKILL.md'),
+        `---\nname: ${name}\ndescription: Keep a decision\n---\n\nRULE_${name} ${'a'.repeat(18_000)}\n`,
+      );
+    }
+    const workspace = await harness.prepareWorkspace();
+    const { id } = await harness.create(
+      workspace.id,
+      (await harness.createPreset([agentSkillsCapabilityId])).id,
+    );
+    const client = harness.sdk(id);
+
+    const submit = async (body: string) =>
+      client.wait(await client.send({ message: { kind: 'user', body } }), {
+        signal: AbortSignal.timeout(10_000),
+      });
+
+    await submit(`Seed: ${'work '.repeat(4_000)}`);
+    await submit(trigger);
+    const retried = inputs.at(-1);
+    assert(retried);
+    expect(retried).toContain(checkpoint);
+    expect(retried).not.toContain('"role":"toolResult"');
+    expect(retried.match(/RULE_\w+/g)?.sort()).toEqual(['RULE_first', 'RULE_second']);
+
+    for (let index = 0; index < 4; index++) {
+      await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
+    }
+    await submit('Trigger threshold');
+    await submit('Inspect restored skills');
+    const path = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(path))).at(-1);
+    const model = turn?.records.findLast(
+      (record) => record.kind === 'assistant' && record.purpose === 'agent',
+    );
+    assert(turn && model);
+    const input = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${path}/${turn.id}/${model.id}`)).json(),
+    );
+    const restored = inputs.at(-1)?.match(/RULE_\w+/g);
+    expect(restored).toHaveLength(1);
+    expect(JSON.stringify(input.messages).match(/RULE_\w+/g)).toEqual(restored);
   },
 );
 

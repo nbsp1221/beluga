@@ -40,13 +40,18 @@ interface Activation {
   body: string;
 }
 
-type SkillUse = Pick<Activation, 'id' | 'name' | 'sourceId' | 'actor' | 'toolCallId'>;
+type SkillUse = Pick<Activation, 'id' | 'name' | 'sourceId' | 'actor'> & {
+  tool?: { assistantMessageId: string; toolCallId: string };
+};
+
+interface PendingSkillUses {
+  responseId: string;
+  uses: readonly SkillUse[];
+}
 
 interface SkillState {
   catalog: ReturnType<typeof skillCatalog>;
   active: readonly Activation[];
-  responseId?: string;
-  pendingUses?: readonly SkillUse[];
 }
 
 function activationSignal(activation: Activation, restored = false): AgentAppendMessage {
@@ -78,8 +83,8 @@ function canRestore(activation: SkillUse, sources: readonly SkillSource[]) {
   );
 }
 
-function skillUse({ id, name, sourceId, actor }: Activation, toolCallId?: string): SkillUse {
-  return { id, name, sourceId, actor, toolCallId };
+function skillUse({ id, name, sourceId, actor }: Activation, tool?: SkillUse['tool']): SkillUse {
+  return { id, name, sourceId, actor, tool };
 }
 
 function visibleActivation(
@@ -194,6 +199,10 @@ export function agentSkillsCapability(
               catalog: { text: '', entries: [] },
               active: [],
             });
+            const [pending, setPending] = usePersistentState<PendingSkillUses | null>(
+              'agent-skills-pending',
+              null,
+            );
             const { catalog } = state;
             const restoreLimit = skillRestoreLimit(contextWindow);
 
@@ -258,9 +267,8 @@ export function agentSkillsCapability(
                 start.signal.throwIfAborted();
                 const previous =
                   next && visibleActivation(next, start.contextSignals(skillInvocationSignal));
-                const pending =
-                  state.responseId === start.responseId ? (state.pendingUses ?? []) : [];
-                const names = new Set([...state.active, ...pending].map(({ name }) => name));
+                const uses = pending?.responseId === start.responseId ? pending.uses : [];
+                const names = new Set([...state.active, ...uses].map(({ name }) => name));
                 const candidates = new Map(
                   await Promise.all(
                     [...names].map(async (name) => {
@@ -278,18 +286,20 @@ export function agentSkillsCapability(
                 const eligible = (use: SkillUse) => canRestore(use, candidates.get(use.name) ?? []);
 
                 const active = state.active.filter(eligible);
-                const pendingUses = pending.filter(eligible);
+                const pendingUses = uses.filter(eligible);
                 const used = previous ?? next;
                 if (used) {
                   pendingUses.push(skillUse(used));
                 }
-                setState((current) => ({
-                  ...current,
+                if (pending || pendingUses.length) {
+                  setPending(
+                    pendingUses.length ? { responseId: start.responseId, uses: pendingUses } : null,
+                  );
+                }
+                setState({
                   catalog: skillCatalog(sources, contextWindow),
                   active,
-                  responseId: start.responseId,
-                  pendingUses,
-                }));
+                });
                 restore(start, active);
                 if (next && !previous) {
                   start.append(activationSignal(next));
@@ -297,15 +307,21 @@ export function agentSkillsCapability(
               },
               {
                 restoreContext: (start) => restore(start, state.active),
-                onModelInput(contextSignals, toolCallSucceeded) {
+                onModelInput(contextSignals, response) {
+                  if (pending?.responseId !== response.id) {
+                    return;
+                  }
+                  const visible = contextSignals(skillInvocationSignal);
                   setState((current) => {
-                    if (!current.pendingUses?.length) {
-                      return current;
-                    }
-                    const visible = contextSignals(skillInvocationSignal);
                     let active = current.active;
-                    for (const use of current.pendingUses) {
-                      if (use.toolCallId && !toolCallSucceeded(use.toolCallId)) {
+                    for (const use of pending.uses) {
+                      if (
+                        use.tool &&
+                        !response.toolCallSucceeded(
+                          use.tool.assistantMessageId,
+                          use.tool.toolCallId,
+                        )
+                      ) {
                         continue;
                       }
                       const signal = visible.find(({ attributes }) => attributes?.id === use.id);
@@ -319,8 +335,9 @@ export function agentSkillsCapability(
                         );
                       }
                     }
-                    return { ...current, active, pendingUses: [] };
+                    return { ...current, active };
                   });
+                  setPending(null);
                 },
               },
             );
@@ -333,15 +350,19 @@ export function agentSkillsCapability(
                     name: 'skill',
                     description: 'Load the full instructions for one listed skill.',
                     input: v.object({ name: v.string() }),
-                    async run({ data, signal, toolCallId, contextSignals }) {
+                    async run({ data, signal, toolCallId, toolInvocation, contextSignals }) {
                       const source = catalog.entries.find(({ name }) => name === data.name);
                       if (!source) {
                         throw new Error('Choose a skill from the available skills list.');
                       }
-                      const pending =
+                      if (!toolInvocation) {
+                        throw new Error('A skill call requires an active conversation response.');
+                      }
+                      const { responseId, assistantMessageId } = toolInvocation;
+                      const loads =
                         pendingBySession.get(sessionId) ?? new Map<string, Promise<string>>();
-                      pendingBySession.set(sessionId, pending);
-                      const existing = pending.get(source.name);
+                      pendingBySession.set(sessionId, loads);
+                      const existing = loads.get(source.name);
                       if (existing) {
                         return existing;
                       }
@@ -357,18 +378,21 @@ export function agentSkillsCapability(
                           signal?.throwIfAborted();
                         }
                         const used = previous ?? next;
-                        setState((current) => ({
-                          ...current,
-                          pendingUses: [...(current.pendingUses ?? []), skillUse(used, toolCallId)],
+                        setPending((current) => ({
+                          responseId,
+                          uses: [
+                            ...(current?.responseId === responseId ? current.uses : []),
+                            skillUse(used, { assistantMessageId, toolCallId }),
+                          ],
                         }));
                         return `Loaded skill: ${next.name}.`;
                       })();
-                      pending.set(source.name, job);
+                      loads.set(source.name, job);
                       try {
                         return await job;
                       } finally {
-                        pending.delete(source.name);
-                        if (!pending.size) {
+                        loads.delete(source.name);
+                        if (!loads.size) {
                           pendingBySession.delete(sessionId);
                         }
                       }

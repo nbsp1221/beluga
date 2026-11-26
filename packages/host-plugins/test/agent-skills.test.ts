@@ -1,6 +1,7 @@
 import { unlinkSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import {
   AGENT_SKILLS_PATH,
   agentSkillsCapabilityId,
@@ -36,6 +37,31 @@ function deferred() {
   });
   return { promise, resolve };
 }
+
+test('keeps applied skill bodies in place across ordinary follow-ups', async (context) => {
+  const harness = await setupHarness(context);
+  const marker = 'KEEP_REVIEW_RULE';
+  await writeSkill(join(dirname(harness.databasePath), 'skills'), 'review', marker);
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset([agentSkillsCapabilityId]);
+  const { id } = await harness.create(workspace.id, preset.id);
+  await submit(harness, id, '/review review this change');
+
+  using db = new DatabaseSync(harness.databasePath, { readOnly: true });
+  const writes = db.prepare(`
+    SELECT count(*) AS count FROM flue_conversation_stream_batches, json_each(data)
+    WHERE json_extract(value, '$.type') = 'state_write'
+      AND instr(json_extract(value, '$.name'), 'agent-skills') = 1
+      AND instr(value, ?) > 0
+  `);
+  const applied = writes.get(marker)?.count;
+  expect(applied).toBe(1);
+  for (const request of ['Continue', 'One more detail']) {
+    const input = await submit(harness, id, request);
+    expect(input.at(-1)?.skillInstructions.match(/KEEP_REVIEW_RULE/g)).toHaveLength(1);
+  }
+  expect(writes.get(marker)?.count).toBe(applied);
+});
 
 test('loads, reuses, and refreshes project skill overrides', async (context) => {
   const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
