@@ -3,7 +3,13 @@ import { chmod, mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
-import { instrument, useDispatchMessage } from '@flue/runtime';
+import {
+  type DispatchReceipt,
+  instrument,
+  useAgentStart,
+  useDelivery,
+  useDispatchMessage,
+} from '@flue/runtime';
 import {
   AGENT_SKILLS_PATH,
   agentSkillsCapabilityId,
@@ -11,7 +17,7 @@ import {
   skillListingSchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
-import { expect, test, vi } from 'vitest';
+import { type TestContext, expect, test, vi } from 'vitest';
 import type { AgentCapability } from '../src/agent-capabilities/host.js';
 import { fileReadCapability } from '../src/agent-capabilities/file/read/host.js';
 import { linkDirectory, origin, readTrajectory, setupHarness } from './fixtures/harness.js';
@@ -41,9 +47,9 @@ async function submit(harness: Awaited<ReturnType<typeof setupHarness>>, id: str
   return harness.observed.slice(start);
 }
 
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
+function deferred<Value = void>() {
+  let resolve!: (value: Value | PromiseLike<Value>) => void;
+  const promise = new Promise<Value>((done) => {
     resolve = done;
   });
   return { promise, resolve };
@@ -552,8 +558,9 @@ test.for([
   },
 );
 
-test('keeps a joined skill on the receiving response, including before the owner was stored', async (context) => {
-  const marker = 'LEGACY_JOINED_SKILL_BODY';
+async function setupJoinedSkill(context: TestContext, marker: string, beforeSignal?: () => void) {
+  const admitted = deferred<DispatchReceipt>();
+  const initialMessage = '{"path":"README.md"}';
   const fixture = {
     id: 'fixture-joined-skill',
     name: 'Joined skill fixture',
@@ -572,17 +579,29 @@ test('keeps a joined skill on the receiving response, including before the owner
             metadata: fixture,
             useContext() {
               const dispatch = useDispatchMessage();
-              return {
-                async onFiles() {
+              const delivery = useDelivery();
+
+              async function dispatchSignal() {
+                admitted.resolve(
                   await dispatch({
                     kind: 'signal',
                     type: 'skill-invocation',
                     tagName: 'system-reminder',
                     body: marker,
                     attributes: { contextLifetime: 'response' },
-                  });
-                },
-              };
+                  }),
+                );
+              }
+
+              useAgentStart(async () => {
+                if (delivery.kind === 'signal' && delivery.type === 'skill-invocation') {
+                  beforeSignal?.();
+                }
+                if (beforeSignal && delivery.kind === 'user' && delivery.body === initialMessage) {
+                  await dispatchSignal();
+                }
+              });
+              return beforeSignal ? {} : { onFiles: dispatchSignal };
             },
           });
         },
@@ -593,7 +612,13 @@ test('keeps a joined skill on the receiving response, including before the owner
   const preset = await harness.createPreset(['file.read', fixture.id]);
   const { id } = await harness.create(workspace.id, preset.id);
   const client = harness.sdk(id);
-  const host = await client.send({ message: { kind: 'user', body: '{"path":"README.md"}' } });
+  const receipt = await client.send({ message: { kind: 'user', body: initialMessage } });
+  return { harness, id, client, receipt, admitted: admitted.promise };
+}
+
+test('keeps a joined skill on the receiving response, including before the owner was stored', async (context) => {
+  const marker = 'LEGACY_JOINED_SKILL_BODY';
+  const { harness, id, client, receipt: host } = await setupJoinedSkill(context, marker);
   await client.wait(host, { signal: context.signal });
   expect(harness.observed.at(-1)?.skillInstructions).toContain(marker);
 
@@ -620,6 +645,26 @@ test('keeps a joined skill on the receiving response, including before the owner
   }
   await harness.restart();
   const [request] = await submit(harness, id, 'Follow up on the read');
+  expect(request.skillInstructions).toContain(marker);
+});
+
+test('retains a scoped skill when a failed join runs the delivery on its own', async (context) => {
+  const marker = 'REQUEUED_SKILL_BODY';
+  let failFirst = true;
+  const { harness, id, client, receipt, admitted } = await setupJoinedSkill(context, marker, () => {
+    if (failFirst) {
+      failFirst = false;
+      throw new Error('Join fixture rejected its first start');
+    }
+  });
+  await expect(client.wait(receipt, { signal: context.signal })).rejects.toMatchObject({
+    targetId: receipt.submissionId,
+    failure: 'failed',
+  });
+  const dispatch = await admitted;
+  await client.wait({ ...receipt, ...dispatch }, { signal: context.signal });
+  expect(harness.observed.at(-1)?.skillInstructions).toContain(marker);
+  const [request] = await submit(harness, id, 'Follow up on the standalone delivery');
   expect(request.skillInstructions).toContain(marker);
 });
 

@@ -423,54 +423,63 @@ test('reports context usage for the selected model after it responds', async (co
   );
 });
 
-test('keeps pending manual skill bodies out of the overflow summary', async (context) => {
-  const marker = 'MANUAL_SKILL_WAITING_FOR_RESPONSE';
-  const summaries: string[] = [];
-  const overflowRequests: string[] = [];
-  const harness = await setupHarness(context, [], undefined, () => {
-    const provider = compactionProvider();
-    return {
-      ...provider,
-      streamSimple(model, input, options) {
-        const messages = JSON.stringify(input.messages);
-        if (messages.includes('<conversation>')) {
-          summaries.push(messages);
-        } else if (messages.includes('Trigger overflow')) {
-          overflowRequests.push(messages);
-        }
-        return provider.streamSimple(model, input, options);
-      },
-    };
-  });
-  const skills = join(dirname(harness.databasePath), 'skills');
-  for (const [name, body] of [
-    ['review', marker],
-    ['long', 'Long skill body '.repeat(3_500)],
-  ]) {
-    await mkdir(join(skills, name), { recursive: true });
-    await writeFile(
-      join(skills, name, 'SKILL.md'),
-      `---\nname: ${name}\ndescription: Fixture skill\n---\n\n${body}\n`,
-    );
-  }
-  const workspace = await harness.prepareWorkspace();
-  const preset = await harness.createPreset([agentSkillsCapabilityId]);
-  const { id } = await harness.create(workspace.id, preset.id);
-  const client = harness.sdk(id);
+test.for([
+  { history: 'short', turns: 1, skillWords: 7_500 },
+  { history: 'long', turns: 4, skillWords: 3_500 },
+])(
+  'keeps pending manual skill bodies in the retry with $history history',
+  async (entry, context) => {
+    const marker = 'MANUAL_SKILL_WAITING_FOR_RESPONSE';
+    const summaries: string[] = [];
+    const overflowRequests: string[] = [];
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider();
+      return {
+        ...provider,
+        streamSimple(model, input, options) {
+          const messages = JSON.stringify(input.messages);
+          if (messages.includes('<conversation>')) {
+            summaries.push(messages);
+          } else if (messages.includes('Trigger overflow') || messages.includes(checkpoint)) {
+            overflowRequests.push(messages);
+          }
+          return provider.streamSimple(model, input, options);
+        },
+      };
+    });
+    const skills = join(dirname(harness.databasePath), 'skills');
+    for (const [name, body] of [
+      ['review', marker],
+      ['long', 'Long skill body '.repeat(entry.skillWords)],
+    ]) {
+      await mkdir(join(skills, name), { recursive: true });
+      await writeFile(
+        join(skills, name, 'SKILL.md'),
+        `---\nname: ${name}\ndescription: Fixture skill\n---\n\n${body}\n`,
+      );
+    }
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset([agentSkillsCapabilityId]);
+    const { id } = await harness.create(workspace.id, preset.id);
+    const client = harness.sdk(id);
 
-  const submit = async (body: string) =>
-    client.wait(await client.send({ message: { kind: 'user', body } }), { signal: context.signal });
+    const submit = async (body: string) =>
+      client.wait(await client.send({ message: { kind: 'user', body } }), {
+        signal: context.signal,
+      });
 
-  for (let index = 0; index < 4; index++) {
-    await submit(`Earlier history ${index}: ${'seed '.repeat(4_000)}`);
-  }
-  await submit('/review /long Trigger overflow');
-  expect(overflowRequests[0]).toContain(marker);
-  expect(overflowRequests).toHaveLength(2);
-  expect(summaries).not.toHaveLength(0);
-  expect(summaries.join('\n')).toContain('Earlier history');
-  expect(summaries.join('\n')).not.toMatch(/MANUAL_SKILL_WAITING_FOR_RESPONSE|Long skill body/);
-});
+    for (let index = 0; index < entry.turns; index++) {
+      await submit(`Earlier history ${index}: ${'seed '.repeat(4_000)}`);
+    }
+    await submit('/review /long Trigger overflow');
+    expect(overflowRequests).toHaveLength(2);
+    expect(overflowRequests[0]).toContain(marker);
+    expect(overflowRequests[1]).toContain(marker);
+    expect(summaries).not.toHaveLength(0);
+    expect(summaries.join('\n')).toContain('Earlier history');
+    expect(summaries.join('\n')).not.toMatch(/MANUAL_SKILL_WAITING_FOR_RESPONSE|Long skill body/);
+  },
+);
 
 test('restores workspace instructions in the model request that retries an overflow', async (context) => {
   const rule = 'FIXTURE_RULE_SURVIVES_OVERFLOW';
