@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import {
   type AssistantMessage,
   type Provider,
+  type ToolCall,
   createAssistantMessageEventStream,
 } from '@earendil-works/pi-ai';
 import {
+  agentSkillsCapabilityId,
   conversationUsageSchema,
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
@@ -16,18 +18,56 @@ import { fixtureProvider } from './fixtures/model-provider.js';
 
 const checkpoint = 'Keep the original decision to use port 4173.';
 
+function toolResponse(model: Parameters<Provider['streamSimple']>[0], calls: ToolCall[]) {
+  const message: AssistantMessage = {
+    role: 'assistant',
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    content: calls,
+    stopReason: 'toolUse',
+    timestamp: Date.now(),
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { ...model.cost, total: 0 },
+    },
+  };
+  const stream = createAssistantMessageEventStream();
+  stream.push({ type: 'start', partial: message });
+  for (const [contentIndex, toolCall] of calls.entries()) {
+    stream.push({ type: 'toolcall_end', contentIndex, toolCall, partial: message });
+  }
+  stream.push({ type: 'done', reason: 'toolUse', message });
+  return stream;
+}
+
 function compactionProvider(
   onSummary?: (signal?: AbortSignal) => Promise<void>,
   alternateWindow = 128_000,
   beforeReply?: () => Promise<void>,
+  maxInputCharacters?: number,
 ): Provider {
   const provider = fixtureProvider([]);
   const [model] = provider.getModels();
 
   const streamSimple: Provider['streamSimple'] = (selected, context, options) => {
-    const user = JSON.stringify(context.messages.findLast(({ role }) => role === 'user') ?? null);
-    const summary = user.includes('<conversation>');
-    const pressure = !summary && user.includes('Trigger threshold') ? 29_000 : 1_000;
+    const user = context.messages.findLast((message) => {
+      if (message.role !== 'user') {
+        return false;
+      }
+      const text =
+        typeof message.content === 'string'
+          ? message.content
+          : message.content.find((part) => part.type === 'text')?.text;
+      return !text?.startsWith('<system-reminder ');
+    });
+    const userInput = JSON.stringify(user ?? null);
+    const summary = userInput.includes('<conversation>');
+    const pressure = !summary && userInput.includes('Trigger threshold') ? 29_000 : 1_000;
     const stream = createAssistantMessageEventStream();
     const response: AssistantMessage = {
       role: 'assistant',
@@ -49,9 +89,11 @@ function compactionProvider(
 
     const send = () => {
       if (
-        !summary &&
-        user.includes('Trigger overflow') &&
-        !JSON.stringify(context.messages).includes(checkpoint)
+        (maxInputCharacters !== undefined &&
+          JSON.stringify(context.messages).length > maxInputCharacters) ||
+        (!summary &&
+          userInput.includes('Trigger overflow') &&
+          !JSON.stringify(context.messages).includes(checkpoint))
       ) {
         stream.push({
           type: 'error',
@@ -69,7 +111,7 @@ function compactionProvider(
 
     const hold = summary
       ? onSummary?.(options?.signal)
-      : user.includes('Hold model response')
+      : userInput.includes('Hold model response')
         ? beforeReply?.()
         : undefined;
     if (hold) {
@@ -250,6 +292,99 @@ test(
   },
 );
 
+test.for(['threshold', 'overflow'] as const)(
+  'publishes the current catalog and reloads a skill after %s compaction',
+  async (reason, context) => {
+    const oldBody = 'ORIGINAL_SKILL_BODY';
+    const newBody = 'RELOADED_SKILL_BODY';
+    const oldDescription = 'Old review instructions';
+    const newDescription = 'Updated review instructions';
+    let skillFile = '';
+
+    const skill = (description: string, body: string) =>
+      `---\nname: review\ndescription: ${description}\n---\n\n${body}\n`;
+
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider(async () => {
+        await writeFile(skillFile, skill(newDescription, newBody));
+      });
+      return {
+        ...provider,
+        streamSimple(model, input, options) {
+          const last = input.messages.at(-1);
+          if (
+            last?.role === 'user' &&
+            JSON.stringify(last.content).includes('Reload the review skill')
+          ) {
+            return toolResponse(model, [
+              {
+                type: 'toolCall',
+                id: 'reload-review',
+                name: 'skill',
+                arguments: { name: 'review' },
+              },
+            ]);
+          }
+          return provider.streamSimple(model, input, options);
+        },
+      };
+    });
+    const directory = join(dirname(harness.databasePath), 'skills', 'review');
+    skillFile = join(directory, 'SKILL.md');
+    await mkdir(directory, { recursive: true });
+    await writeFile(skillFile, skill(oldDescription, oldBody));
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset([agentSkillsCapabilityId]);
+    const { id } = await harness.create(workspace.id, preset.id);
+    const client = harness.sdk(id);
+
+    const submit = async (body: string) =>
+      client.wait(await client.send({ message: { kind: 'user', body } }), {
+        signal: context.signal,
+      });
+
+    const path = `${origin}/api/conversations/${id}/trajectory`;
+
+    const history = () => readTrajectory(harness.fetch(path));
+
+    const latestInput = async () => {
+      const turn = (await history()).at(-1);
+      const model = turn?.records.findLast(
+        (record) => record.kind === 'assistant' && record.purpose === 'agent',
+      );
+      assert(turn && model);
+      const response = await harness.fetch(`${path}/${turn.id}/${model.id}`);
+      return trajectoryModelInputResponseSchema.parse(await response.json());
+    };
+
+    await submit('/review check the change');
+    const initial = await latestInput();
+    expect(JSON.stringify(initial)).toContain(oldDescription);
+    expect(JSON.stringify(initial.messages)).toContain(oldBody);
+    for (let index = 0; index < 4; index++) {
+      await submit(`Seed ${index}: ${'work '.repeat(4_000)}`);
+    }
+    await submit(reason === 'threshold' ? 'Trigger threshold' : 'Trigger overflow');
+    const compaction = (await history())
+      .flatMap(({ records }) => records)
+      .find((record) => record.kind === 'compaction' && record.reason === reason);
+    expect(compaction).toMatchObject({ status: 'completed' });
+    if (reason === 'threshold') {
+      await submit('Continue with the current catalog');
+    }
+    const compacted = await latestInput();
+    expect(JSON.stringify(compacted)).toContain(newDescription);
+    expect(JSON.stringify(compacted)).not.toContain(oldDescription);
+    expect(JSON.stringify(compacted.messages)).toContain(checkpoint);
+    expect(JSON.stringify(compacted.messages)).not.toMatch(new RegExp(`${oldBody}|${newBody}`));
+
+    await submit('Reload the review skill');
+    const reloaded = JSON.stringify((await latestInput()).messages);
+    expect(reloaded).toContain(newBody);
+    expect(reloaded).not.toContain(oldBody);
+  },
+);
+
 test('reports context usage for the selected model after it responds', async (context) => {
   const harness = await setupHarness(context, [], undefined, () => compactionProvider());
   const workspace = await harness.prepareWorkspace();
@@ -289,6 +424,135 @@ test('reports context usage for the selected model after it responds', async (co
   expect(alternate?.status === 'available' && alternate.estimatedTokens?.messages).toBeGreaterThan(
     0,
   );
+});
+
+test.for([
+  { history: 'short', turns: 1, skillWords: 7_500 },
+  { history: 'long', turns: 4, skillWords: 3_500 },
+])(
+  'keeps pending manual skills only in the retained history with $history history',
+  async (entry, context) => {
+    const marker = 'MANUAL_SKILL_WAITING_FOR_RESPONSE';
+    const summaries: string[] = [];
+    const overflowRequests: string[] = [];
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider();
+      return {
+        ...provider,
+        streamSimple(model, input, options) {
+          const messages = JSON.stringify(input.messages);
+          if (messages.includes('<conversation>')) {
+            summaries.push(messages);
+          } else if (messages.includes('Trigger overflow') || messages.includes(checkpoint)) {
+            overflowRequests.push(messages);
+          }
+          return provider.streamSimple(model, input, options);
+        },
+      };
+    });
+    const skills = join(dirname(harness.databasePath), 'skills');
+    for (const [name, body] of [
+      ['review', marker],
+      ['long', 'Long skill body '.repeat(entry.skillWords)],
+    ]) {
+      await mkdir(join(skills, name), { recursive: true });
+      await writeFile(
+        join(skills, name, 'SKILL.md'),
+        `---\nname: ${name}\ndescription: Fixture skill\n---\n\n${body}\n`,
+      );
+    }
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset([agentSkillsCapabilityId]);
+    const { id } = await harness.create(workspace.id, preset.id);
+    const client = harness.sdk(id);
+
+    const submit = async (body: string) =>
+      client.wait(await client.send({ message: { kind: 'user', body } }), {
+        signal: context.signal,
+      });
+
+    for (let index = 0; index < entry.turns; index++) {
+      await submit(`Earlier history ${index}: ${'seed '.repeat(4_000)}`);
+    }
+    await submit('/review /long Trigger overflow');
+    expect(overflowRequests).toHaveLength(2);
+    expect(overflowRequests[0]).toContain(marker);
+    expect(overflowRequests[1]).toContain('Long skill body');
+    expect(overflowRequests[1]).not.toContain(marker);
+    expect(summaries).not.toHaveLength(0);
+    expect(summaries.join('\n')).toContain('Earlier history');
+    expect(summaries.join('\n')).not.toMatch(/MANUAL_SKILL_WAITING_FOR_RESPONSE|Long skill body/);
+  },
+);
+
+test('compacts intervening joined messages after a pending skill', async (context) => {
+  const inputLimit = 128_000;
+  const pendingReview = 'PENDING_REVIEW_SKILL_BODY';
+  const responding = deferred();
+  const releaseReply = deferred();
+  const requests: { summary: boolean; input: string }[] = [];
+  const harness = await setupHarness(context, [], undefined, () => {
+    const provider = compactionProvider(
+      undefined,
+      undefined,
+      async () => {
+        responding.resolve();
+        await releaseReply.promise;
+      },
+      inputLimit,
+    );
+    return {
+      ...provider,
+      streamSimple(model, input, options) {
+        const serialized = JSON.stringify(input.messages);
+        requests.push({ summary: serialized.includes('<conversation>'), input: serialized });
+        return provider.streamSimple(model, input, options);
+      },
+    };
+  });
+  const skill = join(dirname(harness.databasePath), 'skills', 'review');
+  await mkdir(skill, { recursive: true });
+  await writeFile(
+    join(skill, 'SKILL.md'),
+    `---\nname: review\ndescription: Review a change\ndisable-model-invocation: true\n---\n\n${pendingReview}\n`,
+  );
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset([agentSkillsCapabilityId]);
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+
+  const send = (body: string) =>
+    client.send({ message: { kind: 'user', body }, signal: context.signal });
+
+  const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
+    client.wait(receipt, { signal: context.signal });
+
+  const receipt = await send('Hold model response');
+  const continued = wait(receipt);
+  try {
+    await Promise.race([responding.promise, continued]);
+    const deliveries = [
+      await send('/review'),
+      await send('First joined message '.padEnd(68_000, 'a')),
+      await send('Latest joined message '.padEnd(68_000, 'z')),
+    ];
+    releaseReply.resolve();
+    await Promise.all([continued, ...deliveries.map(wait)]);
+  } finally {
+    releaseReply.resolve();
+  }
+
+  const overflow = requests.find(({ summary, input }) => !summary && input.length > inputLimit);
+  const summary = requests.find((request) => request.summary);
+  const retry = requests.find(({ summary, input }) => !summary && input.includes(checkpoint));
+  expect(overflow?.input).toContain(pendingReview);
+  expect(overflow?.input).toContain('First joined message');
+  expect(overflow?.input).toContain('Latest joined message');
+  expect(summary?.input).toContain('First joined message');
+  expect(summary?.input).not.toContain(pendingReview);
+  expect(retry?.input).toContain('Latest joined message');
+  expect(retry?.input).not.toContain(pendingReview);
+  expect(retry?.input.length).toBeLessThanOrEqual(inputLimit);
 });
 
 test('restores workspace instructions in the model request that retries an overflow', async (context) => {

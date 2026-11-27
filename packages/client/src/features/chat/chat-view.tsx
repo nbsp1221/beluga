@@ -112,7 +112,11 @@ export function ChatView({
                       <MessageContent className="gap-0 md:gap-1.5">
                         {message.role === 'context' ? (
                           <Trace>
-                            <ContextLine changes={message.changes} text={message.text} />
+                            <ContextLine
+                              changes={message.changes}
+                              text={message.text}
+                              skill={message.skill}
+                            />
                           </Trace>
                         ) : message.role === 'user' ? (
                           <>

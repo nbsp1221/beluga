@@ -7,6 +7,7 @@ import {
   type RunSettings,
   accessModeInputSchema,
   agentPresetInputSchema,
+  agentSkillsCapabilityId,
   availableAccessModes,
   createSessionSchema,
   productRoutes,
@@ -25,6 +26,7 @@ import '../auth/services.js';
 import { primaryAgentName } from '../trajectory/contract.js';
 import { allowsTools, workspaceToolAccess } from '../workspace/tool-access.js';
 import { observeConversationActivity } from './activity.js';
+import { mountSkillSuggestions } from './skills-http.js';
 
 const initialData = v.object({ sessionId: v.string() });
 
@@ -110,6 +112,7 @@ export function createHarnessHost(
         catalog,
         capabilitiesById,
         context.get('workspaceToolSessions'),
+        providers.contextWindow,
       );
       const runtime = await start({
         agents: [BelugaPresetAgent],
@@ -136,6 +139,12 @@ export function createHarnessHost(
       mountProviders(app, providers, catalog);
 
       activity.mountRoutes(app);
+
+      const skills = capabilitiesById.get(agentSkillsCapabilityId);
+      const listSkills = skills && 'useContext' in skills ? skills.listSkills : undefined;
+      if (listSkills) {
+        mountSkillSuggestions(app, catalog, listSkills);
+      }
 
       app.on(
         productRoutes.listConversations.method,
@@ -386,6 +395,7 @@ function createPresetAgent(
   catalog: Pick<WorkspaceCatalog, 'findSession' | 'sessionPreset' | 'sessionAccessMode'>,
   capabilitiesById: ReadonlyMap<string, AgentCapability>,
   sessions: WorkspaceToolSessions,
+  contextWindow: ReturnType<OpenModelProviders>['contextWindow'],
 ) {
   function BelugaPresetAgent() {
     const { sessionId } = useInitialData<v.InferOutput<typeof initialData>>();
@@ -408,14 +418,22 @@ function createPresetAgent(
       return capability;
     });
     const cwd = sessions.workspaceRootForSession(sessionId);
-    const contexts = capabilities
+    const separator = settings.model.indexOf('/');
+    const window = contextWindow(
+      settings.model.slice(0, separator),
+      settings.model.slice(separator + 1),
+    );
+    const fileHooks = capabilities
       .filter((capability) => 'useContext' in capability)
-      .map((capability) => capability.useContext(cwd, sessionId));
+      .flatMap((capability) => {
+        const { onFiles } = capability.useContext(cwd, sessionId, window);
+        return onFiles ? [onFiles] : [];
+      });
     const onFiles =
-      contexts.length > 0
+      fileHooks.length > 0
         ? async (paths: readonly string[], toolCallId: string, signal?: AbortSignal) => {
-            for (const context of contexts) {
-              await context.onFiles(paths, toolCallId, signal);
+            for (const hook of fileHooks) {
+              await hook(paths, toolCallId, signal);
             }
           }
         : undefined;
@@ -489,7 +507,7 @@ function bindSession(
   request: Request,
   origin: string,
   id: string,
-  message: { body: string; uid?: unknown; idempotencyKey?: unknown },
+  message: NonNullable<Awaited<ReturnType<typeof parseTextMessage>>>,
 ) {
   const headers = new Headers(request.headers);
   headers.delete('Content-Length');

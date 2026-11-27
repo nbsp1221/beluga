@@ -5,6 +5,7 @@ import { fileSearchCapability } from '@workspace/host-plugins/agent-capabilities
 import { fileWriteCapability } from '@workspace/host-plugins/agent-capabilities/file/write';
 import { shellExecCapability } from '@workspace/host-plugins/agent-capabilities/shell';
 import { agentInstructionsCapability } from '@workspace/host-plugins/agent-instructions/host';
+import { agentSkillsCapability } from '@workspace/host-plugins/agent-skills/host';
 import { connectionHost } from '@workspace/host-plugins/connection/host';
 import { type HarnessOptions, createHarnessHost } from '@workspace/host-plugins/harness/host';
 import { createTrajectoryHost } from '@workspace/host-plugins/trajectory/host';
@@ -34,6 +35,7 @@ export function hostPlugins(options: HostOptions): Plugin[] {
     const agentCapabilities = [
       ...toolCapabilities,
       agentInstructionsCapability(options.harness.instructionsDirectory),
+      agentSkillsCapability(options.harness.instructionsDirectory),
     ];
     plugins.push(
       createWorkspaceHost(workspaceCatalogPath(options.harness.databasePath)),

@@ -160,6 +160,17 @@ Git checks out text files with LF on every platform. Editors that support
 
 ### Write and review tests
 
+`pnpm test` runs the Host package tests before the product integration suite.
+Windows CI runs up to two Host test files at a time to bound the number of
+live Host fixtures on the runner.
+
+To run just the product suite, build its workspace dependencies first.
+
+```sh
+pnpm exec turbo run build --filter=@workspace/host-plugins
+pnpm test:integration
+```
+
 Start from a working example that exercises the same boundary. The
 [workspace instructions suite](../packages/host-plugins/test/agent-instructions.test.ts)
 uses the [Host fixture](../packages/host-plugins/test/fixtures/harness.ts) for a
@@ -179,7 +190,8 @@ that need both the Host and the web client.
   data and cleanup through the fixture or the runner's lifecycle.
 - Wait for a response, event, or observable state. Use local fixtures for
   dependencies such as model calls. Keep production credentials and fixed
-  delays out of the setup.
+  delays out of the setup. Use the test context's signal for normal Host
+  waits. Add a separate deadline when the case verifies timeout behavior.
 - When a case times out, check which operation was slow and see whether
   unrelated behaviors share that case. Raising a timeout does not address
   those causes. Use a longer deadline only for an operation with a known

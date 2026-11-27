@@ -1,8 +1,9 @@
 import { type FlueConversationPart, type FlueConversationState, createFlueClient } from '@flue/sdk';
 import {
   CONVERSATION_PATH,
+  skillInvocationAttributesSchema,
   workspaceInstructionChanges,
-  workspaceInstructionsRootError,
+  conversationFailureMessage,
 } from '@workspace/protocol/host';
 import type { AssistantMessagePart, Message, TurnActivity } from '../contract.js';
 
@@ -37,10 +38,11 @@ export function conversationMessages(
   const contexts = new Map<string, Extract<AssistantMessagePart, { type: 'context' }>>();
   for (const { id, role, submissionId, timestamp, parts, signal } of visible) {
     if (signal?.tagName === 'system-reminder') {
-      const changes = workspaceInstructionChanges(signal.attributes?.changes);
-      if (changes?.length) {
+      const skill = skillInvocationAttributesSchema.safeParse(signal.attributes).data;
+      const changes = workspaceInstructionChanges(signal.attributes?.changes) ?? [];
+      if ((skill && !skill.restored) || changes.length) {
         const text = parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('');
-        const context = { type: 'context' as const, id, changes, text };
+        const context = { type: 'context' as const, id, changes, text, skill };
         contexts.set(id, context);
         const toolId = signal.attributes?.toolCallId;
         if (toolId) {
@@ -85,13 +87,7 @@ export function conversationMessages(
     return {
       state: outcome,
       durationMs,
-      error:
-        error &&
-        typeof error === 'object' &&
-        'type' in error &&
-        error.type === workspaceInstructionsRootError.type
-          ? workspaceInstructionsRootError.message
-          : undefined,
+      error: conversationFailureMessage(error),
     };
   }
 
@@ -99,9 +95,11 @@ export function conversationMessages(
     if (message.signal?.tagName === 'system-reminder') {
       const context = contexts.get(message.id);
       const toolId = message.signal.attributes?.toolCallId;
-      return context && (!toolId || !toolIds.has(toolId))
-        ? [{ id: context.id, role: 'context', changes: context.changes, text: context.text }]
-        : [];
+      if (!context || (toolId && toolIds.has(toolId))) {
+        return [];
+      }
+      const { id, changes, text, skill } = context;
+      return [{ id, role: 'context', changes, text, skill }];
     }
     const result = message.submissionId ? results.get(message.submissionId) : undefined;
     const endedAt = captureTime(result?.timestamp);
@@ -157,6 +155,7 @@ export function conversationMessages(
           : part.state === 'output-error'
             ? 'failed'
             : 'completed';
+      const attached = contextsByTool.get(part.toolCallId);
       parts.push({
         type: 'tool',
         id: part.toolCallId,
@@ -165,10 +164,10 @@ export function conversationMessages(
         status,
         output: part.output,
         error: part.errorText,
+        skillInstructions: attached?.find(({ skill }) => skill)?.text,
       });
-      const attached = contextsByTool.get(part.toolCallId);
       if (attached) {
-        parts.push(...attached);
+        parts.push(...attached.filter(({ skill }) => !skill));
       }
     }
 

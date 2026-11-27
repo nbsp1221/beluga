@@ -5,6 +5,8 @@ import type {
   ConversationActivity,
   ConversationUsage,
   RunSettings,
+  SkillContext,
+  SkillListing,
   WorkspaceInstructionChanges,
 } from '@workspace/protocol/host';
 import type { ComponentType } from 'react';
@@ -14,6 +16,7 @@ type ContextMessage = {
   id: string;
   text: string;
   changes: WorkspaceInstructionChanges;
+  skill?: SkillContext;
 };
 
 export type AssistantMessagePart =
@@ -28,6 +31,7 @@ export type AssistantMessagePart =
       status: 'running' | 'completed' | 'failed' | 'incomplete';
       output?: unknown;
       error?: string;
+      skillInstructions?: string;
     };
 
 export type TurnActivity =
@@ -97,6 +101,14 @@ export interface ConversationClient {
   observeSession?(this: void, id: string): () => void;
   observeUsage?(this: void, id: string): () => void;
   setDraft(this: void, sessionId: string, text: string): void;
+  listSkills?(
+    this: void,
+    session: Pick<
+      Session,
+      'id' | 'workspaceId' | 'agentPresetId' | 'agentPresetVersion' | 'isDraft'
+    >,
+    signal: AbortSignal,
+  ): Promise<SkillListing>;
   send(this: void, sessionId: string, options: SendOptions): Promise<void>;
   stop?(this: void, sessionId: string, submissionId: string): Promise<void>;
 }

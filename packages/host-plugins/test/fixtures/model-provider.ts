@@ -26,6 +26,7 @@ export interface ModelRequest {
   result: ToolResultMessage | undefined;
   instructions: string;
   workspaceInstructions: string;
+  skillInstructions: string;
 }
 
 export function fixtureProvider(
@@ -57,9 +58,13 @@ export function fixtureProvider(
             )
             .join('');
 
-    const latest = context.messages.findLast(
-      (message) => message.role === 'user' && text(message.content).startsWith('{'),
+    const latestUser = context.messages.findLast(
+      (message) => message.role === 'user' && !text(message.content).startsWith('<'),
     );
+    const latest =
+      latestUser?.role === 'user' && text(latestUser.content).startsWith('{')
+        ? latestUser
+        : undefined;
     const prior = context.messages.findLast(
       (message) =>
         message === latest || message.role === 'toolResult' || message.role === 'assistant',
@@ -91,6 +96,11 @@ export function fixtureProvider(
         .filter((message) => message.role === 'user')
         .map((message) => text(message.content))
         .filter((content) => content.startsWith('<system-reminder type="agent-instructions"'))
+        .join('\n'),
+      skillInstructions: context.messages
+        .filter((message) => message.role === 'user')
+        .map((message) => text(message.content))
+        .filter((content) => content.startsWith('<system-reminder type="skill-invocation"'))
         .join('\n'),
     });
 

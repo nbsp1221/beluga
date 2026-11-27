@@ -13,6 +13,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
+      "env": ["CI"],
       "passThroughEnv": ["SystemRoot"]
     },
     "dev": {
@@ -34,7 +35,7 @@
       "dependsOn": ["@workspace/host-plugins#build", "@workspace/runtime#build"]
     },
     "//#test:integration": {
-      "dependsOn": ["@workspace/host-plugins#build", "@workspace/runtime#build"],
+      "dependsOn": ["@workspace/host-plugins#build", "@workspace/host-plugins#test"],
       "passThroughEnv": ["SystemRoot"]
     }
   }

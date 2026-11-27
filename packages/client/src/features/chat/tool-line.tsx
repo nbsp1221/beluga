@@ -36,12 +36,21 @@ export function ToolLine({
   const command = shell ? field(part.input, 'command') : undefined;
   const failed = part.status === 'failed';
   const subject = typeof command === 'string' ? command : part.name;
-  const label = {
-    running: `Running ${subject}`,
-    completed: `Ran ${subject}`,
-    failed: `Failed to run ${subject}`,
-    incomplete: `No result for ${subject}`,
-  }[part.status];
+  const skill = part.name === 'skill' ? field(part.input, 'name') : undefined;
+  const label =
+    typeof skill === 'string'
+      ? {
+          running: `Loading skill · ${skill}`,
+          completed: `Loaded skill · ${skill}`,
+          failed: `Could not load skill · ${skill}`,
+          incomplete: `Skill load interrupted · ${skill}`,
+        }[part.status]
+      : {
+          running: `Running ${subject}`,
+          completed: `Ran ${subject}`,
+          failed: `Failed to run ${subject}`,
+          incomplete: `No result for ${subject}`,
+        }[part.status];
 
   const line = (
     <TraceLine status={part.status === 'running' ? 'running' : failed ? 'error' : undefined}>
@@ -54,7 +63,7 @@ export function ToolLine({
     return line;
   }
 
-  const output = toolText(part.output);
+  const output = part.skillInstructions ?? toolText(part.output);
   const input = typeof command === 'string' ? command : toolText(part.input);
 
   if (!input && !output && !part.error) {
@@ -65,7 +74,12 @@ export function ToolLine({
       <TraceCollapsibleTrigger className="touch-target">{line}</TraceCollapsibleTrigger>
       <TraceCollapsibleContent className="flex flex-col gap-2">
         {input && <ToolDetails title={shell ? 'Command' : 'Input'} value={input} />}
-        {output && <ToolDetails title="Output" value={output} />}
+        {output && (
+          <ToolDetails
+            title={typeof skill === 'string' && !failed ? 'Instructions' : 'Output'}
+            value={output}
+          />
+        )}
         {part.error && <ToolDetails title="Error" value={part.error} />}
       </TraceCollapsibleContent>
     </TraceCollapsible>

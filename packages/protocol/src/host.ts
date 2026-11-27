@@ -5,6 +5,25 @@ export const workspaceInstructionsRootError = {
   type: 'workspace_instructions_root_unavailable',
   message: 'Beluga could not determine the project root for workspace instructions.',
 };
+export const skillLoadFailureType = 'skill_load_failed';
+
+export function isSkillLoadFailure(error: unknown) {
+  return Boolean(
+    error && typeof error === 'object' && 'type' in error && error.type === skillLoadFailureType,
+  );
+}
+
+export function conversationFailureMessage(error: unknown) {
+  if (!error || typeof error !== 'object' || !('type' in error)) {
+    return;
+  }
+  if (error.type === workspaceInstructionsRootError.type) {
+    return workspaceInstructionsRootError.message;
+  }
+  if (isSkillLoadFailure(error) && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+}
 
 export const CONVERSATION_PATH = '/api/conversations';
 export const CONVERSATION_ACTIVITY_PATH = `${CONVERSATION_PATH}/activity`;
@@ -14,9 +33,53 @@ export const AUTH_PATH = '/api/auth';
 export const DESKTOP_CONNECTIONS_PATH = '/api/desktop/connections';
 export const WORKSPACES_PATH = '/api/workspaces';
 export const WORKSPACE_FOLDERS_PATH = `${WORKSPACES_PATH}/folders`;
+export const AGENT_SKILLS_PATH = '/api/agent-skills';
+export const agentSkillsCapabilityId = 'agent-skills';
+export const skillInvocationSignal = 'skill-invocation';
+export const skillNameSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+export const skillSummarySchema = z.object({
+  id: z.string().regex(/^[a-f0-9]{64}$/),
+  name: skillNameSchema,
+  description: z.string(),
+  userOnly: z.boolean(),
+});
+
+export type SkillSummary = z.infer<typeof skillSummarySchema>;
+
+export const skillListingSchema = z.object({
+  items: z.array(skillSummarySchema),
+  incomplete: z.boolean(),
+});
+
+export type SkillListing = z.infer<typeof skillListingSchema>;
+
+export const skillInvocationAttributesSchema = z.object({
+  id: z.string(),
+  name: skillNameSchema,
+  scope: z.enum(['project', 'global']),
+  toolCallId: z.string().optional(),
+  restored: z.literal('true').optional(),
+});
+export const skillContextSchema = skillInvocationAttributesSchema.pick({ name: true, scope: true });
+
+export type SkillContext = z.infer<typeof skillContextSchema>;
+
+export function explicitSkillNames(text: string) {
+  const names = new Set<string>();
+  for (const match of text.matchAll(/(?:^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g)) {
+    if (skillNameSchema.safeParse(match[1]).success) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
 
 // The explicitly supported product routes are shared by Host registration and Desktop forwarding.
 export const productRoutes = {
+  listSkills: { method: 'GET', path: AGENT_SKILLS_PATH },
   listConversations: { method: 'GET', path: CONVERSATION_PATH },
   conversationActivity: { method: 'GET', path: CONVERSATION_ACTIVITY_PATH },
   acknowledgeConversation: { method: 'PUT', path: `${CONVERSATION_PATH}/:id/read` },
@@ -100,6 +163,7 @@ export const trajectoryRecordSchema = z.discriminatedUnion('kind', [
     text: z.string(),
     body: z.string(),
     changes: workspaceInstructionChangesSchema,
+    skill: skillContextSchema.optional(),
     modelRequestId: z.string(),
     timestamp: z.string().optional(),
   }),

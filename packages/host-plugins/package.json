@@ -23,6 +23,10 @@
       "types": "./dist/agent-instructions/host.d.ts",
       "default": "./dist/agent-instructions/host.js"
     },
+    "./agent-skills/host": {
+      "types": "./dist/agent-skills/host.d.ts",
+      "default": "./dist/agent-skills/host.js"
+    },
     "./workspace/host": {
       "types": "./dist/workspace/host.d.ts",
       "default": "./dist/workspace/host.js"

@@ -244,6 +244,16 @@ function InstructionContextDetails({
 }: {
   record: Extract<TrajectoryRecord, { kind: 'context' }>;
 }) {
+  if (record.skill) {
+    return (
+      <DetailSection title={`Skill · ${record.skill.name}`}>
+        <p className="text-muted-foreground">
+          {record.skill.scope === 'project' ? 'Project skill' : 'Global skill'}
+        </p>
+        <Payload value={record.body} empty="No instructions" />
+      </DetailSection>
+    );
+  }
   return (
     <DetailSection title="Workspace instructions">
       <ul className="flex flex-col gap-1">

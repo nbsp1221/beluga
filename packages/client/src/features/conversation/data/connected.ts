@@ -1,13 +1,17 @@
 import { FlueExecutionError } from '@flue/sdk';
 import {
+  AGENT_SKILLS_PATH,
   CONVERSATION_PATH,
   type SessionSummary,
   accessModeInputSchema,
   availableAccessModes,
   conversationCatalogSchema,
+  conversationFailureMessage,
   conversationUsageSchema,
+  isSkillLoadFailure,
   runSettingsSchema,
   sessionSummarySchema,
+  skillListingSchema,
 } from '@workspace/protocol/host';
 import { readPreference, writePreference } from '@workspace/ui/lib/browser-storage';
 import { v4 as uuid } from 'uuid';
@@ -157,6 +161,25 @@ export function createConnectedConversation({
     activity,
     getSnapshot,
     subscribe,
+    async listSkills(session, signal) {
+      const params = new URLSearchParams();
+      if (session.isDraft) {
+        const state = agentPresets.getSnapshot();
+        const id = session.agentPresetId ?? state.defaultPresetId;
+        const preset = state.presets.find((item) => item.id === id);
+        if (!session.workspaceId || !preset) {
+          return { items: [], incomplete: false };
+        }
+        params.set('workspaceId', session.workspaceId);
+        params.set('presetId', preset.id);
+        params.set('presetVersion', String(preset.version));
+      } else {
+        params.set('sessionId', session.id);
+      }
+      return skillListingSchema.parse(
+        await request(`${AGENT_SKILLS_PATH}?${params}`, undefined, 'GET', signal),
+      );
+    },
     createSession(workspaceId) {
       const session = draftSession(workspaceId ?? preferredWorkspace(getSnapshot().sessions));
       rememberWorkspace(session.workspaceId);
@@ -446,7 +469,15 @@ function createSubmissionClient({
       try {
         await client.wait(receipt, { signal });
       } catch (error) {
-        if (!(error instanceof FlueExecutionError && error.failure === 'aborted')) {
+        if (error instanceof FlueExecutionError && isSkillLoadFailure(error.error)) {
+          update(id, (session) => ({ ...session, draft: session.draft || text }));
+        }
+        if (
+          !(
+            error instanceof FlueExecutionError &&
+            (error.failure === 'aborted' || conversationFailureMessage(error.error))
+          )
+        ) {
           throw error;
         }
       }
