@@ -67,7 +67,12 @@ function compactionProvider(
     });
     const userInput = JSON.stringify(user ?? null);
     const summary = userInput.includes('<conversation>');
-    const pressure = !summary && userInput.includes('Trigger threshold') ? 29_000 : 1_000;
+    const pressure =
+      maxInputCharacters !== undefined
+        ? Math.ceil(JSON.stringify(context.messages).length / 4)
+        : !summary && userInput.includes('Trigger threshold')
+          ? 29_000
+          : 1_000;
     const stream = createAssistantMessageEventStream();
     const response: AssistantMessage = {
       role: 'assistant',
@@ -485,7 +490,105 @@ test.for([
   },
 );
 
-test('compacts intervening joined messages after a pending skill', async (context) => {
+test.for([42_000, 68_000])(
+  'compacts earlier history before admitting %i-character inputs from the queue',
+  async (length, context) => {
+    const inputLimit = 128_000;
+    const responding = deferred();
+    const releaseReply = deferred();
+    const requests: { summary: boolean; input: string }[] = [];
+    const harness = await setupHarness(context, [], undefined, () => {
+      const provider = compactionProvider(
+        undefined,
+        undefined,
+        async () => {
+          responding.resolve();
+          await releaseReply.promise;
+        },
+        inputLimit,
+      );
+      return {
+        ...provider,
+        streamSimple(model, input, options) {
+          const serialized = JSON.stringify(input.messages);
+          requests.push({ summary: serialized.includes('<conversation>'), input: serialized });
+          return provider.streamSimple(model, input, options);
+        },
+      };
+    });
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset();
+    const { id } = await harness.create(workspace.id, preset.id);
+    const url = `${origin}/api/conversations/${id}/trajectory`;
+    const client = harness.sdk(id);
+
+    const send = (body: string) =>
+      client.send({ message: { kind: 'user', body }, signal: context.signal });
+
+    const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
+      client.wait(receipt, { signal: context.signal });
+
+    for (let index = 0; index < 4; index++) {
+      await wait(await send(`Earlier history ${index} `.padEnd(24_000, 's')));
+    }
+    const running = wait(await send('Hold model response'));
+    const first = 'First queued long input';
+    const second = 'Second queued long input';
+    try {
+      await Promise.race([responding.promise, running]);
+      const queued = [
+        await send('Short queued input'),
+        await send(first.padEnd(length, 'a')),
+        await send(second.padEnd(length, 'b')),
+      ];
+      releaseReply.resolve();
+      await Promise.all([running, ...queued.map(wait)]);
+    } finally {
+      releaseReply.resolve();
+    }
+    await wait(await send('Short follow-up'));
+
+    const firstSummary = requests.findIndex(({ summary }) => summary);
+    expect(firstSummary).toBeGreaterThanOrEqual(0);
+    expect(requests[firstSummary].input).toContain('Earlier history');
+    expect(requests.every(({ input }) => input.length <= inputLimit)).toBe(true);
+    expect(
+      requests.some(({ summary, input }) => !summary && input.includes('Short queued input')),
+    ).toBe(true);
+    for (const marker of [first, second]) {
+      const firstUse = requests.findIndex(({ input }) => input.includes(marker));
+      expect(firstUse).toBeGreaterThan(firstSummary);
+      expect(requests[firstUse].summary).toBe(false);
+      expect(requests[firstUse].input).toContain(checkpoint);
+    }
+
+    const trajectory = await readTrajectory(harness.fetch(url));
+    const records = trajectory.flatMap((turn) => turn.records);
+    const answers = records
+      .filter((record) => record.kind === 'assistant')
+      .filter((record) => record.purpose === 'agent');
+    expect(answers.every(({ status }) => status === 'completed')).toBe(true);
+    expect(answers.at(-1)?.text).toBe('Reply.');
+    expect(requests.at(-1)?.input).toContain('Short follow-up');
+    const summaryTurn = trajectory.find(({ records }) =>
+      records.some((record) => record.kind === 'assistant' && record.purpose === 'compaction'),
+    );
+    assert(summaryTurn);
+    const summaryRecord = summaryTurn.records.find(
+      (record) => record.kind === 'assistant' && record.purpose === 'compaction',
+    );
+    assert(summaryRecord);
+    const snapshot = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${url}/${summaryTurn.id}/${summaryRecord.id}`)).json(),
+    );
+    const summaryInput = JSON.stringify(snapshot.messages);
+    expect(summaryInput).toContain('Earlier history');
+    expect(summaryInput).not.toContain(first);
+    expect(summaryInput).not.toContain(second);
+  },
+);
+
+test('runs a pending skill before compacting to admit queued long inputs', async (context) => {
   const inputLimit = 128_000;
   const pendingReview = 'PENDING_REVIEW_SKILL_BODY';
   const responding = deferred();
@@ -542,17 +645,18 @@ test('compacts intervening joined messages after a pending skill', async (contex
     releaseReply.resolve();
   }
 
-  const overflow = requests.find(({ summary, input }) => !summary && input.length > inputLimit);
-  const summary = requests.find((request) => request.summary);
-  const retry = requests.find(({ summary, input }) => !summary && input.includes(checkpoint));
-  expect(overflow?.input).toContain(pendingReview);
-  expect(overflow?.input).toContain('First joined message');
-  expect(overflow?.input).toContain('Latest joined message');
-  expect(summary?.input).toContain('First joined message');
-  expect(summary?.input).not.toContain(pendingReview);
-  expect(retry?.input).toContain('Latest joined message');
-  expect(retry?.input).not.toContain(pendingReview);
-  expect(retry?.input.length).toBeLessThanOrEqual(inputLimit);
+  const skillRequest = requests.findIndex(
+    ({ summary, input }) => !summary && input.includes(pendingReview),
+  );
+  const firstInput = requests.findIndex(({ input }) => input.includes('First joined message'));
+  const latestInput = requests.findIndex(({ input }) => input.includes('Latest joined message'));
+  expect(skillRequest).toBeGreaterThanOrEqual(0);
+  expect(firstInput).toBeGreaterThanOrEqual(skillRequest);
+  expect(latestInput).toBeGreaterThan(firstInput);
+  expect(requests[firstInput].summary).toBe(false);
+  expect(requests[latestInput].summary).toBe(false);
+  expect(requests.slice(firstInput + 1, latestInput).some(({ summary }) => summary)).toBe(true);
+  expect(requests.every(({ input }) => input.length <= inputLimit)).toBe(true);
 });
 
 test('restores workspace instructions in the model request that retries an overflow', async (context) => {
