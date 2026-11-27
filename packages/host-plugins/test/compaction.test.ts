@@ -45,8 +45,13 @@ function toolResponse(model: Parameters<Provider['streamSimple']>[0], calls: Too
   return stream;
 }
 
+interface SummaryFixture {
+  text: string;
+  stopReason: 'stop' | 'length';
+}
+
 function compactionProvider(
-  onSummary?: (signal?: AbortSignal) => Promise<void>,
+  onSummary?: (signal?: AbortSignal) => Promise<void | SummaryFixture>,
   alternateWindow = 128_000,
   beforeReply?: () => Promise<void>,
   maxInputCharacters?: number,
@@ -92,7 +97,7 @@ function compactionProvider(
       },
     };
 
-    const send = () => {
+    const send = (result?: void | SummaryFixture) => {
       if (
         (maxInputCharacters !== undefined &&
           JSON.stringify(context.messages).length > maxInputCharacters) ||
@@ -111,7 +116,14 @@ function compactionProvider(
         });
         return;
       }
-      stream.push({ type: 'done', reason: 'stop', message: response });
+      const message: AssistantMessage = result
+        ? {
+            ...response,
+            content: [{ type: 'text', text: result.text }],
+            stopReason: result.stopReason,
+          }
+        : response;
+      stream.push({ type: 'done', reason: result?.stopReason ?? 'stop', message });
     };
 
     const hold = summary
@@ -587,6 +599,161 @@ test.for([42_000, 68_000])(
     expect(summaryInput).not.toContain(second);
   },
 );
+
+test.for(['blank', 'truncated'] as const)(
+  'keeps the earlier decision when preflight returns a %s summary',
+  async (outcome, context) => {
+    const decision = 'Keep port 4173 for the rollout';
+    const harness = await setupHarness(context, [], undefined, () =>
+      compactionProvider(
+        () =>
+          Promise.resolve(
+            outcome === 'blank'
+              ? { text: ' \n', stopReason: 'stop' }
+              : { text: '## Goal\nThe rollout', stopReason: 'length' },
+          ),
+        undefined,
+        undefined,
+        128_000,
+      ),
+    );
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset();
+    const { id } = await harness.create(workspace.id, preset.id);
+    const client = harness.sdk(id);
+
+    const submit = async (body: string) => {
+      const receipt = await client.send({
+        message: { kind: 'user', body },
+        signal: context.signal,
+      });
+      await client.wait(receipt, { signal: context.signal });
+    };
+
+    await submit(decision.padEnd(24_000, 's'));
+    for (let index = 1; index < 4; index++) {
+      await submit(`Earlier history ${index} `.padEnd(24_000, 's'));
+    }
+    await submit('A new message crossing the compaction threshold '.padEnd(20_000, 'n'));
+
+    const url = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(url))).at(-1);
+    assert(turn);
+    const firstCompaction = turn.records.findIndex(({ kind }) => kind === 'compaction');
+    const agentRequest = turn.records.find(
+      (record) => record.kind === 'assistant' && record.purpose === 'agent',
+    );
+    assert(agentRequest);
+    expect(firstCompaction).toBeGreaterThanOrEqual(0);
+    expect(firstCompaction).toBeLessThan(turn.records.indexOf(agentRequest));
+    expect(turn.records[firstCompaction]).toMatchObject({ reason: 'threshold', status: 'failed' });
+    expect(agentRequest).toMatchObject({ status: 'completed' });
+    const input = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${url}/${turn.id}/${agentRequest.id}`)).json(),
+    );
+    expect(JSON.stringify(input.messages)).toContain(decision);
+  },
+);
+
+test('preserves the accepted message when preflight compaction is stopped', async (context) => {
+  const summaryStarted = deferred();
+  const releaseSummary = deferred();
+  let pause = true;
+  const harness = await setupHarness(context, [], undefined, () =>
+    compactionProvider(
+      async (signal) => {
+        if (!pause) {
+          return;
+        }
+        pause = false;
+        summaryStarted.resolve();
+        await Promise.race([
+          releaseSummary.promise,
+          new Promise<never>((_, reject) => {
+            if (signal?.aborted) {
+              reject(new DOMException('Summary cancelled', 'AbortError'));
+            } else {
+              signal?.addEventListener(
+                'abort',
+                () => reject(new DOMException('Summary cancelled', 'AbortError')),
+                { once: true },
+              );
+            }
+          }),
+        ]);
+      },
+      undefined,
+      undefined,
+      128_000,
+    ),
+  );
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset();
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+
+  const send = (body: string) =>
+    client.send({ message: { kind: 'user', body }, signal: context.signal });
+
+  for (let index = 0; index < 4; index++) {
+    await client.wait(await send(`Earlier history ${index} `.padEnd(24_000, 's')), {
+      signal: context.signal,
+    });
+  }
+
+  const marker = 'New message during compaction';
+  const receipt = await send(marker.padEnd(42_000, 'n'));
+  const settlement = client.wait(receipt, { signal: context.signal }).then(
+    () => ({ outcome: 'completed' }),
+    (error: unknown) => ({ error }),
+  );
+
+  try {
+    await Promise.race([
+      summaryStarted.promise,
+      settlement.then(() => {
+        throw new Error('Submission settled before compaction started');
+      }),
+    ]);
+
+    const reconnected = await harness.sdk(id).history();
+    const visibleMessage = reconnected.messages.find(
+      (message) =>
+        message.role === 'user' &&
+        message.display === 'visible' &&
+        message.submissionId === receipt.submissionId,
+    );
+    expect(
+      visibleMessage?.parts.some((part) => part.type === 'text' && part.text.includes(marker)),
+    ).toBe(true);
+    expect(
+      reconnected.settlements.some(({ submissionId }) => submissionId === receipt.submissionId),
+    ).toBe(false);
+
+    const url = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(url))).at(-1);
+    const summary = turn?.records.find(
+      (record) => record.kind === 'assistant' && record.purpose === 'compaction',
+    );
+    assert(turn && summary);
+    const request = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${url}/${turn.id}/${summary.id}`)).json(),
+    );
+    expect(JSON.stringify(request.messages)).toContain('Earlier history');
+    expect(JSON.stringify(request.messages)).not.toContain(marker);
+
+    await harness.sdk(id).abort();
+    expect(await settlement).toMatchObject({ error: { failure: 'aborted' } });
+    await harness.restart();
+    const history = await harness.sdk(id).history();
+    expect(JSON.stringify(history.messages)).toContain(marker);
+    expect(history.settlements).toContainEqual(
+      expect.objectContaining({ submissionId: receipt.submissionId, outcome: 'aborted' }),
+    );
+  } finally {
+    releaseSummary.resolve();
+  }
+});
 
 test('runs a pending skill before compacting to admit queued long inputs', async (context) => {
   const inputLimit = 128_000;
