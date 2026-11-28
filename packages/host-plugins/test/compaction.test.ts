@@ -7,6 +7,7 @@ import {
   type ToolCall,
   createAssistantMessageEventStream,
 } from '@earendil-works/pi-ai';
+import { instrument } from '@flue/runtime';
 import {
   agentSkillsCapabilityId,
   conversationUsageSchema,
@@ -1063,3 +1064,75 @@ test.for(['failed', 'interrupted', 'overflow'] as const)(
     expect(usage.context?.status).toBe('available');
   },
 );
+
+test('keeps the interrupted summary step without unconfirmed input', async (context) => {
+  let summaryCalls = 0;
+  const harness = await setupHarness(context, [], undefined, () =>
+    compactionProvider(() => {
+      summaryCalls++;
+      return Promise.resolve();
+    }),
+  );
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset();
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+
+  const send = (body: string) => client.send({ message: { kind: 'user', body } });
+
+  const wait = (receipt: Awaited<ReturnType<typeof send>>) =>
+    client.wait(receipt, { signal: context.signal });
+
+  for (let index = 0; index < 4; index++) {
+    await wait(await send(`Seed ${index}: ${'work '.repeat(4_000)}`));
+  }
+
+  let compacting = false;
+  const reached = deferred();
+  const release = deferred();
+  const dispose = instrument({
+    observe(event) {
+      if (event.type === 'compaction_start') {
+        compacting = true;
+      }
+    },
+    dispose() {},
+    async interceptor(operation, _context, next) {
+      if (compacting && operation.type === 'model') {
+        reached.resolve();
+        await release.promise;
+      }
+      return next();
+    },
+  });
+  try {
+    const settled = wait(await send('Trigger threshold'));
+    try {
+      await Promise.race([reached.promise, settled]);
+      expect((await client.abort()).aborted).toBe(true);
+    } finally {
+      release.resolve();
+      await settled;
+    }
+    const history = await readTrajectory(
+      harness.fetch(`${origin}/api/conversations/${id}/trajectory`),
+    );
+    expect(summaryCalls).toBe(0);
+    const turn = history.at(-1);
+    assert(turn);
+    expect(turn.records).toContainEqual(
+      expect.objectContaining({ kind: 'compaction', status: 'interrupted' }),
+    );
+    const summary = turn.records.find(
+      (record) => record.kind === 'assistant' && record.purpose === 'compaction',
+    );
+    assert(summary);
+    expect(summary).toMatchObject({ status: 'interrupted' });
+    const input = await harness.fetch(
+      `${origin}/api/conversations/${id}/trajectory/${turn.id}/${summary.id}`,
+    );
+    expect(input.status).toBe(404);
+  } finally {
+    await dispose();
+  }
+});

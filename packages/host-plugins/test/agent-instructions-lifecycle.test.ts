@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { copyFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import {
   type AssistantMessage,
   type Provider,
@@ -32,7 +33,7 @@ const ruleVersions = (text: string) =>
 
 const encode = (value: unknown) => JSON.stringify(value);
 
-type Mode = 'race' | 'overflow';
+type Mode = 'race' | 'overflow' | 'restart';
 
 const userMessage = v.object({
   role: v.literal('user'),
@@ -58,17 +59,25 @@ function provider(inputs: ModelInput[], mode: Mode): Provider {
   const model = base.getModels()[0];
   let called = false;
   let overflowed = false;
+  let seeded = false;
 
   const streamSimple: Provider['streamSimple'] = (selected, context) => {
     const text = encode(context.messages);
     const summary = text.includes('<conversation>');
     inputs.push({ messages: context.messages, summary });
     const trigger = text.includes('AUDIT_RUN_TOOLS');
+    const seed = mode === 'restart' && !seeded && text.includes('AUDIT_SEED_SCOPE');
     let tools: ToolCall[] = [];
-    if (!summary && trigger && !called) {
-      called = true;
+    if (!summary && (seed || (trigger && !called))) {
+      seeded ||= seed;
+      called ||= trigger;
       tools = [
-        { type: 'toolCall', id: 'audit-read', name: 'read', arguments: { path: 'docs/notes.txt' } },
+        {
+          type: 'toolCall',
+          id: seed ? 'seed-read' : 'audit-read',
+          name: 'read',
+          arguments: { path: 'docs/notes.txt' },
+        },
       ];
       if (mode === 'race') {
         tools.push({
@@ -76,6 +85,14 @@ function provider(inputs: ModelInput[], mode: Mode): Provider {
           id: 'audit-edit',
           name: 'edit',
           arguments: { path: 'AGENTS.md', edits: [{ oldText: v1, newText: v2 }] },
+        });
+      }
+      if (mode === 'restart' && !seed) {
+        tools.push({
+          type: 'toolCall',
+          id: 'sibling-read',
+          name: 'read',
+          arguments: { path: 'README.md' },
         });
       }
     }
@@ -123,9 +140,8 @@ function provider(inputs: ModelInput[], mode: Mode): Provider {
 
 async function setup(context: TestContext, mode: Mode) {
   const inputs: ModelInput[] = [];
-  const harness = await setupHarness(context, allCapabilities, undefined, () =>
-    provider(inputs, mode),
-  );
+  const modelProvider = provider(inputs, mode);
+  const harness = await setupHarness(context, allCapabilities, undefined, () => modelProvider);
   const ruleFile = join(harness.project, 'AGENTS.md');
   const nestedFile = join(harness.project, 'docs', 'AGENTS.md');
   await writeFile(ruleFile, v1);
@@ -153,8 +169,9 @@ async function setup(context: TestContext, mode: Mode) {
   return { harness, inputs, ruleFile, nestedFile, client, send, wait, trajectory, getInput };
 }
 
-async function verifyLastModel(fixture: Awaited<ReturnType<typeof setup>>) {
-  const turn = (await fixture.trajectory()).at(-1);
+async function verifyLastModel(fixture: Awaited<ReturnType<typeof setup>>, submissionId?: string) {
+  const turns = await fixture.trajectory();
+  const turn = submissionId ? turns.find(({ id }) => id === submissionId) : turns.at(-1);
   assert(turn);
   const model = turn.records.findLast(
     (record) => record.kind === 'assistant' && record.purpose === 'agent',
@@ -282,6 +299,129 @@ test('restores only the missing scope on the overflow retry and in Trace', async
     contexts.filter(({ modelRequestId }) => modelRequestId === model.id).map(({ text }) => text),
   ).toEqual(['AGENTS.md']);
 });
+
+test.for(['keep', 'edit', 'delete', 'unavailable'] as const)(
+  'reconciles a retained instruction after a partial restart (%s file)',
+  async (file, context) => {
+    const fixture = await setup(context, 'restart');
+    const { harness, nestedFile } = fixture;
+    const replacement = 'AUDIT_CURRENT_DOCS_INSTRUCTIONS';
+    const unavailable = file === 'unavailable';
+    if (unavailable) {
+      // Persist the older text before the interrupted read discovers its replacement.
+      await fixture.wait(await fixture.send('AUDIT_SEED_SCOPE'));
+      await writeFile(nestedFile, replacement);
+    }
+    const held = latch();
+    const release = latch();
+    const dispose = instrument({
+      observe() {},
+      dispose() {},
+      async interceptor(operation, _context, next) {
+        if (operation.type === 'tool' && operation.toolCallId === 'sibling-read') {
+          held.resolve();
+          await release.promise;
+        }
+        return next();
+      },
+    });
+    const snapshot = join(dirname(harness.databasePath), 'interrupted.sqlite');
+    let receipt: Awaited<ReturnType<typeof fixture.send>>;
+    try {
+      receipt = await fixture.send('AUDIT_RUN_TOOLS');
+      const settled = fixture.client.wait(receipt, { signal: context.signal });
+      try {
+        await Promise.race([held.promise, settled]);
+        const db = new DatabaseSync(harness.databasePath);
+        try {
+          await vi.waitFor(
+            () => {
+              const batches = db.prepare('SELECT data FROM flue_conversation_stream_batches').all();
+
+              const hasOutcome = (id: string) =>
+                batches.some(
+                  ({ data }) =>
+                    typeof data === 'string' &&
+                    data.includes('"type":"tool_outcome"') &&
+                    data.includes(`"toolCallId":"${id}"`),
+                );
+
+              expect(hasOutcome('audit-read')).toBe(true);
+              expect(hasOutcome('sibling-read')).toBe(false);
+              expect(encode(db.prepare('SELECT * FROM flue_agent_submissions').all())).toContain(
+                unavailable ? replacement : nested,
+              );
+            },
+            { timeout: 4_000 },
+          );
+          db.prepare('VACUUM INTO ?').run(snapshot);
+        } finally {
+          db.close();
+        }
+      } finally {
+        release.resolve();
+        await settled;
+      }
+    } finally {
+      await dispose();
+    }
+
+    await harness.getRuntime().dispose();
+    const db = new DatabaseSync(snapshot);
+    try {
+      // The replaced worker's lease must expire before another worker can recover its submission.
+      expect(
+        db
+          .prepare(
+            "UPDATE flue_agent_submissions SET lease_expires_at = ? WHERE status = 'running'",
+          )
+          .run(Date.now() - 1).changes,
+      ).toBe(1);
+    } finally {
+      db.close();
+    }
+    await copyFile(snapshot, harness.databasePath);
+    const deleted = file === 'delete';
+    if (deleted) {
+      await unlink(nestedFile);
+    } else if (file === 'edit') {
+      await writeFile(nestedFile, replacement);
+    }
+    expect(await readFile(nestedFile, 'utf8').catch(() => undefined)).toBe(
+      deleted ? undefined : file === 'keep' ? nested : replacement,
+    );
+    await harness.restart();
+    await fixture.client.wait(receipt, { signal: context.signal });
+
+    const files = harness.getRuntime().get('workspaceFiles');
+    const read = files.read;
+    const readSpy = vi.spyOn(files, 'read').mockImplementation((target, options) => {
+      if (unavailable && target.absolutePath === nestedFile) {
+        throw new Error('Temporary permission failure reading saved instructions');
+      }
+      return read(target, options);
+    });
+    context.onTestFinished(() => {
+      readSpy.mockRestore();
+    });
+    const followUp = await fixture.send('Continue after restart');
+    await fixture.wait(followUp);
+
+    const { model, signals, contexts } = await verifyLastModel(fixture, followUp.submissionId);
+    const removal = 'Instructions removed: "docs/AGENTS.md"';
+    const scopeChanges = contexts
+      .filter(({ modelRequestId }) => modelRequestId === model.id)
+      .flatMap(({ changes }) => changes)
+      .filter(({ path }) => path === 'docs/AGENTS.md')
+      .map(({ action }) => action);
+    expect(signals.filter((text) => text.includes(nested))).toHaveLength(1);
+    expect(signals.filter((text) => text.includes(replacement))).toHaveLength(
+      file === 'edit' || unavailable ? 1 : 0,
+    );
+    expect(signals.filter((text) => text.includes(removal))).toHaveLength(deleted ? 1 : 0);
+    expect(scopeChanges).toEqual(deleted ? ['remove'] : file === 'edit' ? ['replace'] : []);
+  },
+);
 
 test('a held instruction update does not block a second conversation in the same workspace', async (context) => {
   const harness = await setupHarness(context, allCapabilities);

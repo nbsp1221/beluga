@@ -36,12 +36,11 @@ interface InstructionFile {
   truncated: boolean;
 }
 
-interface ScopeUpdate {
-  directory: string;
-  file?: InstructionFile;
-  unavailable?: boolean;
-}
+type ScopeObservation =
+  | { status: 'present'; file: InstructionFile }
+  | { status: 'absent' | 'unavailable' };
 
+/** Saved discovery state for the next scan, including scopes hidden by compaction. */
 export interface InstructionState {
   instance?: string;
   root?: string;
@@ -146,19 +145,19 @@ async function readScope(
   global: boolean,
   maxSourceBytes: number,
   signal?: AbortSignal,
-): Promise<ScopeUpdate> {
+): Promise<ScopeObservation> {
   if (!global) {
     try {
       if (relative(directory, await files.realpath(directory))) {
-        return { directory };
+        return { status: 'absent' };
       }
     } catch (error) {
       signal?.throwIfAborted();
       if (isMissing(error)) {
-        return { directory };
+        return { status: 'absent' };
       }
       console.warn('Beluga could not resolve the agent instructions directory', directory);
-      return { directory, unavailable: true };
+      return { status: 'unavailable' };
     }
   }
   for (const filename of filenames) {
@@ -167,13 +166,13 @@ async function readScope(
     try {
       const file = await readInstruction(files, path, maxSourceBytes, signal);
       if (!file) {
-        return { directory, unavailable: true };
+        return { status: 'unavailable' };
       }
       if (file.text) {
-        return { directory, file: { directory, path, ...file } };
+        return { status: 'present', file: { directory, path, ...file } };
       }
       if (!global) {
-        return { directory };
+        return { status: 'absent' };
       }
     } catch (error) {
       signal?.throwIfAborted();
@@ -185,26 +184,26 @@ async function readScope(
         continue;
       }
       console.warn('Beluga could not read agent instructions', path);
-      return { directory, unavailable: true };
+      return { status: 'unavailable' };
     }
   }
-  return { directory };
+  return { status: 'absent' };
 }
 
 function applyScopes(
   state: InstructionState,
-  updates: readonly ScopeUpdate[],
+  observations: ReadonlyMap<string, ScopeObservation>,
   maxBytes: number,
 ): InstructionState {
   const files = new Map(state.project.map((file) => [file.directory, file]));
   const omitted = new Set(state.omitted);
-  for (const { directory, file, unavailable } of updates) {
-    if (unavailable) {
+  for (const [directory, observation] of observations) {
+    if (observation.status === 'unavailable') {
       continue;
     }
     omitted.delete(directory);
-    if (file) {
-      files.set(directory, retainTruncation(files.get(directory), file));
+    if (observation.status === 'present') {
+      files.set(directory, retainTruncation(files.get(directory), observation.file));
     } else {
       files.delete(directory);
     }
@@ -255,25 +254,76 @@ export async function refreshInstructions(
   root: string,
   previous: InstructionState,
   signal: AbortSignal | undefined,
-  options: InstructionOptions = {},
-  rebuild = false,
-): Promise<InstructionState> {
+  options: InstructionOptions,
+  before: InstructionVersions,
+  {
+    touched = [],
+    retryOmitted = false,
+  }: { touched?: Iterable<string>; retryOmitted?: boolean } = {},
+) {
   const { maxBytes, maxSourceBytes } = { ...defaults, ...options };
-  const update = await readScope(files, directory, true, maxSourceBytes, signal);
-  const known = previous.root === root ? previous : initialInstructions;
-  const global = update.unavailable ? previous.global : capGlobal(previous, update.file, maxBytes);
+  const globalUpdate = await readScope(files, directory, true, maxSourceBytes, signal);
+  const known =
+    previous.root === root ? previous : { ...initialInstructions, instance: previous.instance };
+  const global =
+    globalUpdate.status === 'unavailable'
+      ? previous.global
+      : capGlobal(
+          previous,
+          globalUpdate.status === 'present' ? globalUpdate.file : undefined,
+          maxBytes,
+        );
   const directories = new Set([
     ...ancestorChain(root, cwd),
     ...known.project.map((file) => file.directory),
-    ...(rebuild ? known.omitted : []),
+    ...(retryOmitted ? known.omitted : []),
+    ...touched,
   ]);
-  const updates: ScopeUpdate[] = [];
-  for (const scope of directories) {
-    if (isWithin(root, scope) && (rebuild || !known.omitted.includes(scope))) {
-      updates.push(await readScope(files, scope, false, maxSourceBytes, signal));
+
+  // A visible signal identifies a scope even if the saved discovery state predates it.
+  const appliedScopes = new Map<string, string | undefined>();
+  for (const path of before.keys()) {
+    if (filenames.some((filename) => path === `Host ${filename}`)) {
+      appliedScopes.set(path, undefined);
+      continue;
+    }
+    const target = join(root, path);
+    const scope = dirname(target);
+    if (
+      previous.root === root &&
+      filenames.includes(basename(target)) &&
+      (isWithin(cwd, scope) || directories.has(scope)) &&
+      relative(root, target).split(sep).join('/') === path
+    ) {
+      appliedScopes.set(path, scope);
+      directories.add(scope);
     }
   }
-  return applyScopes({ ...known, root, global }, updates, maxBytes);
+
+  const observed = new Map<string, ScopeObservation>();
+  for (const scope of directories) {
+    if (isWithin(root, scope) && (retryOmitted || !known.omitted.includes(scope))) {
+      observed.set(scope, await readScope(files, scope, false, maxSourceBytes, signal));
+    }
+  }
+  const state = applyScopes({ ...known, root, global }, observed, maxBytes);
+  const retainedScopes = new Set<string | undefined>();
+  const after = new Map<string, InstructionVersion>();
+
+  for (const [path, scope] of appliedScopes) {
+    const observation = scope === undefined ? globalUpdate : observed.get(scope);
+    if (observation?.status === 'unavailable') {
+      // Keep what the model can already see until this scope can be read again.
+      retainedScopes.add(scope);
+      after.set(path, { digest: before.get(path) });
+    }
+  }
+  for (const section of instructionSections(state)) {
+    if (!retainedScopes.has(section.scope)) {
+      after.set(section.path, section);
+    }
+  }
+  return { state, changes: instructionChanges(before, after, state.omitted.length > 0) };
 }
 
 export async function discoverTouchedInstructions(
@@ -285,7 +335,6 @@ export async function discoverTouchedInstructions(
   signal?: AbortSignal,
   options: InstructionOptions = {},
 ) {
-  const { maxBytes, maxSourceBytes } = { ...defaults, ...options };
   const directories = new Set<string>();
   for (const path of paths) {
     signal?.throwIfAborted();
@@ -297,24 +346,20 @@ export async function discoverTouchedInstructions(
     }
   }
   if (directories.size === 0) {
-    return previous;
+    return undefined;
   }
   const root = await resolveInstructionRoot(files, cwd, signal, options);
-  const globalUpdate = await readScope(files, directory, true, maxSourceBytes, signal);
-  const updates: ScopeUpdate[] = [];
-  const knownScopes = previous.root === root ? previous.project.map((file) => file.directory) : [];
-  for (const scope of new Set([...ancestorChain(root, cwd), ...knownScopes, ...directories])) {
-    if (previous.root === root && previous.omitted.includes(scope)) {
-      continue;
-    }
-    updates.push(await readScope(files, scope, false, maxSourceBytes, signal));
-  }
-  const known =
-    previous.root === root ? previous : { ...initialInstructions, instance: previous.instance };
-  const global = globalUpdate.unavailable
-    ? previous.global
-    : capGlobal(known, globalUpdate.file, maxBytes);
-  return applyScopes({ ...known, root, global }, updates, maxBytes);
+  return refreshInstructions(
+    files,
+    directory,
+    cwd,
+    root,
+    previous,
+    signal,
+    options,
+    instructionVersions(previous),
+    { touched: directories },
+  );
 }
 
 const introduction =
@@ -393,20 +438,33 @@ const changeSchema = v.array(
 type Change = v.InferOutput<typeof changeSchema>[number];
 type InstructionVersions = ReadonlyMap<string, string | undefined>;
 
-function instructionSections(state: InstructionState) {
-  const entries = state.project.map(
-    (file) => [instructionPath(state, file), instructionSection(state, file)] as const,
-  );
+interface InstructionVersion {
+  digest: string | undefined;
+  text?: string;
+}
+
+interface InstructionSection {
+  path: string;
+  scope?: string;
+  text: string;
+  digest: string;
+}
+
+function instructionSections(state: InstructionState): InstructionSection[] {
+  const sections = state.project.map<Omit<InstructionSection, 'digest'>>((file) => ({
+    path: instructionPath(state, file),
+    scope: file.directory,
+    text: instructionSection(state, file),
+  }));
   if (state.global) {
-    entries.unshift([
-      instructionPath(state, state.global, true),
-      instructionSection(state, state.global, true),
-    ]);
+    sections.unshift({
+      path: instructionPath(state, state.global, true),
+      text: instructionSection(state, state.global, true),
+    });
   }
-  return entries.map(([path, section]) => ({
-    path,
-    section,
-    digest: createHash('sha256').update(section).digest('hex'),
+  return sections.map((section) => ({
+    ...section,
+    digest: createHash('sha256').update(section.text).digest('hex'),
   }));
 }
 
@@ -447,28 +505,30 @@ export function visibleInstructionVersions(
   return versions;
 }
 
-export function diffInstructions(before: InstructionVersions, next: InstructionState) {
-  const after = instructionSections(next);
-  const paths = new Set(after.map(({ path }) => path));
+function instructionChanges(
+  before: InstructionVersions,
+  after: ReadonlyMap<string, InstructionVersion>,
+  omitted: boolean,
+) {
   const changes: Change[] = [];
   const sections: string[] = [];
   for (const path of before.keys()) {
-    if (!paths.has(path)) {
+    if (!after.has(path)) {
       changes.push({ action: 'remove', path });
       sections.push(removalSection(path));
     }
   }
-  for (const { path, section, digest } of after) {
-    if (before.get(path) !== digest) {
+  for (const [path, { text, digest }] of after) {
+    if (text !== undefined && before.get(path) !== digest) {
       const action = before.has(path) ? 'replace' : 'add';
       changes.push({ action, path, digest });
-      sections.push(action === 'replace' ? updateNotice + section : section);
+      sections.push(action === 'replace' ? updateNotice + text : text);
     }
   }
   if (changes.length === 0) {
     return;
   }
-  if (next.omitted.length > 0) {
+  if (omitted) {
     sections.unshift(omissionNotice);
   }
   return {
