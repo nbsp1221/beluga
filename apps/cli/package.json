@@ -1,6 +1,6 @@
 {
   "name": "@retn0/beluga",
-  "version": "0.1.0-preview.1",
+  "version": "0.1.0-preview.2",
   "private": true,
   "description": "Run Beluga's coding agent Host and web app on Linux.",
   "license": "MIT",
