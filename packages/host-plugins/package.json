@@ -27,6 +27,10 @@
       "types": "./dist/agent-skills/host.d.ts",
       "default": "./dist/agent-skills/host.js"
     },
+    "./pi/tool": {
+      "types": "./dist/pi/tool.d.ts",
+      "default": "./dist/pi/tool.js"
+    },
     "./workspace/host": {
       "types": "./dist/workspace/host.d.ts",
       "default": "./dist/workspace/host.js"

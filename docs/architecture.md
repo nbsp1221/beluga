@@ -136,7 +136,7 @@ Chat은 Flue의 보이는 메시지를 공통 계약의 텍스트·추론·도�
 
 [glob](../packages/host-plugins/src/filesystem/glob.ts), [grep](../packages/host-plugins/src/filesystem/grep.ts), [write](../packages/host-plugins/src/filesystem/write.ts), [edit](../packages/host-plugins/src/filesystem/edit.ts), [셸](../packages/host-plugins/src/process/shell.ts)의 일반 함수 계약은 Pi와 Flue를 참조하지 않는다. 일반 호출과 모델 등록은 각각 `pi/`의 같은 이름을 가진 구현을 사용한다. 검색과 파일 변경은 Pi의 공개 구현과 텍스트 결과·오류 동작을 따른다. 직접 호출에는 에이전트 세션 권한이 자동 적용되지 않는다. 경계 검사는 일반 계약이나 Host 권한에서 Pi·Flue로 역방향 의존성이 생기는 것을 막는다.
 
-[Pi 연결부](../packages/host-plugins/src/pi/tool.ts)는 첫 도구 생성 시 Pi의 공개 모듈을 동기로 불러와 프로세스 안에서 재사용한다. Flue는 모델 요청 전 도구 설명과 스키마를 동기로 등록하며, 중단된 작업을 복구할 때도 같은 경로를 사용한다. Pi를 갱신할 때는 Node에서 모듈을 동기로 읽을 수 있는지와 새 프로세스의 첫 도구 호출을 확인한다.
+[연결 모드 Host](../packages/host-server/src/app.ts)는 요청을 받기 전에 [Pi 연결부](../packages/host-plugins/src/pi/tool.ts)로 Pi의 공개 모듈을 불러온다. 도구를 구성할 때는 Node가 프로세스에 이미 로드한 모듈을 재사용한다. Flue는 모델 요청 전 도구 설명과 스키마를 동기로 등록하며, 중단된 작업을 복구할 때도 같은 경로를 사용한다. Pi를 갱신할 때는 새 프로세스에서 Host 시작과 첫 도구 호출을 확인한다.
 
 Workspace write와 Full access의 직접 파일 변경은 [Host 파일 접근 정책](../packages/host-plugins/src/workspace/file-mutations/operations.ts)을 거친다. Pi가 경로를 해석한 뒤 Host가 실제 파일·폴더 작업에서 워크스페이스 경계, 링크, 세션 권한을 검사한다. 그 범위 안에서 Pi `write`는 폴더를 만들고 파일을 덮어쓸 수 있으며, Pi `edit`는 정확한 치환을 적용한다. 파일 시스템을 동시에 변경하는 다른 프로세스까지 OS 수준으로 격리하는 정책은 아니다.
 

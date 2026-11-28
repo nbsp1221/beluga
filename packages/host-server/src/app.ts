@@ -1,3 +1,4 @@
+import { loadPi } from '@workspace/host-plugins/pi/tool';
 import {
   AGENT_PRESETS_PATH,
   AGENT_SKILLS_PATH,
@@ -33,6 +34,7 @@ export async function createHost(options: HostOptions = {}) {
   // Flue's process-wide state and startup recovery both need exclusive ownership.
   connectedHostActive = true;
   try {
+    loadPi();
     const host = await startHost(options);
     let disposal: Promise<void> | undefined;
     return {
