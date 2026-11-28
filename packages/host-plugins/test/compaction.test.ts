@@ -13,7 +13,7 @@ import {
   trajectoryModelInputResponseSchema,
 } from '@workspace/protocol/host';
 import { expect, test } from 'vitest';
-import { origin, readTrajectory, setupHarness } from './fixtures/harness.js';
+import { allCapabilities, origin, readTrajectory, setupHarness } from './fixtures/harness.js';
 import { fixtureProvider } from './fixtures/model-provider.js';
 
 const checkpoint = 'Keep the original decision to use port 4173.';
@@ -658,17 +658,43 @@ test.for(['blank', 'truncated'] as const)(
 test('carries an earlier checkpoint into a split with no new history to summarize', async (context) => {
   const originalDecision = 'Retain the decision to use port 4173.';
   const retainedWork = 'Continue reviewing the current workspace.';
-  const harness = await setupHarness(context, [], undefined, () =>
-    compactionProvider((_signal, input) =>
+  const secondTask = 'Trigger threshold while reviewing files';
+  const path = 'docs/notes.txt';
+  const harness = await setupHarness(context, allCapabilities, undefined, () => {
+    const provider = compactionProvider((_signal, input) =>
       Promise.resolve({
         text: input.includes(originalDecision) ? checkpoint : retainedWork,
         stopReason: 'stop',
       }),
-    ),
-  );
+    );
+
+    return {
+      ...provider,
+      streamSimple(model, input, options) {
+        const last = input.messages.at(-1);
+        const content = last?.role === 'user' ? JSON.stringify(last.content) : '';
+        if (content.includes(originalDecision) && !content.includes('<conversation>')) {
+          return toolResponse(model, [
+            { type: 'toolCall', id: 'original-read', name: 'read', arguments: { path } },
+          ]);
+        }
+        if (content.includes(secondTask) && !content.includes('<conversation>')) {
+          return toolResponse(model, [
+            {
+              type: 'toolCall',
+              id: 'retained-write',
+              name: 'write',
+              arguments: { path, content: 'Updated note' },
+            },
+          ]);
+        }
+        return provider.streamSimple(model, input, options);
+      },
+    };
+  });
   const workspace = await harness.prepareWorkspace();
-  const preset = await harness.createPreset();
-  const { id } = await harness.create(workspace.id, preset.id);
+  const preset = await harness.createPreset(['file.read', 'file.write']);
+  const { id } = await harness.create(workspace.id, preset.id, 'workspace-write');
   const client = harness.sdk(id);
 
   const submit = async (body: string) =>
@@ -677,9 +703,9 @@ test('carries an earlier checkpoint into a split with no new history to summariz
     });
 
   await submit(originalDecision.padEnd(40_000, 'a'));
-  await submit('Trigger threshold while reviewing files'.padEnd(36_000, 'a'));
+  await submit(secondTask.padEnd(36_000, 'a'));
   const incoming = 'Continue after the split';
-  await submit(incoming.padEnd(84_000, 'a'));
+  await submit(incoming.padEnd(111_960, 'a'));
 
   const url = `${origin}/api/conversations/${id}/trajectory`;
   const turn = (await readTrajectory(harness.fetch(url))).at(-1);
@@ -700,6 +726,10 @@ test('carries an earlier checkpoint into a split with no new history to summariz
   expect(messages.includes(checkpoint), 'earlier checkpoint reaches the model').toBe(true);
   expect(messages.includes(retainedWork), 'new split summary reaches the model').toBe(true);
   expect(messages.includes(incoming), 'pending input reaches the model').toBe(true);
+  expect(messages.split(path)).toHaveLength(2);
+  expect(messages.includes(`&lt;modified-files&gt;\\n${path}\\n&lt;/modified-files&gt;`)).toBe(
+    true,
+  );
 });
 
 test('rejects a split with an invalid history summary before calling the prefix model', async (context) => {

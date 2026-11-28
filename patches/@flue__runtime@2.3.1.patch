@@ -343,7 +343,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..3fbb11b27599b04eb057b750d8ac41ba
  		...pending.record.outcome === "completed" || pending.record.error === void 0 ? {} : { error: pending.record.error }
  	});
 diff --git a/dist/dispatch-DTmMreLV.mjs b/dist/dispatch-DTmMreLV.mjs
-index 4af08391f41d94893ede44aede6614283528b44a..0fc8e29d3ec6d1569567aa96a0b0b149f1944488 100644
+index 4af08391f41d94893ede44aede6614283528b44a..ed14ab1a7f362684174a7c0023cc0a60518343d8 100644
 --- a/dist/dispatch-DTmMreLV.mjs
 +++ b/dist/dispatch-DTmMreLV.mjs
 @@ -354,9 +354,10 @@ function isPlainObject(value) {
@@ -496,6 +496,15 @@ index 4af08391f41d94893ede44aede6614283528b44a..0fc8e29d3ec6d1569567aa96a0b0b149
  	if (cutPoint.firstKeptIndex <= boundaryStart) return void 0;
  	const historyEnd = cutPoint.isSplitTurn ? cutPoint.turnStartIndex : cutPoint.firstKeptIndex;
  	const messagesToSummarize = messages.slice(boundaryStart, historyEnd);
+@@ -1997,7 +2035,7 @@ function prepareCompaction(messages, settings, previousCompaction) {
+ 		turnPrefixMessages,
+ 		isSplitTurn: cutPoint.isSplitTurn,
+ 		tokensBefore,
+-		previousSummary: previousCompaction?.summary,
++		previousCompaction,
+ 		fileOps,
+ 		settings
+ 	};
 @@ -2035,10 +2073,10 @@ async function runSummarizationCall(purpose, promptText, maxTokens, model, signa
  		throw error;
  	}
@@ -511,7 +520,17 @@ index 4af08391f41d94893ede44aede6614283528b44a..0fc8e29d3ec6d1569567aa96a0b0b149
  }
  async function generateSummary(currentMessages, model, reserveTokens, signal, previousSummary, observer) {
  	const maxTokens = Math.min(Math.floor(.8 * reserveTokens), 16e3);
-@@ -2062,13 +2100,16 @@ async function compact(preparation, model, signal, observer) {
+@@ -2053,7 +2091,8 @@ async function generateTurnPrefixSummary(messages, model, reserveTokens, signal,
+ 	return runSummarizationCall("compaction_prefix", `<conversation>\n${serializeConversation(messages)}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`, maxTokens, model, signal, observer, "Turn prefix summarization failed");
+ }
+ async function compact(preparation, model, signal, observer) {
+-	const { messagesToSummarize, turnPrefixMessages, isSplitTurn, tokensBefore, previousSummary, fileOps, settings } = preparation;
++	const { messagesToSummarize, turnPrefixMessages, isSplitTurn, tokensBefore, previousCompaction, fileOps, settings } = preparation;
++	const previousSummary = previousCompaction?.summary;
+ 	let summary;
+ 	let aggregateUsage;
+ 	const addCallUsage = (usage) => {
+@@ -2062,13 +2101,21 @@ async function compact(preparation, model, signal, observer) {
  		aggregateUsage = aggregateUsage ? addUsage(aggregateUsage, normalized) : normalized;
  	};
  	if (isSplitTurn && turnPrefixMessages.length > 0) {
@@ -525,6 +544,11 @@ index 4af08391f41d94893ede44aede6614283528b44a..0fc8e29d3ec6d1569567aa96a0b0b149
 +			const result = await generateSummary(messagesToSummarize, model, settings.reserveTokens, signal, previousSummary, observer);
 +			history = result.text;
 +			addCallUsage(result.usage);
++		} else if (previousCompaction?.details) {
++			// Render the merged file lists once, after the reused summary text.
++			const { readFiles = [], modifiedFiles = [] } = previousCompaction.details;
++			const fileLists = formatFileOperations(readFiles, modifiedFiles);
++			if (fileLists && history.endsWith(fileLists)) history = history.slice(0, -fileLists.length);
 +		}
 +		signal?.throwIfAborted();
 +		const turnPrefixResult = await generateTurnPrefixSummary(turnPrefixMessages, model, settings.reserveTokens, signal, observer);
@@ -534,7 +558,7 @@ index 4af08391f41d94893ede44aede6614283528b44a..0fc8e29d3ec6d1569567aa96a0b0b149
  	} else {
  		const historyResult = await generateSummary(messagesToSummarize, model, settings.reserveTokens, signal, previousSummary, observer);
  		addCallUsage(historyResult.usage);
-@@ -4243,4 +4284,4 @@ function validateDispatchRequest(request, agent) {
+@@ -4243,4 +4290,4 @@ function validateDispatchRequest(request, agent) {
  	return parseDeliveredMessage(request.message);
  }
  //#endregion
