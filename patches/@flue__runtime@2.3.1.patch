@@ -343,7 +343,7 @@ index b08e1b3379a7b6429ae9f46e41c6a658ef7776bd..3fbb11b27599b04eb057b750d8ac41ba
  		...pending.record.outcome === "completed" || pending.record.error === void 0 ? {} : { error: pending.record.error }
  	});
 diff --git a/dist/dispatch-DTmMreLV.mjs b/dist/dispatch-DTmMreLV.mjs
-index 4af08391f41d94893ede44aede6614283528b44a..6c1ada505cd80dd7065a42cdf4d1f270e81410ea 100644
+index 4af08391f41d94893ede44aede6614283528b44a..0fc8e29d3ec6d1569567aa96a0b0b149f1944488 100644
 --- a/dist/dispatch-DTmMreLV.mjs
 +++ b/dist/dispatch-DTmMreLV.mjs
 @@ -354,9 +354,10 @@ function isPlainObject(value) {
@@ -511,7 +511,30 @@ index 4af08391f41d94893ede44aede6614283528b44a..6c1ada505cd80dd7065a42cdf4d1f270
  }
  async function generateSummary(currentMessages, model, reserveTokens, signal, previousSummary, observer) {
  	const maxTokens = Math.min(Math.floor(.8 * reserveTokens), 16e3);
-@@ -4243,4 +4281,4 @@ function validateDispatchRequest(request, agent) {
+@@ -2062,13 +2100,16 @@ async function compact(preparation, model, signal, observer) {
+ 		aggregateUsage = aggregateUsage ? addUsage(aggregateUsage, normalized) : normalized;
+ 	};
+ 	if (isSplitTurn && turnPrefixMessages.length > 0) {
+-		const [historyResult, turnPrefixResult] = await Promise.all([messagesToSummarize.length > 0 ? generateSummary(messagesToSummarize, model, settings.reserveTokens, signal, previousSummary, observer) : Promise.resolve({
+-			text: "No prior history.",
+-			usage: void 0
+-		}), generateTurnPrefixSummary(turnPrefixMessages, model, settings.reserveTokens, signal, observer)]);
+-		addCallUsage(historyResult.usage);
++		let history = previousSummary ?? "No prior history.";
++		if (messagesToSummarize.length > 0) {
++			const result = await generateSummary(messagesToSummarize, model, settings.reserveTokens, signal, previousSummary, observer);
++			history = result.text;
++			addCallUsage(result.usage);
++		}
++		signal?.throwIfAborted();
++		const turnPrefixResult = await generateTurnPrefixSummary(turnPrefixMessages, model, settings.reserveTokens, signal, observer);
+ 		addCallUsage(turnPrefixResult.usage);
+-		summary = `${historyResult.text}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixResult.text}`;
++		summary = `${history}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixResult.text}`;
+ 	} else {
+ 		const historyResult = await generateSummary(messagesToSummarize, model, settings.reserveTokens, signal, previousSummary, observer);
+ 		addCallUsage(historyResult.usage);
+@@ -4243,4 +4284,4 @@ function validateDispatchRequest(request, agent) {
  	return parseDeliveredMessage(request.message);
  }
  //#endregion

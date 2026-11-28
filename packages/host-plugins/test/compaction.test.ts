@@ -51,7 +51,7 @@ interface SummaryFixture {
 }
 
 function compactionProvider(
-  onSummary?: (signal?: AbortSignal) => Promise<void | SummaryFixture>,
+  onSummary?: (signal: AbortSignal | undefined, input: string) => Promise<void | SummaryFixture>,
   alternateWindow = 128_000,
   beforeReply?: () => Promise<void>,
   maxInputCharacters?: number,
@@ -127,7 +127,7 @@ function compactionProvider(
     };
 
     const hold = summary
-      ? onSummary?.(options?.signal)
+      ? onSummary?.(options?.signal, userInput)
       : userInput.includes('Hold model response')
         ? beforeReply?.()
         : undefined;
@@ -654,6 +654,107 @@ test.for(['blank', 'truncated'] as const)(
     expect(JSON.stringify(input.messages)).toContain(decision);
   },
 );
+
+test('carries an earlier checkpoint into a split with no new history to summarize', async (context) => {
+  const originalDecision = 'Retain the decision to use port 4173.';
+  const retainedWork = 'Continue reviewing the current workspace.';
+  const harness = await setupHarness(context, [], undefined, () =>
+    compactionProvider((_signal, input) =>
+      Promise.resolve({
+        text: input.includes(originalDecision) ? checkpoint : retainedWork,
+        stopReason: 'stop',
+      }),
+    ),
+  );
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset();
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+
+  const submit = async (body: string) =>
+    client.wait(await client.send({ message: { kind: 'user', body }, signal: context.signal }), {
+      signal: context.signal,
+    });
+
+  await submit(originalDecision.padEnd(40_000, 'a'));
+  await submit('Trigger threshold while reviewing files'.padEnd(36_000, 'a'));
+  const incoming = 'Continue after the split';
+  await submit(incoming.padEnd(84_000, 'a'));
+
+  const url = `${origin}/api/conversations/${id}/trajectory`;
+  const turn = (await readTrajectory(harness.fetch(url))).at(-1);
+  const compaction = turn?.records.find(({ kind }) => kind === 'compaction');
+  const prefix = turn?.records.find(
+    (record) => record.kind === 'assistant' && record.purpose === 'compaction_prefix',
+  );
+  const agent = turn?.records.find(
+    (record) => record.kind === 'assistant' && record.purpose === 'agent',
+  );
+  assert(turn && prefix && agent);
+  expect(compaction).toMatchObject({ reason: 'threshold', status: 'completed' });
+  expect(prefix).toMatchObject({ status: 'completed' });
+  const input = trajectoryModelInputResponseSchema.parse(
+    await (await harness.fetch(`${url}/${turn.id}/${agent.id}`)).json(),
+  );
+  const messages = JSON.stringify(input.messages);
+  expect(messages.includes(checkpoint), 'earlier checkpoint reaches the model').toBe(true);
+  expect(messages.includes(retainedWork), 'new split summary reaches the model').toBe(true);
+  expect(messages.includes(incoming), 'pending input reaches the model').toBe(true);
+});
+
+test('rejects a split with an invalid history summary before calling the prefix model', async (context) => {
+  const originalDecision = 'Keep the original rollout configuration';
+  const releasePrefix = deferred();
+  const retainedTurn = 'This is the beginning of the retained turn';
+  const harness = await setupHarness(context, [], undefined, () =>
+    compactionProvider(
+      async (_signal, input) => {
+        if (input.includes(retainedTurn) && input.includes('This is the PREFIX of a turn')) {
+          await releasePrefix.promise;
+          return;
+        }
+        return { text: 'An incomplete summary', stopReason: 'length' };
+      },
+      undefined,
+      undefined,
+      128_000,
+    ),
+  );
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset();
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+
+  const submit = async (body: string) =>
+    client.wait(await client.send({ message: { kind: 'user', body }, signal: context.signal }), {
+      signal: context.signal,
+    });
+
+  try {
+    await submit(originalDecision.padEnd(8_000, 'a'));
+    await submit(retainedTurn.padEnd(26_000, 'a'));
+    await submit('Continue the rollout'.padEnd(90_000, 'a'));
+
+    const url = `${origin}/api/conversations/${id}/trajectory`;
+    const turn = (await readTrajectory(harness.fetch(url))).at(-1);
+    const compaction = turn?.records.find(({ kind }) => kind === 'compaction');
+    const agent = turn?.records.find(
+      (record) => record.kind === 'assistant' && record.purpose === 'agent',
+    );
+    assert(turn && agent);
+    expect(compaction).toMatchObject({ reason: 'threshold', status: 'failed' });
+    expect(turn.records).not.toContainEqual(
+      expect.objectContaining({ kind: 'assistant', purpose: 'compaction_prefix' }),
+    );
+    expect(agent).toMatchObject({ status: 'completed' });
+    const input = trajectoryModelInputResponseSchema.parse(
+      await (await harness.fetch(`${url}/${turn.id}/${agent.id}`)).json(),
+    );
+    expect(JSON.stringify(input.messages).includes(originalDecision)).toBe(true);
+  } finally {
+    releasePrefix.resolve();
+  }
+});
 
 test('preserves the accepted message when preflight compaction is stopped', async (context) => {
   const summaryStarted = deferred();
