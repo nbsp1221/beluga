@@ -1,12 +1,170 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { TrajectoryRecord } from '@workspace/protocol/host';
+import { instrument } from '@flue/runtime';
+import {
+  type TrajectoryRecord,
+  trajectoryModelInputResponseSchema,
+} from '@workspace/protocol/host';
 import { Hono } from 'hono';
 import { expect, test } from 'vitest';
 import { mountTrajectoryRoutes } from '../src/trajectory/http.js';
 import { createTrajectoryStore } from '../src/trajectory/store.js';
+import { origin, readTrajectory, setupHarness } from './fixtures/harness.js';
+import { fixtureProvider } from './fixtures/model-provider.js';
+
+test.for(['allowed', 'cancelled'] as const)(
+  'records the model step and commits its input only after execution is allowed (%s)',
+  async (execution, context) => {
+    let reportTurnId!: (turnId: string) => void;
+    const reached = new Promise<string>((resolve) => {
+      reportTurnId = resolve;
+    });
+    let releaseModel!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseModel = resolve;
+    });
+    const harness = await setupHarness(context, []);
+    const instructions = 'TRAJECTORY_WORKSPACE_RULE';
+    await writeFile(join(harness.project, 'AGENTS.md'), instructions);
+    const workspace = await harness.prepareWorkspace();
+    const preset = await harness.createPreset(['agent-instructions']);
+    const { id } = await harness.create(workspace.id, preset.id);
+    const client = harness.sdk(id);
+    const url = `${origin}/api/conversations/${id}/trajectory`;
+    const dispose = instrument({
+      observe() {},
+      dispose() {},
+      async interceptor(operation, _context, next) {
+        if (operation.type === 'model') {
+          reportTurnId(operation.turnId);
+          await held;
+        }
+        return next();
+      },
+    });
+    try {
+      const receipt = await client.send({ message: { kind: 'user', body: 'Review these notes' } });
+      const settled = Promise.allSettled([client.wait(receipt, { signal: context.signal })]);
+      const turnId = await Promise.race([
+        reached,
+        settled.then(() => {
+          throw new Error('Model interceptor was not reached');
+        }),
+      ]);
+      const cancelled = execution === 'cancelled';
+      const aborted = cancelled && (await client.abort()).aborted;
+      expect(aborted).toBe(cancelled);
+      releaseModel();
+      const [result] = await settled;
+      const [turn] = await readTrajectory(harness.fetch(url));
+      const input = await harness.fetch(`${url}/${turn.id}/model:${turnId}`);
+
+      expect(result.status).toBe(cancelled ? 'rejected' : 'fulfilled');
+      expect(harness.observed).toHaveLength(cancelled ? 0 : 1);
+      expect(
+        harness.observed.some(({ workspaceInstructions }) =>
+          workspaceInstructions.includes(instructions),
+        ),
+      ).toBe(!cancelled);
+      expect(turn.status).toBe(cancelled ? 'interrupted' : 'completed');
+      expect(turn.records.map(({ kind }) => kind)).toEqual(
+        cancelled ? ['user', 'assistant'] : ['system', 'user', 'context', 'assistant'],
+      );
+      expect(turn.records.at(-1)).toMatchObject({
+        id: `model:${turnId}`,
+        kind: 'assistant',
+        status: cancelled ? 'interrupted' : 'completed',
+      });
+      expect(input.status).toBe(cancelled ? 404 : 200);
+      const messages = input.ok
+        ? trajectoryModelInputResponseSchema.parse(await input.json()).messages
+        : [];
+      expect(JSON.stringify(messages).includes(instructions)).toBe(!cancelled);
+    } finally {
+      releaseModel();
+      await dispose();
+    }
+  },
+);
+
+test('keeps confirmed model input when cancelled during provider authentication', async (context) => {
+  let reportAuthStarted!: () => void;
+  const authStarted = new Promise<void>((resolve) => {
+    reportAuthStarted = resolve;
+  });
+  let releaseAuth!: () => void;
+  const authHeld = new Promise<void>((resolve) => {
+    releaseAuth = resolve;
+  });
+  const harness = await setupHarness(context, [], undefined, (observed, beforeToolCall) => {
+    const provider = fixtureProvider(observed, beforeToolCall);
+    const apiKey = provider.auth.apiKey;
+    if (!apiKey) {
+      throw new Error('Expected fixture credential resolver');
+    }
+    return {
+      ...provider,
+      auth: {
+        apiKey: {
+          ...apiKey,
+          async resolve(options) {
+            reportAuthStarted();
+            await authHeld;
+            return apiKey.resolve(options);
+          },
+        },
+      },
+    };
+  });
+
+  const instructions = 'TRAJECTORY_RULE_CONFIRMED_BEFORE_AUTH';
+  await writeFile(join(harness.project, 'AGENTS.md'), instructions);
+  const workspace = await harness.prepareWorkspace();
+  const preset = await harness.createPreset(['agent-instructions']);
+  const { id } = await harness.create(workspace.id, preset.id);
+  const client = harness.sdk(id);
+  const url = `${origin}/api/conversations/${id}/trajectory`;
+
+  try {
+    const receipt = await client.send({ message: { kind: 'user', body: 'Review these notes' } });
+    const settled = Promise.allSettled([client.wait(receipt, { signal: context.signal })]);
+    await Promise.race([
+      authStarted,
+      settled.then(() => {
+        throw new Error('Provider authentication was not reached');
+      }),
+    ]);
+    const [activeTurn] = await readTrajectory(harness.fetch(url));
+    const activeModel = activeTurn.records.at(-1);
+    expect(activeModel).toMatchObject({ kind: 'assistant', status: 'in-progress' });
+    const inputUrl = `${url}/${activeTurn.id}/${activeModel?.id}`;
+    expect((await harness.fetch(inputUrl)).status).toBe(200);
+
+    expect((await client.abort()).aborted).toBe(true);
+    releaseAuth();
+    expect((await settled)[0].status).toBe('rejected');
+    expect(harness.observed).toHaveLength(0);
+
+    const [turn] = await readTrajectory(harness.fetch(url));
+    expect(turn.status).toBe('interrupted');
+    expect(turn.records.map(({ kind }) => kind)).toEqual([
+      'system',
+      'user',
+      'context',
+      'assistant',
+    ]);
+    const model = turn.records.at(-1);
+    expect(model).toMatchObject({ id: activeModel?.id, kind: 'assistant', status: 'interrupted' });
+    const input = await harness.fetch(inputUrl);
+    expect(input.status).toBe(200);
+    const { messages } = trajectoryModelInputResponseSchema.parse(await input.json());
+    expect(JSON.stringify(messages)).toContain(instructions);
+  } finally {
+    releaseAuth();
+  }
+});
 
 test('pages and searches the complete Trajectory history', () => {
   const db = new DatabaseSync(':memory:');

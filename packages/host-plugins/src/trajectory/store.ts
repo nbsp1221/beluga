@@ -265,6 +265,9 @@ export function createTrajectoryStore(db: DatabaseSync) {
     } else if (record.kind === 'user') {
       const first = request.records.at(0);
       request.records.splice(first?.kind === 'system' && first.initial ? 1 : 0, 0, record);
+    } else if (record.kind === 'context' || record.kind === 'system') {
+      const model = request.records.findIndex(({ id }) => id === record.modelRequestId);
+      request.records.splice(model < 0 ? request.records.length : model, 0, record);
     } else {
       request.records.push(record);
     }

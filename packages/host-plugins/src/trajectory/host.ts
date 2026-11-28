@@ -22,16 +22,16 @@ export function createTrajectoryHost(databasePath: string): Plugin {
         undefined;
 
       // Flue reconciles unfinished submissions during startup.
-      context.onDispose(
-        observeFlueTrajectory(store, {
-          ownsSession: sessionExists,
-          selection: (id) => catalog.contextModel(id),
-          contextWindow: (provider, model) => contextWindow(provider, model),
-          reportFailure: (error) => reportFailure('activity', error),
-        }),
-      );
+      const observation = observeFlueTrajectory(store, {
+        ownsSession: sessionExists,
+        selection: (id) => catalog.contextModel(id),
+        contextWindow: (provider, model) => contextWindow(provider, model),
+        reportFailure: (error) => reportFailure('activity', error),
+      });
+      context.onDispose(observation.dispose);
 
       context.provide('trajectory', {
+        observeProvider: observation.observeProvider,
         bindModelContext(lookup) {
           contextWindow = lookup;
         },

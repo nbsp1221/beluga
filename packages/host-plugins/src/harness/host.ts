@@ -94,7 +94,9 @@ export function createHarnessHost(
         });
       }
 
-      const providers = options.openProviders(setProvider);
+      const providers = options.openProviders((provider) =>
+        setProvider(trajectory.observeProvider(provider)),
+      );
       closeProviders = () => providers.close();
       trajectory.bindModelContext((providerId, modelId) =>
         providers.contextWindow(providerId, modelId),

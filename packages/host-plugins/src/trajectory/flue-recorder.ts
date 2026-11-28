@@ -1,10 +1,12 @@
-import { type FlueObservation, observe } from '@flue/runtime';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { Provider } from '@earendil-works/pi-ai';
+import { type FlueObservation, type FlueObservationSubscriber, instrument } from '@flue/runtime';
 import {
   type TrajectoryRecord,
+  conversationFailureMessage,
   skillInvocationAttributesSchema,
   skillInvocationSignal,
   workspaceInstructionChanges,
-  conversationFailureMessage,
 } from '@workspace/protocol/host';
 import * as v from 'valibot';
 import type { TrajectoryStore } from './store.js';
@@ -13,6 +15,7 @@ import { primaryAgentName } from './contract.js';
 const recordedEvents = new Set([
   'submission_running',
   'submission_settled',
+  'turn_start',
   'turn_request',
   'turn',
   'text_delta',
@@ -41,6 +44,12 @@ interface ObservationOptions {
 interface SubmissionContext {
   selection: ReturnType<ObservationOptions['selection']>;
   compactionId?: string;
+}
+
+interface PreparedInput {
+  session: string;
+  submission: string;
+  event: Extract<FlueObservation, { type: 'turn_request' }>;
 }
 
 function isOutputDelta(type: FlueObservation['type']) {
@@ -113,8 +122,60 @@ export function observeFlueTrajectory(store: TrajectoryStore, options: Observati
   const toolsBySubmission = new Map<string, SubmissionTools>();
   const outputTurnsBySubmission = new Map<string, Set<string>>();
   const contextBySubmission = new Map<string, SubmissionContext>();
+  const preparedInputs = new Map<string, PreparedInput>();
+  const modelExecution = new AsyncLocalStorage<string>();
 
-  return observe((event, context) => {
+  function confirmInput(providerId: string, signal?: AbortSignal) {
+    const turnId = modelExecution.getStore();
+    if (!turnId || signal?.aborted) {
+      return;
+    }
+    const prepared = preparedInputs.get(turnId);
+    if (prepared?.event.request.providerId !== providerId) {
+      return;
+    }
+    preparedInputs.delete(turnId);
+    const { session, submission, event } = prepared;
+    const submissionKey = `${session}/${submission}`;
+
+    try {
+      const modelId = `model:${turnId}`;
+      const tools = toolsBySubmission.get(submissionKey) ?? {
+        schemasByModel: new Map(),
+        inputsByCall: new Map(),
+      };
+      const { input } = event.request;
+      const ordinary = event.purpose === 'agent';
+      store.putModelInput(
+        session,
+        submission,
+        modelId,
+        event.timestamp,
+        {
+          systemPrompt: input.systemPrompt,
+          messages: input.messages.map((message) => {
+            if (!('contextSignal' in message)) {
+              return message;
+            }
+            const { contextSignal: _source, ...modelMessage } = message;
+            return modelMessage;
+          }),
+          tools: input.tools ?? [],
+        },
+        ordinary,
+        ordinary ? appliedContexts(input.messages, modelId, event.timestamp) : [],
+      );
+      tools.schemasByModel.set(
+        modelId,
+        new Map(input.tools?.map((tool) => [tool.name, tool.parameters])),
+      );
+      toolsBySubmission.set(submissionKey, tools);
+    } catch (error) {
+      options.reportFailure(error);
+    }
+  }
+
+  const observe: FlueObservationSubscriber = (event, context) => {
     if (
       !recordedEvents.has(event.type) ||
       ((event.type === 'submission_running' || event.type === 'submission_settled') &&
@@ -143,6 +204,12 @@ export function observeFlueTrajectory(store: TrajectoryStore, options: Observati
     try {
       if (event.type === 'submission_running') {
         contextBySubmission.set(submissionKey, { selection: options.selection(context.id) });
+      } else if (event.type === 'turn_request') {
+        preparedInputs.set(event.turnId, {
+          session: context.id,
+          submission: event.submissionId,
+          event,
+        });
       }
       capture(
         store,
@@ -161,13 +228,59 @@ export function observeFlueTrajectory(store: TrajectoryStore, options: Observati
     } catch (error) {
       options.reportFailure(error);
     } finally {
-      if (event.type === 'submission_settled') {
+      if (event.type === 'turn') {
+        preparedInputs.delete(event.turnId);
+      } else if (event.type === 'submission_settled') {
+        for (const [turnId, { session, submission }] of preparedInputs) {
+          if (session === context.id && submission === event.submissionId) {
+            preparedInputs.delete(turnId);
+          }
+        }
         toolsBySubmission.delete(submissionKey);
         outputTurnsBySubmission.delete(submissionKey);
         contextBySubmission.delete(submissionKey);
       }
     }
+  };
+
+  const dispose = instrument({
+    observe,
+    interceptor(operation, _context, next) {
+      return operation.type === 'model' ? modelExecution.run(operation.turnId, next) : next();
+    },
+    dispose() {},
   });
+
+  return {
+    dispose,
+    observeProvider(this: void, provider: Provider): Provider {
+      const { apiKey } = provider.auth;
+      return {
+        ...provider,
+        auth: {
+          ...provider.auth,
+          ...(apiKey && {
+            apiKey: {
+              ...apiKey,
+              resolve(input) {
+                // Pi enters the credential resolver after Flue allows execution.
+                confirmInput(provider.id, input.signal);
+                return apiKey.resolve(input);
+              },
+            },
+          }),
+        },
+        stream(model, context, options) {
+          confirmInput(provider.id, options?.signal);
+          return provider.stream(model, context, options);
+        },
+        streamSimple(model, context, options) {
+          confirmInput(provider.id, options?.signal);
+          return provider.streamSimple(model, context, options);
+        },
+      };
+    },
+  };
 }
 
 function capture(
@@ -235,6 +348,15 @@ function capture(
         error: errorText(event.error),
       });
     }
+  } else if (event.type === 'turn_start' && modelId && !model) {
+    store.put(session, submission, {
+      kind: 'assistant',
+      id: modelId,
+      text: '',
+      timestamp: event.timestamp,
+      purpose: event.purpose,
+      status: 'in-progress',
+    });
   } else if (event.type === 'turn_request' && modelId) {
     const { providerId, requestedModel, contextCompacted } = event.request;
     const ordinary = event.purpose === 'agent';
@@ -243,37 +365,11 @@ function capture(
       ordinary && selection?.model === `${providerId}/${requestedModel}`
         ? contextWindow(providerId, requestedModel)
         : undefined;
-    const current = tools ?? { schemasByModel: new Map(), inputsByCall: new Map() };
-    current.schemasByModel.set(
-      modelId,
-      new Map(event.request.input.tools?.map((tool) => [tool.name, tool.parameters])),
-    );
-    toolsBySubmission.set(submissionKey, current);
-
-    store.putModelInput(
-      session,
-      submission,
-      modelId,
-      event.timestamp,
-      {
-        systemPrompt: event.request.input.systemPrompt,
-        messages: event.request.input.messages.map((message) => {
-          if (!('contextSignal' in message)) {
-            return message;
-          }
-          const { contextSignal: _source, ...modelMessage } = message;
-          return modelMessage;
-        }),
-        tools: event.request.input.tools ?? [],
-      },
-      ordinary,
-      ordinary ? appliedContexts(event.request.input.messages, modelId, event.timestamp) : [],
-    );
     store.put(session, submission, {
       kind: 'assistant',
       id: modelId,
       text: '',
-      timestamp: event.timestamp,
+      timestamp: model?.timestamp ?? event.timestamp,
       model: event.request.requestedModel,
       provider: event.request.providerName,
       purpose: event.purpose,

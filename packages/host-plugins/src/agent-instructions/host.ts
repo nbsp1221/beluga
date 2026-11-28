@@ -10,7 +10,6 @@ import {
   type InstructionOptions,
   type InstructionState,
   WorkspaceInstructionsRootError,
-  diffInstructions,
   discoverTouchedInstructions,
   initialInstructions,
   instructionVersions,
@@ -88,7 +87,7 @@ export function agentInstructionsCapability(
               if (current.instance === instance && current.root === root && !missingContext) {
                 return;
               }
-              const next = await refreshInstructions(
+              const { state: next, changes } = await refreshInstructions(
                 files,
                 directory,
                 cwd,
@@ -96,10 +95,10 @@ export function agentInstructionsCapability(
                 current,
                 signal,
                 options,
-                missingContext,
+                visible,
+                { retryOmitted: missingContext },
               );
               signal.throwIfAborted();
-              const changes = diffInstructions(visible, next);
               if (changes) {
                 append(changes);
               }
@@ -126,7 +125,7 @@ export function agentInstructionsCapability(
                 }
                 return queueUpdate(sessionId, async () => {
                   signal?.throwIfAborted();
-                  const next = await discoverTouchedInstructions(
+                  const update = await discoverTouchedInstructions(
                     files,
                     directory,
                     cwd,
@@ -142,11 +141,11 @@ export function agentInstructionsCapability(
                     // this response before the next provider call instead.
                     await dispatch({ kind: 'signal', type: unavailableRoot, body: error.message });
                   });
-                  if (!next) {
+                  if (!update) {
                     return;
                   }
                   signal?.throwIfAborted();
-                  const changes = diffInstructions(instructionVersions(current), next);
+                  const { state: next, changes } = update;
                   current = next;
                   setState(current);
                   if (changes) {
